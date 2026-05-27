@@ -137,17 +137,68 @@ router.post('/twilio/recording', (req, res) => {
 
 // POST /api/webhook/twilio/voice — TwiML response to forward and record calls
 router.post('/twilio/voice', (req, res) => {
-  const userPhone = process.env.USER_PHONE_NUMBER || '';
-  const callbackUrl = `${req.protocol}://${req.get('host')}/api/webhook/twilio/recording`;
+  try {
+    const userPhone = (process.env.USER_PHONE_NUMBER || '').trim();
+    const from = req.body.From || 'unknown';
+    const to = (req.body.To || '').trim();
+    const callSid = req.body.CallSid || 'unknown';
 
-  res.type('text/xml');
-  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+    console.log('[webhook/voice] ── inbound call ──────────────────────────');
+    console.log(`[webhook/voice]   CallSid:   ${callSid}`);
+    console.log(`[webhook/voice]   From:      ${from}`);
+    console.log(`[webhook/voice]   To:        ${to || 'MISSING'}`);
+    console.log(`[webhook/voice]   ForwardTo: ${userPhone || 'MISSING'}`);
+
+    if (!userPhone) {
+      console.error('[webhook/voice]   ✗ USER_PHONE_NUMBER not set — playing config message');
+      res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">We're sorry, this number is not configured to receive calls at this time.</Say>
+  <Hangup/>
+</Response>`);
+      return;
+    }
+
+    if (!/^\+\d{10,15}$/.test(userPhone)) {
+      console.error(`[webhook/voice]   ✗ USER_PHONE_NUMBER "${userPhone}" is not E.164 (expected +<countrycode><number>) — Twilio will reject the Dial`);
+    }
+
+    // Behind a Cloudflare/ngrok tunnel the Host header is the local origin
+    // (localhost:3001); the public hostname arrives in X-Forwarded-Host.
+    // Twilio must reach the recording callback, so prefer the forwarded host.
+    const publicHost = req.get('x-forwarded-host') || req.get('host');
+    const callbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/recording`;
+    console.log(`[webhook/voice]   recording callback: ${callbackUrl}`);
+
+    // Set callerId to an owned Twilio number on the forwarded leg. The dialed
+    // number (To) is the Twilio number on a real inbound call; fall back to
+    // TWILIO_PHONE_NUMBER. Without a valid owned caller ID some forwards fail
+    // with Twilio error 13214.
+    const envTwilio = (process.env.TWILIO_PHONE_NUMBER || '').trim();
+    const callerId = /^\+\d{10,15}$/.test(to) ? to : (/^\+\d{10,15}$/.test(envTwilio) ? envTwilio : '');
+    const callerIdAttr = callerId ? ` callerId="${callerId}"` : '';
+    console.log(`[webhook/voice]   dial callerId: ${callerId || '(passthrough — original caller)'}`);
+
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice">This call may be recorded for quality assurance purposes.</Say>
-  <Dial record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
+  <Dial${callerIdAttr} record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
     <Number>${userPhone}</Number>
   </Dial>
+</Response>`;
+
+    console.log(`[webhook/voice]   ✓ returning TwiML — dialing ${userPhone}`);
+    res.type('text/xml').send(twiml);
+  } catch (err) {
+    // Never return HTTP 500 to Twilio: that triggers "an application error has
+    // occurred" and the call is dropped instantly. Always answer with TwiML.
+    console.error('[webhook/voice]   ✗ handler error:', err);
+    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">We're sorry, an error occurred connecting your call.</Say>
+  <Hangup/>
 </Response>`);
+  }
 });
 
 module.exports = router;

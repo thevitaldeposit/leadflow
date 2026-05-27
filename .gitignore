@@ -3,3 +3,5 @@ node_modules/
 .DS_Store
 server/uploads/
 server/db/leadflow.db
+server/db/*.db-shm
+server/db/*.db-wal
