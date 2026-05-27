@@ -28,6 +28,11 @@ const webhookRouter = require('./routes/webhook');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust the Cloudflare/reverse-proxy X-Forwarded-Proto header so
+// req.protocol returns 'https' when behind a tunnel, keeping Twilio
+// callback URLs valid (Twilio rejects http:// callback URLs).
+app.set('trust proxy', true);
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -101,6 +106,15 @@ app.use('/api/webhook', webhookRouter);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Serve built React client (production)
+const CLIENT_DIST = path.join(__dirname, '../client/dist');
+if (fs.existsSync(CLIENT_DIST)) {
+  app.use(express.static(CLIENT_DIST));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(CLIENT_DIST, 'index.html'));
+  });
+}
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);

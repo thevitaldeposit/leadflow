@@ -2,7 +2,12 @@
   "name": "leadflow",
   "version": "1.0.0",
   "description": "AI-powered CRM lead extraction for automotive dealerships",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
+    "start": "node server/index.js",
+    "build": "cd client && npm install && npm run build",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "node server/index.js",
     "client": "cd client && npm run dev",
