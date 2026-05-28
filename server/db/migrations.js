@@ -12,6 +12,15 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN discarded INTEGER DEFAULT 0',
   'ALTER TABLE leads ADD COLUMN caller_phone_raw TEXT',
   'ALTER TABLE leads ADD COLUMN raw_transcript TEXT',
+  // iOS CallKit columns
+  'ALTER TABLE leads ADD COLUMN vertical TEXT DEFAULT \'auto_dealer\'',
+  'ALTER TABLE leads ADD COLUMN source TEXT',
+  'ALTER TABLE leads ADD COLUMN caller_number TEXT',
+  'ALTER TABLE leads ADD COLUMN call_direction TEXT',
+  'ALTER TABLE leads ADD COLUMN call_duration INTEGER',
+  'ALTER TABLE leads ADD COLUMN captured_by TEXT',
+  'ALTER TABLE leads ADD COLUMN vertical_data TEXT',
+  'ALTER TABLE leads ADD COLUMN confidence INTEGER DEFAULT 0',
 ];
 
 function runMigrations() {
@@ -29,6 +38,29 @@ function runMigrations() {
       }
     }
   }
+
+  // Devices table for APNs tokens
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS devices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_token TEXT NOT NULL UNIQUE,
+      user_name TEXT,
+      business_name TEXT,
+      vertical TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Caller ID stashed by /twilio/voice for later lookup in /twilio/recording,
+  // which doesn't reliably include the From field.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS call_sessions (
+      call_sid TEXT PRIMARY KEY,
+      from_number TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
   console.log('Database migrations completed successfully.');
 }

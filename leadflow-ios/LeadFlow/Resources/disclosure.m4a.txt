@@ -1,0 +1,11 @@
+PLACEHOLDER — Replace with actual disclosure.m4a audio file.
+
+This file must be an m4a/AAC audio recording saying:
+  "This call may be recorded for quality and business purposes."
+
+To generate with macOS text-to-speech:
+  say -v Samantha -o /tmp/disclosure.aiff "This call may be recorded for quality and business purposes."
+  afconvert -f m4af -d aac /tmp/disclosure.aiff disclosure.m4a
+
+Then place disclosure.m4a in this Resources/ directory and delete this .txt placeholder.
+The file is included in the Xcode project build phase already (see project.pbxproj).

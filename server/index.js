@@ -24,6 +24,8 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
 const leadsRouter = require('./routes/leads');
 const extractRouter = require('./routes/extract');
 const webhookRouter = require('./routes/webhook');
+const uploadRouter = require('./routes/upload');
+const devicesRouter = require('./routes/devices');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -102,6 +104,8 @@ app.get('/api/dashboard/stats', (req, res) => {
 app.use('/api/leads', leadsRouter);
 app.use('/api/extract', extractRouter);
 app.use('/api/webhook', webhookRouter);
+app.use('/api/upload', uploadRouter);
+app.use('/api/devices', devicesRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

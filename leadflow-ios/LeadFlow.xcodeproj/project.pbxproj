@@ -1,0 +1,470 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		9D000000000000000000001 /* LeadFlowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000001 /* LeadFlowApp.swift */; };
+		9D000000000000000000002 /* VerticalConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000002 /* VerticalConfig.swift */; };
+		9D000000000000000000003 /* CallObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000003 /* CallObserver.swift */; };
+		9D000000000000000000004 /* RecordingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000004 /* RecordingManager.swift */; };
+		9D000000000000000000005 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000005 /* APIService.swift */; };
+		9D000000000000000000006 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000006 /* NotificationService.swift */; };
+		9D000000000000000000007 /* LocalStorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000007 /* LocalStorageService.swift */; };
+		9D000000000000000000008 /* VerticalSelectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000008 /* VerticalSelectView.swift */; };
+		9D000000000000000000009 /* UserInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000009 /* UserInfoView.swift */; };
+		9D00000000000000000000A /* PermissionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000000A /* PermissionsView.swift */; };
+		9D00000000000000000000B /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000000B /* DashboardView.swift */; };
+		9D00000000000000000000C /* LeadCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000000C /* LeadCardView.swift */; };
+		9D00000000000000000000D /* LeadReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000000D /* LeadReviewView.swift */; };
+		9D00000000000000000000E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000000E /* SettingsView.swift */; };
+		9D00000000000000000000F /* Lead.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000000F /* Lead.swift */; };
+		9D000000000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000010 /* Assets.xcassets */; };
+		/* 9D000000000000000000011 disclosure.m4a — add this file reference once disclosure.m4a is generated (see Resources/disclosure.m4a.txt) */
+		9D000000000000000000012 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000012 /* CallKit.framework */; };
+		9D000000000000000000013 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000013 /* AVFoundation.framework */; };
+		9D000000000000000000014 /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000014 /* UserNotifications.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		9C000000000000000000001 /* LeadFlowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeadFlowApp.swift; sourceTree = "<group>"; };
+		9C000000000000000000002 /* VerticalConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerticalConfig.swift; sourceTree = "<group>"; };
+		9C000000000000000000003 /* CallObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallObserver.swift; sourceTree = "<group>"; };
+		9C000000000000000000004 /* RecordingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingManager.swift; sourceTree = "<group>"; };
+		9C000000000000000000005 /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
+		9C000000000000000000006 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		9C000000000000000000007 /* LocalStorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStorageService.swift; sourceTree = "<group>"; };
+		9C000000000000000000008 /* VerticalSelectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerticalSelectView.swift; sourceTree = "<group>"; };
+		9C000000000000000000009 /* UserInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserInfoView.swift; sourceTree = "<group>"; };
+		9C00000000000000000000A /* PermissionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsView.swift; sourceTree = "<group>"; };
+		9C00000000000000000000B /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		9C00000000000000000000C /* LeadCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeadCardView.swift; sourceTree = "<group>"; };
+		9C00000000000000000000D /* LeadReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeadReviewView.swift; sourceTree = "<group>"; };
+		9C00000000000000000000E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		9C00000000000000000000F /* Lead.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lead.swift; sourceTree = "<group>"; };
+		9C000000000000000000010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		/* 9C000000000000000000011 disclosure.m4a — add once generated */
+		9C000000000000000000012 /* CallKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; };
+		9C000000000000000000013 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		9C000000000000000000014 /* UserNotifications.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UserNotifications.framework; path = System/Library/Frameworks/UserNotifications.framework; sourceTree = SDKROOT; };
+		9C000000000000000000015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		9C000000000000000000016 /* LeadFlow.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LeadFlow.entitlements; sourceTree = "<group>"; };
+		9C000000000000000000017 /* LeadFlow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LeadFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9A00000000000000000000C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9D000000000000000000012 /* CallKit.framework in Frameworks */,
+				9D000000000000000000013 /* AVFoundation.framework in Frameworks */,
+				9D000000000000000000014 /* UserNotifications.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		9B000000000000000000001 /* LeadFlow */ = {
+			isa = PBXGroup;
+			children = (
+				9B000000000000000000002 /* App */,
+				9B000000000000000000003 /* Config */,
+				9B000000000000000000004 /* CallKit */,
+				9B000000000000000000005 /* Services */,
+				9B000000000000000000006 /* Views */,
+				9B00000000000000000000A /* Models */,
+				9B00000000000000000000B /* Resources */,
+				9C000000000000000000015 /* Info.plist */,
+				9C000000000000000000016 /* LeadFlow.entitlements */,
+				9C000000000000000000010 /* Assets.xcassets */,
+			);
+			path = LeadFlow;
+			sourceTree = "<group>";
+		};
+		9B000000000000000000002 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				9C000000000000000000001 /* LeadFlowApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		9B000000000000000000003 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				9C000000000000000000002 /* VerticalConfig.swift */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		9B000000000000000000004 /* CallKit */ = {
+			isa = PBXGroup;
+			children = (
+				9C000000000000000000003 /* CallObserver.swift */,
+				9C000000000000000000004 /* RecordingManager.swift */,
+			);
+			path = CallKit;
+			sourceTree = "<group>";
+		};
+		9B000000000000000000005 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				9C000000000000000000005 /* APIService.swift */,
+				9C000000000000000000006 /* NotificationService.swift */,
+				9C000000000000000000007 /* LocalStorageService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		9B000000000000000000006 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				9B000000000000000000007 /* Onboarding */,
+				9C00000000000000000000B /* DashboardView.swift */,
+				9C00000000000000000000C /* LeadCardView.swift */,
+				9C00000000000000000000D /* LeadReviewView.swift */,
+				9C00000000000000000000E /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		9B000000000000000000007 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				9C000000000000000000008 /* VerticalSelectView.swift */,
+				9C000000000000000000009 /* UserInfoView.swift */,
+				9C00000000000000000000A /* PermissionsView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		9B00000000000000000000A /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				9C00000000000000000000F /* Lead.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		9B00000000000000000000B /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				/* disclosure.m4a — add once generated per Resources/disclosure.m4a.txt */
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		9B00000000000000000000C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9C000000000000000000017 /* LeadFlow.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9B00000000000000000000D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				9C000000000000000000012 /* CallKit.framework */,
+				9C000000000000000000013 /* AVFoundation.framework */,
+				9C000000000000000000014 /* UserNotifications.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		9A000000000000000000002 /* MainGroup */ = {
+			isa = PBXGroup;
+			children = (
+				9B000000000000000000001 /* LeadFlow */,
+				9B00000000000000000000C /* Products */,
+				9B00000000000000000000D /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9A000000000000000000009 /* LeadFlow */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9A000000000000000000003 /* Build configuration list for PBXNativeTarget "LeadFlow" */;
+			buildPhases = (
+				9A00000000000000000000A /* Sources */,
+				9A00000000000000000000B /* Resources */,
+				9A00000000000000000000C /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LeadFlow;
+			productName = LeadFlow;
+			productReference = 9C000000000000000000017 /* LeadFlow.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9A000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					9A000000000000000000009 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 9A000000000000000000004 /* Build configuration list for PBXProject "LeadFlow" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 9A000000000000000000002 /* MainGroup */;
+			productRefGroup = 9B00000000000000000000C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9A000000000000000000009 /* LeadFlow */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		9A00000000000000000000B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9D000000000000000000010 /* Assets.xcassets in Resources */,
+				/* add disclosure.m4a here once generated */
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9A00000000000000000000A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9D000000000000000000001 /* LeadFlowApp.swift in Sources */,
+				9D000000000000000000002 /* VerticalConfig.swift in Sources */,
+				9D000000000000000000003 /* CallObserver.swift in Sources */,
+				9D000000000000000000004 /* RecordingManager.swift in Sources */,
+				9D000000000000000000005 /* APIService.swift in Sources */,
+				9D000000000000000000006 /* NotificationService.swift in Sources */,
+				9D000000000000000000007 /* LocalStorageService.swift in Sources */,
+				9D000000000000000000008 /* VerticalSelectView.swift in Sources */,
+				9D000000000000000000009 /* UserInfoView.swift in Sources */,
+				9D00000000000000000000A /* PermissionsView.swift in Sources */,
+				9D00000000000000000000B /* DashboardView.swift in Sources */,
+				9D00000000000000000000C /* LeadCardView.swift in Sources */,
+				9D00000000000000000000D /* LeadReviewView.swift in Sources */,
+				9D00000000000000000000E /* SettingsView.swift in Sources */,
+				9D00000000000000000000F /* Lead.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		9A000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LeadFlow/LeadFlow.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LeadFlow/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leadflow.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		9A000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LeadFlow/LeadFlow.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LeadFlow/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leadflow.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		9A000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_EXCEPTION = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		9A000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_EXCEPTION = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9A000000000000000000003 /* Build configuration list for PBXNativeTarget "LeadFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9A000000000000000000005 /* Debug */,
+				9A000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9A000000000000000000004 /* Build configuration list for PBXProject "LeadFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9A000000000000000000007 /* Debug */,
+				9A000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 9A000000000000000000001 /* Project object */;
+}

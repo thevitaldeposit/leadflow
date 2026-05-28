@@ -10,6 +10,27 @@ const { getIO } = require('../socket');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 
+// Twilio's recordingStatusCallback often omits `From`, so /twilio/voice stashes
+// the caller ID in call_sessions for /twilio/recording to recover.
+function rememberCaller(callSid, from) {
+  if (!callSid || !from) return;
+  db.prepare(
+    'INSERT OR REPLACE INTO call_sessions (call_sid, from_number) VALUES (?, ?)'
+  ).run(callSid, from);
+}
+
+function recallCaller(callSid) {
+  if (!callSid) return null;
+  const row = db.prepare('SELECT from_number FROM call_sessions WHERE call_sid = ?').get(callSid);
+  if (!row) return null;
+  db.prepare('DELETE FROM call_sessions WHERE call_sid = ?').run(callSid);
+  return row.from_number || null;
+}
+
+setInterval(() => {
+  db.prepare("DELETE FROM call_sessions WHERE created_at < datetime('now', '-1 hour')").run();
+}, 15 * 60 * 1000).unref();
+
 function insertLead(data) {
   const fields = Object.keys(data);
   const placeholders = fields.map(() => '?').join(', ');
@@ -61,7 +82,8 @@ function isPersonalCall(lead) {
 
 // Process recording asynchronously after responding 200 to Twilio
 async function processRecording(payload) {
-  const { RecordingUrl, RecordingSid, CallSid, From, CallDuration } = payload;
+  const { RecordingUrl, RecordingSid, CallSid, CallDuration } = payload;
+  const From = payload.From || recallCaller(CallSid);
 
   if (!fs.existsSync(RECORDINGS_DIR)) {
     fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
@@ -142,6 +164,8 @@ router.post('/twilio/voice', (req, res) => {
     const from = req.body.From || 'unknown';
     const to = (req.body.To || '').trim();
     const callSid = req.body.CallSid || 'unknown';
+
+    rememberCaller(req.body.CallSid, req.body.From);
 
     console.log('[webhook/voice] ── inbound call ──────────────────────────');
     console.log(`[webhook/voice]   CallSid:   ${callSid}`);
