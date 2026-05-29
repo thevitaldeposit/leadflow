@@ -248,7 +248,7 @@ router.post('/twilio/voice', (req, res) => {
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="alice">This call may be recorded for quality assurance purposes.</Say>
+  <Say voice="Polly.Joanna" language="en-US">This call may be recorded.</Say>
   <Dial record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
     <Number>${userPhone}</Number>
   </Dial>
