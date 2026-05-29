@@ -54,7 +54,9 @@
       "Bash(USER_PHONE_NUMBER='' node -e ' *)",
       "Bash(git add *)",
       "Bash(node *)",
-      "Bash(grep -E '\\\\.\\(env|key|pem|p12|p8\\)$|credentials|secret')"
+      "Bash(grep -E '\\\\.\\(env|key|pem|p12|p8\\)$|credentials|secret')",
+      "PowerShell(try { \\(Invoke-WebRequest -Uri \"http://localhost:3001/api/health\" -UseBasicParsing -TimeoutSec 3\\).Content } catch { \"health check failed: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(try { $m = Invoke-WebRequest -Uri \"http://127.0.0.1:4040/api/tunnels\" -UseBasicParsing -TimeoutSec 3; $m.Content } catch { \"no ngrok api on 4040: $\\($_.Exception.Message\\)\" })"
     ],
     "defaultMode": "default"
   }

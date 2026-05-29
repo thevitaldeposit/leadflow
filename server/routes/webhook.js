@@ -194,19 +194,14 @@ router.post('/twilio/voice', (req, res) => {
     const callbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/recording`;
     console.log(`[webhook/voice]   recording callback: ${callbackUrl}`);
 
-    // Set callerId to an owned Twilio number on the forwarded leg. The dialed
-    // number (To) is the Twilio number on a real inbound call; fall back to
-    // TWILIO_PHONE_NUMBER. Without a valid owned caller ID some forwards fail
-    // with Twilio error 13214.
-    const envTwilio = (process.env.TWILIO_PHONE_NUMBER || '').trim();
-    const callerId = /^\+\d{10,15}$/.test(to) ? to : (/^\+\d{10,15}$/.test(envTwilio) ? envTwilio : '');
-    const callerIdAttr = callerId ? ` callerId="${callerId}"` : '';
-    console.log(`[webhook/voice]   dial callerId: ${callerId || '(passthrough — original caller)'}`);
+    // Omit callerId so Twilio passes the original caller's number through to
+    // the forwarded leg with its original STIR/SHAKEN attestation intact.
+    console.log(`[webhook/voice]   dial callerId: (passthrough — original caller ${from})`);
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice">This call may be recorded for quality assurance purposes.</Say>
-  <Dial${callerIdAttr} record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
+  <Dial record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
     <Number>${userPhone}</Number>
   </Dial>
 </Response>`;
