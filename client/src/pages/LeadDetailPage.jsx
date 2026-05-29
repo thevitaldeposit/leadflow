@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Trash2, CheckCircle, Mic, ChevronDown, ChevronUp } from 'lucide-react';
 import LeadCardExpanded from '../components/LeadCardExpanded';
+import HomeServicesLeadDetail from '../components/home_services/HomeServicesLeadDetail';
 import { api } from '../utils/api';
 
 function AudioSection({ lead }) {
@@ -108,7 +109,8 @@ export default function LeadDetailPage() {
   }
 
   const fullName = [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown Customer';
-  const isAudio = lead.extraction_type === 'audio_upload' || lead.extraction_type === 'phone_auto';
+  const isAudio = lead.extraction_type === 'audio_upload' || lead.extraction_type === 'phone_auto' || lead.extraction_type === 'ios_callkit';
+  const isHomeServices = lead.vertical === 'home_services';
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -149,7 +151,9 @@ export default function LeadDetailPage() {
       {/* Audio player + transcript for audio leads */}
       {isAudio && <AudioSection lead={lead} />}
 
-      <LeadCardExpanded lead={lead} onUpdate={setLead} />
+      {isHomeServices
+        ? <HomeServicesLeadDetail lead={lead} onUpdate={setLead} />
+        : <LeadCardExpanded lead={lead} onUpdate={setLead} />}
     </div>
   );
 }

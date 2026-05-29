@@ -5,7 +5,7 @@ const db = require('../db/database');
 // GET /api/leads
 router.get('/', (req, res) => {
   try {
-    const { status, intent, search, sort, order, discarded } = req.query;
+    const { status, intent, search, sort, order, discarded, vertical } = req.query;
 
     let query = 'SELECT * FROM leads WHERE 1=1';
     const params = [];
@@ -23,6 +23,17 @@ router.get('/', (req, res) => {
     if (intent) {
       query += ' AND customer_intent = ?';
       params.push(intent);
+    }
+
+    if (vertical) {
+      // 'auto_dealer' is the default; include rows where vertical is NULL too
+      // so legacy leads created before the vertical column existed still appear.
+      if (vertical === 'auto_dealer') {
+        query += " AND (vertical = ? OR vertical IS NULL)";
+      } else {
+        query += ' AND vertical = ?';
+      }
+      params.push(vertical);
     }
 
     if (search) {
@@ -86,6 +97,15 @@ router.put('/:id', (req, res) => {
       if (req.body[field] !== undefined) {
         updates[field] = req.body[field];
       }
+    }
+
+    // vertical_data is stored as a JSON blob. Allow partial merges: the client
+    // sends an object of keys to set, we merge into the existing JSON.
+    if (req.body.vertical_data && typeof req.body.vertical_data === 'object') {
+      let current = {};
+      try { current = JSON.parse(existing.vertical_data || '{}'); } catch { current = {}; }
+      const merged = { ...current, ...req.body.vertical_data };
+      updates.vertical_data = JSON.stringify(merged);
     }
 
     if (Object.keys(updates).length === 0) {

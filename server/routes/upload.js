@@ -123,7 +123,7 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
     const tokens = getDeviceTokens(deviceToken);
     const customerName = [commonFields.customer_first_name, commonFields.customer_last_name]
       .filter(Boolean).join(' ') || 'Unknown Caller';
-    const primaryField = verticalData.vehicleInterest || verticalData.coverageType || verticalData.serviceNeeded;
+    const primaryField = verticalData.vehicleInterest || verticalData.coverageType || verticalData.serviceType;
     const notifBody = primaryField
       ? `${customerName} — ${primaryField}`
       : customerName;

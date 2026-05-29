@@ -5,6 +5,7 @@ const path = require('path');
 const https = require('https');
 const db = require('../db/database');
 const { extractFromTranscript } = require('../services/extractionEngine');
+const { extractFromTranscriptVertical, VERTICAL_CONFIGS } = require('../services/verticalExtractionEngine');
 const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
 
@@ -103,6 +104,53 @@ async function processRecording(payload) {
 
     console.log(`[webhook] Transcribing recording ${RecordingSid}...`);
     const { transcript, provider, transcription_seconds } = await transcribe(audioPath);
+
+    const defaultVertical = process.env.LEADFLOW_DEFAULT_VERTICAL || 'auto_dealer';
+    const useVerticalEngine = defaultVertical !== 'auto_dealer' && VERTICAL_CONFIGS[defaultVertical];
+
+    if (useVerticalEngine) {
+      console.log(`[webhook] Extracting lead from recording ${RecordingSid} via vertical engine (${defaultVertical})...`);
+      const { commonFields, verticalData, confidence } = await extractFromTranscriptVertical(transcript, defaultVertical);
+
+      if (!commonFields.phone && From) {
+        const digits = From.replace(/\D/g, '');
+        if (digits.length >= 10) {
+          const local = digits.slice(-10);
+          commonFields.phone = `${local.slice(0, 3)}-${local.slice(3, 6)}-${local.slice(6)}`;
+          commonFields.phone_confidence = 0.7;
+        }
+      }
+
+      const leadData = {
+        ...commonFields,
+        extraction_type: 'phone_auto',
+        audio_file_path: audioPublicPath,
+        transcription_provider: provider,
+        transcription_duration_seconds: transcription_seconds || null,
+        auto_captured: 1,
+        caller_phone_raw: From || null,
+        caller_number: From || null,
+        raw_transcript: transcript,
+        vertical: defaultVertical,
+        source: 'twilio_recording',
+        vertical_data: JSON.stringify(verticalData),
+        confidence: confidence || 0,
+      };
+
+      const lead = insertLead(leadData);
+
+      // Vertical prompt sets confidence to 0 for personal/non-business calls
+      if (!confidence) {
+        db.prepare('UPDATE leads SET discarded = 1 WHERE id = ?').run(lead.id);
+        console.log(`[webhook] Auto-discarded zero-confidence call (lead ${lead.id})`);
+        return;
+      }
+
+      const io = getIO();
+      if (io) io.emit('new_lead', lead);
+      console.log(`[webhook] Lead ${lead.id} created from Twilio recording ${RecordingSid} (vertical: ${defaultVertical})`);
+      return;
+    }
 
     console.log(`[webhook] Extracting lead from recording ${RecordingSid}...`);
     const extracted = await extractFromTranscript(transcript);
