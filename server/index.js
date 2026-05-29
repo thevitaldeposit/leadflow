@@ -128,6 +128,9 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app);
 initSocket(server);
 
+// Schedule the 8am Morning Priorities push for Home Services devices.
+require('./services/morningPriorities').start();
+
 server.listen(PORT, () => {
   console.log(`LeadFlow server running on http://localhost:${PORT}`);
 });

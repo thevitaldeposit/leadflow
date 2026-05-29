@@ -77,7 +77,7 @@ router.put('/:id', (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
 
     const allowedFields = [
-      'status', 'discarded', 'sub_vertical',
+      'status', 'discarded', 'sub_vertical', 'outcome',
       'customer_first_name', 'customer_last_name', 'phone', 'email', 'address',
       'voi_year', 'voi_make', 'voi_model', 'voi_trim', 'voi_color',
       'voi_stock_number', 'voi_vin', 'voi_new_or_used',

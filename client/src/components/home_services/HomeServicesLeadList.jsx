@@ -88,7 +88,13 @@ export default function HomeServicesLeadList() {
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-4">
-          {leads.map(lead => <HomeServicesLeadCard key={lead.id} lead={lead} />)}
+          {leads.map(lead => (
+            <HomeServicesLeadCard
+              key={lead.id}
+              lead={lead}
+              onChange={(updated) => setLeads(prev => prev.map(l => l.id === updated.id ? updated : l))}
+            />
+          ))}
         </div>
       )}
     </div>

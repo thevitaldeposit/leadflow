@@ -22,6 +22,10 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN vertical_data TEXT',
   'ALTER TABLE leads ADD COLUMN confidence INTEGER DEFAULT 0',
   'ALTER TABLE leads ADD COLUMN sub_vertical TEXT',
+  // Home Services Phase 1 redesign: outcome lives alongside status so users can
+  // track funnel stage (Quote Sent, Appointment Scheduled, etc.) independently
+  // of pipeline state (Needs Follow Up, Booked, Lost).
+  'ALTER TABLE leads ADD COLUMN outcome TEXT',
 ];
 
 function runMigrations() {

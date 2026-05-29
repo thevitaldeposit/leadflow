@@ -46,7 +46,7 @@ function AudioSection({ lead }) {
           </button>
           {transcriptOpen && (
             <div className="px-4 pb-4 border-t border-gray-100">
-              <pre className="text-xs text-gray-600 font-mono leading-relaxed whitespace-pre-wrap mt-3 max-h-72 overflow-y-auto">
+              <pre className="text-xs text-gray-600 font-mono leading-relaxed whitespace-pre-wrap mt-3">
                 {lead.raw_transcript}
               </pre>
             </div>
@@ -140,20 +140,30 @@ export default function LeadDetailPage() {
         </div>
       </div>
 
-      {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-gray-900">{fullName}</h2>
-        <p className="text-sm text-gray-400 mt-0.5">
-          {extractionLabel(lead.extraction_type)} · {new Date(lead.created_at).toLocaleString()}
-        </p>
-      </div>
-
-      {/* Audio player + transcript for audio leads */}
-      {isAudio && <AudioSection lead={lead} />}
+      {/* Header — suppressed for Home Services since its sticky header carries
+          the customer name and action bar at the top of the detail body. */}
+      {!isHomeServices && (
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">{fullName}</h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {extractionLabel(lead.extraction_type)} · {new Date(lead.created_at).toLocaleString()}
+          </p>
+        </div>
+      )}
 
       {isHomeServices
         ? <HomeServicesLeadDetail lead={lead} onUpdate={setLead} />
         : <LeadCardExpanded lead={lead} onUpdate={setLead} />}
+
+      {/* Source metadata + audio + transcript for audio leads. For Home Services
+          these live below the action-focused detail body so the day-driving
+          controls stay top-of-screen. */}
+      {isHomeServices && (
+        <p className="text-xs text-gray-400 px-1">
+          {extractionLabel(lead.extraction_type)} · {new Date(lead.created_at).toLocaleString()}
+        </p>
+      )}
+      {isAudio && <AudioSection lead={lead} />}
     </div>
   );
 }

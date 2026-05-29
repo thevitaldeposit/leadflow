@@ -46,11 +46,22 @@ const VERTICAL_CONFIGS = {
 
 const HOME_SERVICES_NAME_RULE = `IMPORTANT NAME RULE: customerName must be extracted regardless of which speaker said it. The business owner (Speaker 0) often greets the customer by name ("Hi John, this is Mike at ABC Dumpsters") — capture that name. Only phone, email, and address are restricted to the customer's own speech. Speaker 0 is the business owner — do not extract Speaker 0's personal phone, email, or address.`;
 
+const HOME_SERVICES_ACTION_RULE = `ACTION INTELLIGENCE: You must also produce signals that help the owner know what to do next.
+
+- intentLevel: "high" if the customer requested pricing, a delivery date, an appointment, or availability; "warm" if the customer expressed interest but made no specific request; "cold" if the customer said they were comparing prices, just gathering info, or non-committal.
+- followUpSignal: one of "callback_today" (customer asked to be called back today / ASAP), "callback_tomorrow" (customer said tomorrow), "callback_next_week" (customer said next week), "comparing_prices" (customer is shopping around or needs to think about it), "before_delivery" (customer requested a specific future delivery/service date — set followUpAnchorDate to that date in ISO YYYY-MM-DD), "next_business_day" (high intent but no explicit callback request), "unknown" (no clear signal).
+- followUpAnchorDate: the specific date the customer mentioned, in YYYY-MM-DD, if relevant. Otherwise null.
+- followUpReason: one short sentence explaining why this follow-up timing was chosen (e.g. "Customer requested callback tomorrow morning").
+- aiRecommendation: one concise action sentence the owner can read at a glance (e.g. "Call today — customer requested pricing and a delivery date").
+- estimatedRevenue: numeric dollars (no currency symbol) parsed from quotedPrice if a clear price was discussed, otherwise null. If quotedPrice is a range ("$300-$400"), use the midpoint.`;
+
 const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
   dumpster_rental: {
     promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency, This Week if this week, Next Week if next week, otherwise Flexible.
 
-${HOME_SERVICES_NAME_RULE}`,
+${HOME_SERVICES_NAME_RULE}
+
+${HOME_SERVICES_ACTION_RULE}`,
     outputSchema: `{
   "customerName": string | null,
   "customerPhone": string | null,
@@ -66,6 +77,12 @@ ${HOME_SERVICES_NAME_RULE}`,
   "quotedPrice": string | null,
   "paymentStatus": string | null,
   "urgency": "ASAP" | "This Week" | "Next Week" | "Flexible" | null,
+  "intentLevel": "high" | "warm" | "cold" | null,
+  "followUpSignal": "callback_today" | "callback_tomorrow" | "callback_next_week" | "comparing_prices" | "before_delivery" | "next_business_day" | "unknown" | null,
+  "followUpAnchorDate": string | null,
+  "followUpReason": string | null,
+  "aiRecommendation": string | null,
+  "estimatedRevenue": number | null,
   "notes": string | null,
   "confidence": number (0-100),
   "callSummary": string
@@ -74,7 +91,9 @@ ${HOME_SERVICES_NAME_RULE}`,
   hvac: {
     promptAddition: `This is a call to an HVAC business. Extract: customer name, phone, email, property address, type of service needed (repair/maintenance/install/replacement/estimate), type of equipment (furnace/ac/heat pump/boiler/ductwork/other), description of the issue, age of the system if mentioned, brand or model if mentioned, whether it is an emergency, whether they requested an appointment, and any price discussed. Urgency: ASAP if emergency or no heat/no ac, This Week if soon, Next Week if next week, otherwise Flexible.
 
-${HOME_SERVICES_NAME_RULE}`,
+${HOME_SERVICES_NAME_RULE}
+
+${HOME_SERVICES_ACTION_RULE}`,
     outputSchema: `{
   "customerName": string | null,
   "customerPhone": string | null,
@@ -90,6 +109,12 @@ ${HOME_SERVICES_NAME_RULE}`,
   "quotedPrice": string | null,
   "followUpNeeded": boolean | null,
   "urgency": "ASAP" | "This Week" | "Next Week" | "Flexible" | null,
+  "intentLevel": "high" | "warm" | "cold" | null,
+  "followUpSignal": "callback_today" | "callback_tomorrow" | "callback_next_week" | "comparing_prices" | "before_delivery" | "next_business_day" | "unknown" | null,
+  "followUpAnchorDate": string | null,
+  "followUpReason": string | null,
+  "aiRecommendation": string | null,
+  "estimatedRevenue": number | null,
   "notes": string | null,
   "confidence": number (0-100),
   "callSummary": string
@@ -151,6 +176,92 @@ function splitCustomerName(fullName) {
   return { first: parts[0], last: parts.slice(1).join(' ') };
 }
 
+// Translate the AI-emitted followUpSignal into an absolute follow-up timestamp,
+// applying the rules from the product spec. `now` is injectable for tests.
+// Returns { followUpDate, followUpReason } — followUpDate is an ISO string.
+function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, now = new Date()) {
+  function atHour(d, hour, minute = 0) {
+    const copy = new Date(d);
+    copy.setHours(hour, minute, 0, 0);
+    return copy;
+  }
+  function addDays(d, n) {
+    const copy = new Date(d);
+    copy.setDate(copy.getDate() + n);
+    return copy;
+  }
+  function nextBusinessDayAt9(from) {
+    let next = addDays(from, 1);
+    // 0 = Sun, 6 = Sat
+    while (next.getDay() === 0 || next.getDay() === 6) next = addDays(next, 1);
+    return atHour(next, 9, 0);
+  }
+  function nextMondayAt9(from) {
+    const day = from.getDay();
+    // Days until next Monday (1). If today is Monday, jump 7.
+    const delta = ((1 - day + 7) % 7) || 7;
+    return atHour(addDays(from, delta), 9, 0);
+  }
+  function parseAnchor(str) {
+    if (!str) return null;
+    // Accept YYYY-MM-DD or full ISO.
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+    if (!m) return null;
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+
+  let date;
+  let reason = providedReason || null;
+
+  switch (signal) {
+    case 'callback_today':
+      date = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      reason = reason || 'Customer requested a callback today';
+      break;
+    case 'callback_tomorrow':
+      date = atHour(addDays(now, 1), 9, 0);
+      reason = reason || 'Customer requested a callback tomorrow';
+      break;
+    case 'callback_next_week':
+      date = nextMondayAt9(now);
+      reason = reason || 'Customer requested a callback next week';
+      break;
+    case 'comparing_prices':
+      date = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+      reason = reason || 'Customer is comparing prices — follow up in 48 hours';
+      break;
+    case 'before_delivery': {
+      const anchor = parseAnchor(anchorDate);
+      if (anchor) {
+        date = atHour(addDays(anchor, -1), 9, 0);
+        reason = reason || `Confirm the day before scheduled service (${anchorDate})`;
+      } else {
+        date = nextBusinessDayAt9(now);
+        reason = reason || 'Follow up to confirm service date';
+      }
+      break;
+    }
+    case 'next_business_day':
+      date = nextBusinessDayAt9(now);
+      reason = reason || 'High intent — follow up the next business day';
+      break;
+    case 'unknown':
+    case null:
+    case undefined:
+    default:
+      if (intentLevel === 'high') {
+        date = nextBusinessDayAt9(now);
+        reason = reason || 'High intent lead — follow up the next business day';
+      } else {
+        date = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        reason = reason || 'No explicit follow-up signal — default to 24 hours';
+      }
+      break;
+  }
+
+  return { followUpDate: date.toISOString(), followUpReason: reason };
+}
+
 async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer', subVertical = null) {
   const { resolvedSubVertical } = resolveConfig(vertical, subVertical);
   const systemPrompt = buildSystemPrompt(vertical, subVertical);
@@ -178,11 +289,34 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
   const { customerName, customerPhone, customerEmail, callSummary, confidence, ...verticalSpecific } = extracted;
   verticalSpecific.customerName = customerName || null;
 
+  // Home Services: compute the absolute follow-up date from the AI signal so
+  // the dashboard's prioritization logic can sort on a single timestamp.
+  if (vertical === 'home_services') {
+    const { followUpDate, followUpReason } = computeFollowUpDate(
+      verticalSpecific.followUpSignal,
+      verticalSpecific.followUpAnchorDate,
+      verticalSpecific.followUpReason,
+      verticalSpecific.intentLevel
+    );
+    verticalSpecific.followUpDate = followUpDate;
+    verticalSpecific.followUpReason = followUpReason;
+  }
+
   let phone = extracted.customerPhone;
   if (phone) {
     const digits = phone.replace(/\D/g, '');
     if (digits.length === 10) phone = `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
     else if (digits.length === 11 && digits[0] === '1') phone = `${digits.slice(1, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+
+  // Home Services swaps the confidence-score concept for action-oriented flags
+  // appended to the AI summary so the owner sees concrete follow-ups.
+  let augmentedSummary = callSummary || null;
+  if (vertical === 'home_services' && augmentedSummary) {
+    const flags = [];
+    if (!customerName) flags.push('Customer name was not collected — follow up to confirm.');
+    if (!extracted.customerEmail) flags.push('Email was not collected.');
+    if (flags.length) augmentedSummary = `${augmentedSummary} ${flags.join(' ')}`;
   }
 
   return {
@@ -195,7 +329,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
       phone_confidence: phone ? (confidence / 100) : 0,
       email: extracted.customerEmail,
       email_confidence: extracted.customerEmail ? (confidence / 100) : 0,
-      call_summary: callSummary || null,
+      call_summary: augmentedSummary,
     },
     verticalData: verticalSpecific,
     confidence: confidence || 0,
@@ -205,6 +339,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
 
 module.exports = {
   extractFromTranscriptVertical,
+  computeFollowUpDate,
   VERTICAL_CONFIGS,
   HOME_SERVICES_SUB_VERTICAL_CONFIGS,
 };

@@ -1,14 +1,31 @@
 import { useState } from 'react';
-import { User, Wrench, DollarSign, AlertCircle, Check, X, Sparkles } from 'lucide-react';
+import {
+  User,
+  Wrench,
+  DollarSign,
+  AlertCircle,
+  Check,
+  X,
+  Sparkles,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Edit3,
+} from 'lucide-react';
 import HomeServicesStatusBadge from './HomeServicesStatusBadge';
 import UrgencyBadge from './UrgencyBadge';
+import IntentBadge from './IntentBadge';
 import { api } from '../../utils/api';
 import {
   HOME_SERVICES_STATUSES,
+  HOME_SERVICES_OUTCOMES,
   URGENCY_VALUES,
+  INTENT_VALUES,
+  INTENT_LABELS,
   parseVerticalData,
   getFieldPack,
   getSubVertical,
+  getLeadActionState,
 } from '../../utils/verticalConfig';
 
 function EditableText({ label, value, onSave, multiline = false }) {
@@ -131,12 +148,42 @@ function PackField({ field, vd, saveVertical }) {
   );
 }
 
+// Convert ISO timestamp to local "YYYY-MM-DDTHH:mm" for datetime-local input.
+function toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fromLocalInput(str) {
+  if (!str) return null;
+  const d = new Date(str);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function FollowUpEditor({ value, onSave }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Follow-Up Date</span>
+      <input
+        type="datetime-local"
+        value={toLocalInput(value)}
+        onChange={(e) => onSave(fromLocalInput(e.target.value))}
+        className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+      />
+    </div>
+  );
+}
+
 export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) {
   const [lead, setLead] = useState(initialLead);
   const [saving, setSaving] = useState(false);
   const vd = parseVerticalData(lead);
   const subVertical = getSubVertical(lead);
   const pack = getFieldPack(lead);
+  const state = getLeadActionState(lead);
 
   const applyUpdate = async (body) => {
     setSaving(true);
@@ -144,6 +191,7 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       const updated = await api.updateLead(lead.id, body);
       setLead(updated);
       onUpdate?.(updated);
+      return updated;
     } catch (e) {
       console.error('Save error:', e);
     } finally {
@@ -173,39 +221,117 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   const displayedCustomerName = vd.customerName
     || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ');
 
+  const summary = state.summaryDetail || vd.serviceType || null;
+
   return (
     <div className="space-y-4">
-      {/* Lead Status + urgency */}
+      {/* TOP: Customer header + sticky action bar — action first, data second. */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden sticky top-0 z-10">
+        <div className="p-4 border-b border-gray-100">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-gray-900">{displayedCustomerName || 'Unknown Customer'}</h2>
+              {summary && <p className="text-sm text-gray-600 mt-0.5">{summary}</p>}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              <IntentBadge value={state.intent} size="md" />
+              <UrgencyBadge value={vd.urgency} size="md" />
+              <HomeServicesStatusBadge status={lead.status} size="lg" />
+            </div>
+          </div>
+          {state.recommendation && (
+            <div className="mt-3 flex items-start gap-2 text-sm text-gray-700 bg-blue-50 px-3 py-2 rounded-lg">
+              <Sparkles size={14} className="text-accent mt-0.5 flex-shrink-0" />
+              <span>{state.recommendation}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Sticky action bar — Mark Booked, Mark Lost, Set Follow Up, Edit */}
+        <div className="px-4 py-3 bg-white flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => applyUpdate({ status: 'booked' })}
+            disabled={saving}
+            className="flex items-center gap-1.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+          >
+            <CheckCircle2 size={14} /> Mark Booked
+          </button>
+          <button
+            onClick={() => applyUpdate({ status: 'lost' })}
+            disabled={saving}
+            className="flex items-center gap-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+          >
+            <XCircle size={14} /> Mark Lost
+          </button>
+          <button
+            onClick={() => applyUpdate({ status: 'needs_follow_up' })}
+            disabled={saving}
+            className="flex items-center gap-1.5 text-sm font-medium text-amber-800 bg-amber-100 hover:bg-amber-200 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+          >
+            <Clock size={14} /> Set Follow Up
+          </button>
+          <div className="flex items-center gap-1.5 ml-auto text-xs text-gray-400">
+            <Edit3 size={12} />
+            <span>Edit fields below</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Status + Outcome + Follow-up controls */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Status</p>
             <select
               value={lead.status || 'new'}
               onChange={e => applyUpdate({ status: e.target.value })}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent"
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
             >
               {HOME_SERVICES_STATUSES.map(s => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">Urgency</span>
-              <div className="flex items-center gap-2">
-                <select
-                  value={vd.urgency || ''}
-                  onChange={e => saveVertical('urgency')(e.target.value || null)}
-                  className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
-                >
-                  <option value="">—</option>
-                  {URGENCY_VALUES.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-                <UrgencyBadge value={vd.urgency} />
-              </div>
-            </div>
-            <HomeServicesStatusBadge status={lead.status} size="lg" />
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Outcome</p>
+            <select
+              value={lead.outcome || ''}
+              onChange={e => applyUpdate({ outcome: e.target.value || null })}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
+            >
+              <option value="">—</option>
+              {HOME_SERVICES_OUTCOMES.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Urgency</p>
+            <select
+              value={vd.urgency || ''}
+              onChange={e => saveVertical('urgency')(e.target.value || null)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
+            >
+              <option value="">—</option>
+              {URGENCY_VALUES.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Intent</p>
+            <select
+              value={vd.intentLevel || ''}
+              onChange={e => saveVertical('intentLevel')(e.target.value || null)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
+            >
+              <option value="">—</option>
+              {INTENT_VALUES.map(i => <option key={i} value={i}>{INTENT_LABELS[i]}</option>)}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <FollowUpEditor value={vd.followUpDate} onSave={saveVertical('followUpDate')} />
+            {vd.followUpReason && (
+              <p className="text-xs text-gray-500 mt-1 italic">Reason: {vd.followUpReason}</p>
+            )}
           </div>
         </div>
       </div>
@@ -245,19 +371,13 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       {/* Notes */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <SectionHeader title="Notes" icon={AlertCircle} />
-        <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
-          <div className="col-span-2">
-            <EditableText label="Internal Notes" value={vd.notes} onSave={saveVertical('notes')} multiline />
-          </div>
-          <EditableText label="Follow-Up Date" value={vd.followUpDate} onSave={saveVertical('followUpDate')} />
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Confidence</span>
-            <span className="text-sm font-semibold text-gray-800">{lead.confidence ?? 0} / 100</span>
-          </div>
+        <div className="p-4">
+          <EditableText label="Internal Notes" value={vd.notes} onSave={saveVertical('notes')} multiline />
         </div>
       </div>
 
-      {/* AI Summary */}
+      {/* AI Summary — confidence score replaced by inline follow-up flags on the
+          server side, so this section just shows the augmented summary. */}
       {lead.call_summary && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <SectionHeader title="AI Summary" icon={Sparkles} />
