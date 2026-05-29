@@ -49,7 +49,7 @@ export default function LeadList() {
   const load = async () => {
     setLoading(true);
     try {
-      const params = { sort, order: dir };
+      const params = { vertical: 'auto_dealer', sort, order: dir };
       if (statusFilter) params.status = statusFilter;
       if (intentFilter) params.intent = intentFilter;
       if (search) params.search = search;

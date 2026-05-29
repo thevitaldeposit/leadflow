@@ -44,7 +44,7 @@ export default function Dashboard() {
   const loadData = useCallback(() => {
     return Promise.all([
       api.getDashboardStats(),
-      api.getLeads({ sort: 'created_at', order: 'desc' }),
+      api.getLeads({ vertical: 'auto_dealer', sort: 'created_at', order: 'desc' }),
     ]).then(([s, l]) => {
       setStats(s);
       setLeads(l.slice(0, 20));
@@ -60,6 +60,8 @@ export default function Dashboard() {
   // Auto-refresh when a new lead arrives via WebSocket
   useEffect(() => {
     const handleNewLead = (lead) => {
+      // Only show leads belonging to this tab's vertical
+      if (lead.vertical && lead.vertical !== 'auto_dealer') return;
       // Prepend to leads list and trim to 20
       setLeads(prev => [lead, ...prev].slice(0, 20));
       // Refresh stats

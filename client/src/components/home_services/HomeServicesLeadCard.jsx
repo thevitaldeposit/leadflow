@@ -15,7 +15,9 @@ function formatCallTime(dateStr) {
 export default function HomeServicesLeadCard({ lead }) {
   const navigate = useNavigate();
   const vd = parseVerticalData(lead);
-  const fullName = [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown Customer';
+  const fullName = vd.customerName
+    || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ')
+    || 'Unknown Customer';
 
   return (
     <div

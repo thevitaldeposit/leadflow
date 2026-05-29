@@ -109,6 +109,23 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   const saveCommon = (field) => (value) => applyUpdate({ [field]: value });
   const saveVertical = (field) => (value) => applyUpdate({ vertical_data: { [field]: value } });
 
+  // Save Customer Name to vertical_data.customerName AND split into flat
+  // first/last columns so search-by-name continues to work.
+  const saveCustomerName = (fullName) => {
+    const trimmed = (fullName || '').trim();
+    const parts = trimmed ? trimmed.split(/\s+/) : [];
+    const first = parts[0] || null;
+    const last = parts.length > 1 ? parts.slice(1).join(' ') : null;
+    return applyUpdate({
+      vertical_data: { customerName: trimmed || null },
+      customer_first_name: first,
+      customer_last_name: last,
+    });
+  };
+
+  const displayedCustomerName = vd.customerName
+    || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ');
+
   return (
     <div className="space-y-4">
       {/* Status bar + AI summary */}
@@ -143,8 +160,9 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <SectionHeader title="Contact Info" icon={User} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
-          <EditableText label="First Name" value={lead.customer_first_name} onSave={saveCommon('customer_first_name')} />
-          <EditableText label="Last Name" value={lead.customer_last_name} onSave={saveCommon('customer_last_name')} />
+          <div className="col-span-2">
+            <EditableText label="Customer Name" value={displayedCustomerName} onSave={saveCustomerName} />
+          </div>
           <EditableText label="Phone" value={lead.phone} onSave={saveCommon('phone')} />
           <EditableText label="Email" value={lead.email} onSave={saveCommon('email')} />
           <div className="col-span-2">

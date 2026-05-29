@@ -40,7 +40,9 @@ const VERTICAL_CONFIGS = {
 }`,
   },
   home_services: {
-    promptAddition: `This is a call to a home services business. The business owner may provide dumpster rentals, HVAC, plumbing, roofing, landscaping, junk removal, or other home services. Extract the following from the customer's side of the conversation: their name, phone number, email, and the address where service is needed. Extract the type of service or project they need, what materials or work is involved, the size or scope if mentioned, how long they need it, their requested delivery and pickup dates, any access instructions for the property, whether they asked for a quote, any price discussed, and any payment information mentioned. Determine urgency based on their language: if they say today, now, emergency, or ASAP mark as ASAP. If they say this week mark as This Week. If they say next week mark as Next Week. Otherwise mark as Flexible. Speaker 0 is the business owner — do not extract their personal information.`,
+    promptAddition: `This is a call to a home services business. The business owner may provide dumpster rentals, HVAC, plumbing, roofing, landscaping, junk removal, or other home services. Extract the customer's name, phone number, email, and the address where service is needed. Extract the type of service or project they need, what materials or work is involved, the size or scope if mentioned, how long they need it, their requested delivery and pickup dates, any access instructions for the property, whether they asked for a quote, any price discussed, and any payment information mentioned. Determine urgency based on their language: if they say today, now, emergency, or ASAP mark as ASAP. If they say this week mark as This Week. If they say next week mark as Next Week. Otherwise mark as Flexible.
+
+IMPORTANT NAME RULE: customerName must be extracted regardless of which speaker said it. The business owner (Speaker 0) often greets the customer by name ("Hi John, this is Mike at ABC Dumpsters") — capture that name. Only phone, email, and address are restricted to the customer's own speech. Speaker 0 is the business owner — do not extract Speaker 0's personal phone, email, or address.`,
     outputSchema: `{
   "customerName": string | null,
   "customerPhone": string | null,
@@ -128,8 +130,11 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
 
   const { first, last } = splitCustomerName(extracted.customerName);
 
-  // Separate common fields (stored flat) from vertical-specific fields (stored as JSON)
+  // Separate common fields (stored flat) from vertical-specific fields (stored as JSON).
+  // customerName is preserved in verticalData so vertical UIs can show the full name
+  // as one field even when extraction returns only first or only last via the split.
   const { customerName, customerPhone, customerEmail, callSummary, confidence, ...verticalSpecific } = extracted;
+  verticalSpecific.customerName = customerName || null;
 
   let phone = extracted.customerPhone;
   if (phone) {
