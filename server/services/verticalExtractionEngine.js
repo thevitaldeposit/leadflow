@@ -3,6 +3,9 @@ const Anthropic = require('@anthropic-ai/sdk');
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-sonnet-4-6';
 
+// Top-level vertical configs: auto_dealer and insurance_agent are single-schema.
+// home_services delegates to a sub-vertical (dumpster_rental, hvac, …) via
+// HOME_SERVICES_SUB_VERTICAL_CONFIGS below.
 const VERTICAL_CONFIGS = {
   auto_dealer: {
     promptAddition: `This is a call at a car dealership. Extract the vehicle the customer is interested in purchasing, any trade-in vehicle they mentioned, their budget, whether they expressed interest in financing, and how soon they want to buy. Speaker 0 is the salesperson — do not extract their personal contact information.`,
@@ -39,25 +42,53 @@ const VERTICAL_CONFIGS = {
   "callSummary": string
 }`,
   },
-  home_services: {
-    promptAddition: `This is a call to a home services business. The business owner may provide dumpster rentals, HVAC, plumbing, roofing, landscaping, junk removal, or other home services. Extract the customer's name, phone number, email, and the address where service is needed. Extract the type of service or project they need, what materials or work is involved, the size or scope if mentioned, how long they need it, their requested delivery and pickup dates, any access instructions for the property, whether they asked for a quote, any price discussed, and any payment information mentioned. Determine urgency based on their language: if they say today, now, emergency, or ASAP mark as ASAP. If they say this week mark as This Week. If they say next week mark as Next Week. Otherwise mark as Flexible.
+};
 
-IMPORTANT NAME RULE: customerName must be extracted regardless of which speaker said it. The business owner (Speaker 0) often greets the customer by name ("Hi John, this is Mike at ABC Dumpsters") — capture that name. Only phone, email, and address are restricted to the customer's own speech. Speaker 0 is the business owner — do not extract Speaker 0's personal phone, email, or address.`,
+const HOME_SERVICES_NAME_RULE = `IMPORTANT NAME RULE: customerName must be extracted regardless of which speaker said it. The business owner (Speaker 0) often greets the customer by name ("Hi John, this is Mike at ABC Dumpsters") — capture that name. Only phone, email, and address are restricted to the customer's own speech. Speaker 0 is the business owner — do not extract Speaker 0's personal phone, email, or address.`;
+
+const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
+  dumpster_rental: {
+    promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency, This Week if this week, Next Week if next week, otherwise Flexible.
+
+${HOME_SERVICES_NAME_RULE}`,
     outputSchema: `{
   "customerName": string | null,
   "customerPhone": string | null,
   "customerEmail": string | null,
-  "serviceAddress": string | null,
-  "serviceType": string | null,
-  "projectDescription": string | null,
-  "serviceSize": string | null,
-  "rentalDuration": string | null,
+  "deliveryAddress": string | null,
+  "dumpsterSize": string | null,
   "deliveryDate": string | null,
   "pickupDate": string | null,
+  "rentalDuration": string | null,
+  "debrisType": string | null,
   "accessNotes": string | null,
-  "quoteRequested": boolean | null,
-  "priceDiscussed": string | null,
-  "paymentDiscussed": string | null,
+  "permitNeeded": boolean | null,
+  "quotedPrice": string | null,
+  "paymentStatus": string | null,
+  "urgency": "ASAP" | "This Week" | "Next Week" | "Flexible" | null,
+  "notes": string | null,
+  "confidence": number (0-100),
+  "callSummary": string
+}`,
+  },
+  hvac: {
+    promptAddition: `This is a call to an HVAC business. Extract: customer name, phone, email, property address, type of service needed (repair/maintenance/install/replacement/estimate), type of equipment (furnace/ac/heat pump/boiler/ductwork/other), description of the issue, age of the system if mentioned, brand or model if mentioned, whether it is an emergency, whether they requested an appointment, and any price discussed. Urgency: ASAP if emergency or no heat/no ac, This Week if soon, Next Week if next week, otherwise Flexible.
+
+${HOME_SERVICES_NAME_RULE}`,
+    outputSchema: `{
+  "customerName": string | null,
+  "customerPhone": string | null,
+  "customerEmail": string | null,
+  "propertyAddress": string | null,
+  "serviceType": "repair" | "maintenance" | "install" | "replacement" | "estimate" | "unknown" | null,
+  "equipmentType": "furnace" | "ac" | "heat_pump" | "boiler" | "ductwork" | "other" | "unknown" | null,
+  "issueDescription": string | null,
+  "systemAge": string | null,
+  "brandOrModel": string | null,
+  "emergencyStatus": boolean | null,
+  "appointmentRequested": boolean | null,
+  "quotedPrice": string | null,
+  "followUpNeeded": boolean | null,
   "urgency": "ASAP" | "This Week" | "Next Week" | "Flexible" | null,
   "notes": string | null,
   "confidence": number (0-100),
@@ -66,8 +97,18 @@ IMPORTANT NAME RULE: customerName must be extracted regardless of which speaker 
   },
 };
 
-function buildSystemPrompt(vertical) {
-  const config = VERTICAL_CONFIGS[vertical] || VERTICAL_CONFIGS.auto_dealer;
+function resolveConfig(vertical, subVertical) {
+  if (vertical === 'home_services') {
+    const sub = subVertical || 'dumpster_rental';
+    const cfg = HOME_SERVICES_SUB_VERTICAL_CONFIGS[sub]
+      || HOME_SERVICES_SUB_VERTICAL_CONFIGS.dumpster_rental;
+    return { config: cfg, resolvedSubVertical: HOME_SERVICES_SUB_VERTICAL_CONFIGS[sub] ? sub : 'dumpster_rental' };
+  }
+  return { config: VERTICAL_CONFIGS[vertical] || VERTICAL_CONFIGS.auto_dealer, resolvedSubVertical: null };
+}
+
+function buildSystemPrompt(vertical, subVertical) {
+  const { config } = resolveConfig(vertical, subVertical);
   return `You are an AI-powered lead extraction engine. Your job is to analyze sales call transcripts and extract customer lead information. You operate as the core intelligence behind a fully autonomous CRM population tool. The goal is zero manual data entry.
 
 ## SPEAKER IDENTIFICATION
@@ -110,8 +151,9 @@ function splitCustomerName(fullName) {
   return { first: parts[0], last: parts.slice(1).join(' ') };
 }
 
-async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer') {
-  const systemPrompt = buildSystemPrompt(vertical);
+async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer', subVertical = null) {
+  const { resolvedSubVertical } = resolveConfig(vertical, subVertical);
+  const systemPrompt = buildSystemPrompt(vertical, subVertical);
 
   const response = await client.messages.create({
     model: MODEL,
@@ -157,7 +199,12 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     },
     verticalData: verticalSpecific,
     confidence: confidence || 0,
+    subVertical: resolvedSubVertical,
   };
 }
 
-module.exports = { extractFromTranscriptVertical, VERTICAL_CONFIGS };
+module.exports = {
+  extractFromTranscriptVertical,
+  VERTICAL_CONFIGS,
+  HOME_SERVICES_SUB_VERTICAL_CONFIGS,
+};

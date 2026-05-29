@@ -28,6 +28,80 @@ export const URGENCY_STYLES = {
   'Flexible': 'bg-green-100 text-green-700 border-green-200',
 };
 
+// Sub-verticals that share the home_services dashboard.
+export const HOME_SERVICES_SUB_VERTICALS = [
+  { id: 'dumpster_rental', label: 'Dumpster Rental' },
+  { id: 'hvac', label: 'HVAC' },
+];
+
+// Field packs render the "Industry Details" section of the lead detail view.
+// Field types:
+//   - text       single-line editable string
+//   - multiline  textarea editable string
+//   - bool       Yes / No / unset toggle
+//   - enum       dropdown driven by `options`
+// `span` controls grid layout (1 = half row, 2 = full row).
+export const HOME_SERVICES_FIELD_PACKS = {
+  dumpster_rental: {
+    label: 'Dumpster Rental',
+    // Card subtitle: which vertical_data field summarizes the job at a glance.
+    summaryKey: 'dumpsterSize',
+    industryFields: [
+      { key: 'dumpsterSize', label: 'Dumpster Size', type: 'text' },
+      { key: 'debrisType', label: 'Debris Type', type: 'text' },
+      { key: 'deliveryDate', label: 'Delivery Date', type: 'text' },
+      { key: 'pickupDate', label: 'Pickup Date', type: 'text' },
+      { key: 'rentalDuration', label: 'Rental Duration', type: 'text' },
+      { key: 'permitNeeded', label: 'Permit Needed', type: 'bool' },
+      { key: 'deliveryAddress', label: 'Delivery Address', type: 'text', span: 2 },
+      { key: 'accessNotes', label: 'Access Notes', type: 'multiline', span: 2 },
+    ],
+    quoteFields: [
+      { key: 'quotedPrice', label: 'Quoted Price', type: 'text' },
+      { key: 'paymentStatus', label: 'Payment Status', type: 'text' },
+    ],
+  },
+  hvac: {
+    label: 'HVAC',
+    summaryKey: 'serviceType',
+    industryFields: [
+      {
+        key: 'serviceType',
+        label: 'Service Type',
+        type: 'enum',
+        options: ['repair', 'maintenance', 'install', 'replacement', 'estimate', 'unknown'],
+      },
+      {
+        key: 'equipmentType',
+        label: 'Equipment',
+        type: 'enum',
+        options: ['furnace', 'ac', 'heat_pump', 'boiler', 'ductwork', 'other', 'unknown'],
+      },
+      { key: 'systemAge', label: 'System Age', type: 'text' },
+      { key: 'brandOrModel', label: 'Brand / Model', type: 'text' },
+      { key: 'emergencyStatus', label: 'Emergency', type: 'bool' },
+      { key: 'appointmentRequested', label: 'Appointment Requested', type: 'bool' },
+      { key: 'propertyAddress', label: 'Property Address', type: 'text', span: 2 },
+      { key: 'issueDescription', label: 'Issue Description', type: 'multiline', span: 2 },
+    ],
+    quoteFields: [
+      { key: 'quotedPrice', label: 'Quoted Price', type: 'text' },
+      { key: 'followUpNeeded', label: 'Follow-Up Needed', type: 'bool' },
+    ],
+  },
+};
+
+export function getSubVertical(lead) {
+  const sv = lead?.sub_vertical;
+  if (sv && HOME_SERVICES_FIELD_PACKS[sv]) return sv;
+  // Legacy/back-compat: any home_services lead without a sub_vertical is dumpster_rental.
+  return 'dumpster_rental';
+}
+
+export function getFieldPack(lead) {
+  return HOME_SERVICES_FIELD_PACKS[getSubVertical(lead)];
+}
+
 const STORAGE_KEY = 'leadflow:activeVertical';
 
 export function getActiveVertical() {

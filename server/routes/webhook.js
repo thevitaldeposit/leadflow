@@ -106,11 +106,18 @@ async function processRecording(payload) {
     const { transcript, provider, transcription_seconds } = await transcribe(audioPath);
 
     const defaultVertical = process.env.LEADFLOW_DEFAULT_VERTICAL || 'auto_dealer';
-    const useVerticalEngine = defaultVertical !== 'auto_dealer' && VERTICAL_CONFIGS[defaultVertical];
+    const defaultSubVertical = process.env.LEADFLOW_DEFAULT_SUB_VERTICAL || null;
+    const isHomeServices = defaultVertical === 'home_services';
+    const useVerticalEngine = defaultVertical !== 'auto_dealer'
+      && (isHomeServices || VERTICAL_CONFIGS[defaultVertical]);
 
     if (useVerticalEngine) {
-      console.log(`[webhook] Extracting lead from recording ${RecordingSid} via vertical engine (${defaultVertical})...`);
-      const { commonFields, verticalData, confidence } = await extractFromTranscriptVertical(transcript, defaultVertical);
+      console.log(`[webhook] Extracting lead from recording ${RecordingSid} via vertical engine (${defaultVertical}${defaultSubVertical ? '/' + defaultSubVertical : ''})...`);
+      const { commonFields, verticalData, confidence, subVertical } = await extractFromTranscriptVertical(
+        transcript,
+        defaultVertical,
+        defaultSubVertical
+      );
 
       if (!commonFields.phone && From) {
         const digits = From.replace(/\D/g, '');
@@ -132,6 +139,7 @@ async function processRecording(payload) {
         caller_number: From || null,
         raw_transcript: transcript,
         vertical: defaultVertical,
+        sub_vertical: subVertical || (isHomeServices ? 'dumpster_rental' : null),
         source: 'twilio_recording',
         vertical_data: JSON.stringify(verticalData),
         confidence: confidence || 0,

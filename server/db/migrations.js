@@ -21,6 +21,7 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN captured_by TEXT',
   'ALTER TABLE leads ADD COLUMN vertical_data TEXT',
   'ALTER TABLE leads ADD COLUMN confidence INTEGER DEFAULT 0',
+  'ALTER TABLE leads ADD COLUMN sub_vertical TEXT',
 ];
 
 function runMigrations() {
@@ -38,6 +39,12 @@ function runMigrations() {
       }
     }
   }
+
+  // Backfill: any existing home_services lead without a sub_vertical defaults to
+  // dumpster_rental so the field-pack-driven detail view has something to render.
+  db.prepare(
+    "UPDATE leads SET sub_vertical = 'dumpster_rental' WHERE vertical = 'home_services' AND (sub_vertical IS NULL OR sub_vertical = '')"
+  ).run();
 
   // Devices table for APNs tokens
   db.exec(`

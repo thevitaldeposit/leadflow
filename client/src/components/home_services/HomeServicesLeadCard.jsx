@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { Phone, Wrench } from 'lucide-react';
 import HomeServicesStatusBadge from './HomeServicesStatusBadge';
 import UrgencyBadge from './UrgencyBadge';
-import { parseVerticalData } from '../../utils/verticalConfig';
+import { parseVerticalData, getFieldPack } from '../../utils/verticalConfig';
 
 function formatCallTime(dateStr) {
   const d = new Date(dateStr);
@@ -15,6 +15,11 @@ function formatCallTime(dateStr) {
 export default function HomeServicesLeadCard({ lead }) {
   const navigate = useNavigate();
   const vd = parseVerticalData(lead);
+  const pack = getFieldPack(lead);
+  // Each field pack nominates the vertical_data key that best summarizes the
+  // job at a glance (dumpster size, HVAC service type, etc.). Fall back to the
+  // legacy serviceType key so older home_services leads still show something.
+  const summary = vd[pack.summaryKey] || vd.serviceType;
   const fullName = vd.customerName
     || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ')
     || 'Unknown Customer';
@@ -35,10 +40,10 @@ export default function HomeServicesLeadCard({ lead }) {
         </div>
       </div>
 
-      {vd.serviceType && (
+      {summary && (
         <div className="flex items-center gap-1.5 text-sm text-gray-700 mb-2">
           <Wrench size={13} className="text-gray-400" />
-          <span>{vd.serviceType}</span>
+          <span>{summary}</span>
         </div>
       )}
 

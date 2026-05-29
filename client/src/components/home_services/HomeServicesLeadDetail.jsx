@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { User, Wrench, DollarSign, AlertCircle, Check, X } from 'lucide-react';
+import { User, Wrench, DollarSign, AlertCircle, Check, X, Sparkles } from 'lucide-react';
 import HomeServicesStatusBadge from './HomeServicesStatusBadge';
 import UrgencyBadge from './UrgencyBadge';
 import { api } from '../../utils/api';
@@ -7,6 +7,8 @@ import {
   HOME_SERVICES_STATUSES,
   URGENCY_VALUES,
   parseVerticalData,
+  getFieldPack,
+  getSubVertical,
 } from '../../utils/verticalConfig';
 
 function EditableText({ label, value, onSave, multiline = false }) {
@@ -79,11 +81,52 @@ function EditableBool({ label, value, onSave }) {
   );
 }
 
-function SectionHeader({ title, icon: Icon }) {
+function EditableEnum({ label, value, options, onSave }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      <select
+        value={value || ''}
+        onChange={e => onSave(e.target.value || null)}
+        className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+      >
+        <option value="">—</option>
+        {options.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function SectionHeader({ title, icon: Icon, badge }) {
   return (
     <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 bg-gray-50">
       <Icon size={15} className="text-gray-500" />
       <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+      {badge && (
+        <span className="ml-auto text-[10px] font-medium uppercase tracking-wide text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">
+          {badge}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Render a single field-pack entry as an editable control.
+function PackField({ field, vd, saveVertical }) {
+  const value = vd[field.key];
+  const onSave = saveVertical(field.key);
+  const cls = field.span === 2 ? 'col-span-2' : '';
+  if (field.type === 'bool') {
+    return <div className={cls}><EditableBool label={field.label} value={value} onSave={onSave} /></div>;
+  }
+  if (field.type === 'enum') {
+    return <div className={cls}><EditableEnum label={field.label} value={value} options={field.options || []} onSave={onSave} /></div>;
+  }
+  return (
+    <div className={cls}>
+      <EditableText label={field.label} value={value} onSave={onSave} multiline={field.type === 'multiline'} />
     </div>
   );
 }
@@ -92,6 +135,8 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   const [lead, setLead] = useState(initialLead);
   const [saving, setSaving] = useState(false);
   const vd = parseVerticalData(lead);
+  const subVertical = getSubVertical(lead);
+  const pack = getFieldPack(lead);
 
   const applyUpdate = async (body) => {
     setSaving(true);
@@ -107,6 +152,8 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   };
 
   const saveCommon = (field) => (value) => applyUpdate({ [field]: value });
+  // Partial-merge into vertical_data — server preserves all other keys, so the
+  // transcript, AI summary, and untouched fields are never overwritten.
   const saveVertical = (field) => (value) => applyUpdate({ vertical_data: { [field]: value } });
 
   // Save Customer Name to vertical_data.customerName AND split into flat
@@ -128,8 +175,8 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
 
   return (
     <div className="space-y-4">
-      {/* Status bar + AI summary */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+      {/* Lead Status + urgency */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Status</p>
@@ -143,93 +190,89 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
               ))}
             </select>
           </div>
-          <HomeServicesStatusBadge status={lead.status} size="lg" />
-        </div>
-
-        {lead.call_summary && (
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">AI Summary</p>
-            <p className="text-sm text-gray-700 leading-relaxed bg-blue-50 px-3 py-2 rounded-lg">
-              {lead.call_summary}
-            </p>
+          <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">Urgency</span>
+              <div className="flex items-center gap-2">
+                <select
+                  value={vd.urgency || ''}
+                  onChange={e => saveVertical('urgency')(e.target.value || null)}
+                  className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+                >
+                  <option value="">—</option>
+                  {URGENCY_VALUES.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+                <UrgencyBadge value={vd.urgency} />
+              </div>
+            </div>
+            <HomeServicesStatusBadge status={lead.status} size="lg" />
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Section 1 — Contact Info */}
+      {/* Contact */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <SectionHeader title="Contact Info" icon={User} />
+        <SectionHeader title="Contact" icon={User} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
           <div className="col-span-2">
             <EditableText label="Customer Name" value={displayedCustomerName} onSave={saveCustomerName} />
           </div>
           <EditableText label="Phone" value={lead.phone} onSave={saveCommon('phone')} />
           <EditableText label="Email" value={lead.email} onSave={saveCommon('email')} />
-          <div className="col-span-2">
-            <EditableText label="Service Address" value={vd.serviceAddress} onSave={saveVertical('serviceAddress')} />
-          </div>
         </div>
       </div>
 
-      {/* Section 2 — Service Details */}
+      {/* Industry Details — field pack driven */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <SectionHeader title="Service Details" icon={Wrench} />
+        <SectionHeader title="Industry Details" icon={Wrench} badge={pack.label} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
-          <EditableText label="Service Type" value={vd.serviceType} onSave={saveVertical('serviceType')} />
-          <EditableText label="Size / Scope" value={vd.serviceSize} onSave={saveVertical('serviceSize')} />
-          <EditableText label="Rental Duration" value={vd.rentalDuration} onSave={saveVertical('rentalDuration')} />
-          <div />
-          <EditableText label="Delivery Date" value={vd.deliveryDate} onSave={saveVertical('deliveryDate')} />
-          <EditableText label="Pickup Date" value={vd.pickupDate} onSave={saveVertical('pickupDate')} />
-          <div className="col-span-2">
-            <EditableText label="Project Description" value={vd.projectDescription} onSave={saveVertical('projectDescription')} multiline />
-          </div>
-          <div className="col-span-2">
-            <EditableText label="Access Notes" value={vd.accessNotes} onSave={saveVertical('accessNotes')} multiline />
-          </div>
+          {pack.industryFields.map(field => (
+            <PackField key={field.key} field={field} vd={vd} saveVertical={saveVertical} />
+          ))}
         </div>
       </div>
 
-      {/* Section 3 — Quote & Payment */}
+      {/* Quote / Payment — field pack driven */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <SectionHeader title="Quote & Payment" icon={DollarSign} />
+        <SectionHeader title="Quote / Payment" icon={DollarSign} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
-          <EditableBool label="Quote Requested" value={vd.quoteRequested} onSave={saveVertical('quoteRequested')} />
-          <div />
-          <EditableText label="Price Discussed" value={vd.priceDiscussed} onSave={saveVertical('priceDiscussed')} />
-          <EditableText label="Payment Discussed" value={vd.paymentDiscussed} onSave={saveVertical('paymentDiscussed')} />
+          {pack.quoteFields.map(field => (
+            <PackField key={field.key} field={field} vd={vd} saveVertical={saveVertical} />
+          ))}
         </div>
       </div>
 
-      {/* Section 4 — Urgency + Notes + Confidence */}
+      {/* Notes */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <SectionHeader title="Urgency, Notes & Confidence" icon={AlertCircle} />
+        <SectionHeader title="Notes" icon={AlertCircle} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Urgency</span>
-            <div className="flex items-center gap-2">
-              <select
-                value={vd.urgency || ''}
-                onChange={e => saveVertical('urgency')(e.target.value || null)}
-                className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent"
-              >
-                <option value="">—</option>
-                {URGENCY_VALUES.map(u => <option key={u} value={u}>{u}</option>)}
-              </select>
-              <UrgencyBadge value={vd.urgency} />
-            </div>
+          <div className="col-span-2">
+            <EditableText label="Internal Notes" value={vd.notes} onSave={saveVertical('notes')} multiline />
           </div>
+          <EditableText label="Follow-Up Date" value={vd.followUpDate} onSave={saveVertical('followUpDate')} />
           <div className="flex flex-col gap-0.5">
             <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Confidence</span>
             <span className="text-sm font-semibold text-gray-800">{lead.confidence ?? 0} / 100</span>
           </div>
-          <div className="col-span-2">
-            <EditableText label="Notes" value={vd.notes} onSave={saveVertical('notes')} multiline />
-          </div>
         </div>
       </div>
 
+      {/* AI Summary */}
+      {lead.call_summary && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <SectionHeader title="AI Summary" icon={Sparkles} />
+          <div className="p-4">
+            <p className="text-sm text-gray-700 leading-relaxed bg-blue-50 px-3 py-2 rounded-lg">
+              {lead.call_summary}
+            </p>
+          </div>
+        </div>
+      )}
+
       {saving && <p className="text-xs text-center text-gray-400">Saving...</p>}
+      {/* Transcript / Recording sections live in LeadDetailPage's AudioSection. */}
+      {/* Debug hint for sub_vertical, only visible in dev tools. */}
+      <span className="sr-only" data-sub-vertical={subVertical} />
     </div>
   );
 }
