@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Wrench, AlertTriangle, TrendingUp, Clock, CheckCircle2, DollarSign } from 'lucide-react';
 import { api } from '../../utils/api';
 import HomeServicesLeadCard from './HomeServicesLeadCard';
 import socket from '../../socket';
 import { getLeadActionState } from '../../utils/verticalConfig';
+import { playChime } from '../../utils/chime';
 
 function SummaryTile({ icon: Icon, label, value, color = 'bg-gray-50 text-gray-700', warn = false }) {
   return (
@@ -45,12 +46,39 @@ export default function HomeServicesDashboard() {
     load().catch(console.error).finally(() => setLoading(false));
   }, [load]);
 
+  // Real-time updates. Three concerns this hook handles:
+  //   1. Insert the new lead — dedup by id so a re-emit on reconnect can't
+  //      duplicate cards. The useMemo over `leads` re-derives Today's
+  //      Priorities / Summary / All Active, so no extra state plumbing.
+  //   2. Audible chime — Layout.jsx also pushes a toast that plays the same
+  //      chime, but the dashboard owns its own fallback so the operator hears
+  //      something even if the toast is suppressed (browser focus, etc.).
+  //   3. Refetch on reconnect — events fired while the socket was down would
+  //      otherwise be lost. We refetch the full list on every reconnect so
+  //      the dashboard self-heals.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; }, [load]);
+
   useEffect(() => {
     const handleNewLead = (lead) => {
-      if (lead.vertical === 'home_services') setLeads(prev => [lead, ...prev]);
+      if (lead.vertical !== 'home_services') return;
+      setLeads(prev => {
+        if (prev.some(l => l.id === lead.id)) return prev;
+        return [lead, ...prev];
+      });
+      playChime();
     };
+
+    const handleReconnect = () => {
+      loadRef.current().catch(console.error);
+    };
+
     socket.on('new_lead', handleNewLead);
-    return () => socket.off('new_lead', handleNewLead);
+    socket.io.on('reconnect', handleReconnect);
+    return () => {
+      socket.off('new_lead', handleNewLead);
+      socket.io.off('reconnect', handleReconnect);
+    };
   }, []);
 
   // Optimistic update from quick actions on lead cards.

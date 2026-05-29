@@ -37,13 +37,31 @@ export default function Layout({ children }) {
 
   useEffect(() => {
     const handleNewLead = (lead) => {
-      const name = [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ');
-      const voi = [lead.voi_make, lead.voi_model].filter(Boolean).join(' ');
+      // Pull a sensible subtitle per vertical so the toast feels useful even
+      // when the call has no flat customer name yet (common for Home Services
+      // where customerName lives in vertical_data).
+      let vd = {};
+      if (lead.vertical_data) {
+        try { vd = JSON.parse(lead.vertical_data); } catch { /* ignore */ }
+      }
+      const name = vd.customerName
+        || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ');
+
+      let sub = null;
+      if (lead.vertical === 'home_services') {
+        sub = vd.dumpsterSize
+          || vd.serviceType
+          || vd.deliveryAddress
+          || vd.propertyAddress
+          || null;
+      } else {
+        sub = [lead.voi_make, lead.voi_model].filter(Boolean).join(' ') || null;
+      }
 
       const toast = {
         id: ++toastIdCounter,
         title: name ? `New lead: ${name}` : 'New lead captured',
-        sub: voi || null,
+        sub,
         leadId: lead.id,
       };
       setToasts(prev => [...prev, toast]);
