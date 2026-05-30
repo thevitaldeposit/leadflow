@@ -63,7 +63,7 @@ const BOOKING_SIGNAL_RULE = `BOOKING DETECTION: After extracting all fields, eva
 2. size_confirmed — A specific dumpster size was discussed and not rejected.
 3. delivery_date_set — A specific delivery date or day was given (e.g. "Monday", "June 3rd", "next Tuesday").
 4. location_given — A delivery address or at minimum a city/neighborhood was provided.
-5. payment_intent — Any signal that the customer intends to pay: "send me a payment link", "I'll pay when it arrives", "you can charge my card", "I'll pay online", "cash on delivery", "send invoice", "I'll venmo you", "call me back with payment", "I'll call back with my card", or any equivalent.
+5. payment_intent — Detect whether the business owner (Speaker 0) indicated they would send payment information to the customer, OR the customer indicated they intend to pay. This includes ANY statement suggesting payment will be sent or collected: sending a link, sending an invoice, calling back for card info, collecting payment on delivery, or any other indication that payment arrangements were made or promised. Do not look for specific phrases — understand the intent. Set to true if either party clearly indicated payment would be handled.
 
 Set bookingSignalsDetected to an array of all signal keys found (e.g. ["price_agreed", "size_confirmed"]).
 Set bookingConfidence based on what was found:
@@ -161,7 +161,7 @@ function resolveConfig(vertical, subVertical) {
 
 function buildSystemPrompt(vertical, subVertical) {
   const { config } = resolveConfig(vertical, subVertical);
-  return `You are an AI-powered lead extraction engine. Your job is to analyze sales call transcripts and extract customer lead information. You operate as the core intelligence behind a fully autonomous CRM population tool. The goal is zero manual data entry.
+  return `You are a data extraction engine. You output ONLY valid JSON. Never output explanations, preamble, or markdown. Never start your response with words. Always start with { and end with }. If you cannot extract a value, use null.
 
 ## SPEAKER IDENTIFICATION
 In the transcript, Speaker 0 is always the business owner/employee. Speaker 1 and higher are customers. Extract lead information ONLY from customer speakers. You may extract the salesperson/employee name from Speaker 0 if mentioned, but never their personal phone, email, or address.
@@ -338,17 +338,12 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     messages: [
       {
         role: 'user',
-        content: `Today's date is ${todayISO}. Extract all lead information from this call transcript and respond with JSON only:\n\n${transcript}`,
+        content: `Today's date is ${todayISO}. Output a single JSON object — no other text — extracting all lead information from this call transcript:\n\n${transcript}`,
       },
-      // Assistant prefill: forces the model to begin its response with '{',
-      // making it structurally impossible to emit conversational preamble.
-      // The API returns only the text AFTER this prefill, so we prepend '{' below.
-      { role: 'assistant', content: '{' },
     ],
   });
 
-  // Prepend the prefilled '{' that the API stripped from the completion
-  const rawText = '{' + response.content[0].text;
+  const rawText = response.content[0].text;
   const extracted = parseResponse(rawText);
 
   const { first, last } = splitCustomerName(extracted.customerName);

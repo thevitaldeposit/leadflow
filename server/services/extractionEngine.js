@@ -146,13 +146,12 @@ async function extractFromTranscript(transcript) {
     messages: [
       {
         role: 'user',
-        content: `Extract all lead information from this sales call transcript and respond with JSON only:\n\n${transcript}`,
+        content: `Output a single JSON object — no other text — extracting all lead information from this sales call transcript:\n\n${transcript}`,
       },
-      { role: 'assistant', content: '{' },
     ],
   });
 
-  const rawText = '{' + response.content[0].text;
+  const rawText = response.content[0].text;
   const extracted = parseExtractionResponse(rawText);
   return flattenExtraction(extracted);
 }
@@ -191,15 +190,14 @@ async function extractFromImage(imagePath) {
           },
           {
             type: 'text',
-            text: 'Extract all lead information from this handwritten up sheet image and respond with JSON only.',
+            text: 'Output a single JSON object — no other text — extracting all lead information from this handwritten up sheet image.',
           },
         ],
       },
-      { role: 'assistant', content: '{' },
     ],
   });
 
-  const rawText = '{' + response.content[0].text;
+  const rawText = response.content[0].text;
   const extracted = parseExtractionResponse(rawText);
   return flattenExtraction(extracted);
 }
