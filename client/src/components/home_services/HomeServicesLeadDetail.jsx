@@ -126,6 +126,58 @@ function SectionHeader({ title, icon: Icon, badge }) {
   );
 }
 
+function formatISODate(iso) {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function DateField({ label, value, rawValue, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || '');
+
+  const isISO = value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const formatted = formatISODate(value);
+  // Show the raw phrase only when it differs from the resolved ISO value
+  const showRaw = rawValue && isISO && rawValue.trim() !== value.trim();
+
+  const commit = () => {
+    setEditing(false);
+    if (draft !== (value || '')) onSave(draft || null);
+  };
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      {editing ? (
+        <input
+          autoFocus
+          type="text"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => e.key === 'Enter' && commit()}
+          className="text-sm border border-accent rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-accent"
+          placeholder="YYYY-MM-DD"
+        />
+      ) : (
+        <button
+          onClick={() => { setDraft(value || ''); setEditing(true); }}
+          className="text-sm text-left text-gray-800 hover:text-accent hover:bg-blue-50 px-1 py-0.5 rounded transition-colors min-h-[26px]"
+        >
+          {formatted || <span className="text-gray-300 italic">—</span>}
+        </button>
+      )}
+      {showRaw && !editing && (
+        <span className="text-xs text-gray-400 px-1">Customer said: &ldquo;{rawValue}&rdquo;</span>
+      )}
+    </div>
+  );
+}
+
 // Render a single field-pack entry as an editable control.
 function PackField({ field, vd, saveVertical }) {
   const value = vd[field.key];
@@ -136,6 +188,10 @@ function PackField({ field, vd, saveVertical }) {
   }
   if (field.type === 'enum') {
     return <div className={cls}><EditableEnum label={field.label} value={value} options={field.options || []} onSave={onSave} /></div>;
+  }
+  if (field.type === 'date') {
+    const rawValue = field.rawKey ? vd[field.rawKey] : null;
+    return <div className={cls}><DateField label={field.label} value={value} rawValue={rawValue} onSave={onSave} /></div>;
   }
   return (
     <div className={cls}>

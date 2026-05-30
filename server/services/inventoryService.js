@@ -77,4 +77,89 @@ function addDaysToISO(isoDate, days) {
   return d.toISOString().slice(0, 10);
 }
 
-module.exports = { autoAssignDumpster, parseRentalDays, addDaysToISO, normalizeSize };
+// Resolve a human-readable delivery date string to YYYY-MM-DD using the
+// call timestamp as "today". Returns null if the string cannot be resolved.
+function resolveDeliveryDate(rawDate, callTimestamp = new Date()) {
+  if (!rawDate) return null;
+
+  const raw = String(rawDate).trim();
+
+  // Already a valid ISO date — return as-is
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const lower = raw.toLowerCase();
+
+  // Anchor "today" to the date portion of callTimestamp (UTC, avoids DST drift)
+  const todayStr = callTimestamp.toISOString().slice(0, 10);
+  const today = new Date(todayStr + 'T00:00:00Z');
+  const todayDay = today.getUTCDay(); // 0=Sun … 6=Sat
+
+  function addDays(base, n) {
+    const d = new Date(base);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  if (lower === 'today') return addDays(today, 0);
+  if (lower === 'tomorrow') return addDays(today, 1);
+
+  const WEEKDAY = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+
+  // "next week" → the coming Monday
+  if (lower === 'next week') {
+    const delta = ((1 - todayDay + 7) % 7) + 7;
+    return addDays(today, delta);
+  }
+
+  // "next <weekday>"
+  const nextWd = lower.match(/^next\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/);
+  if (nextWd) {
+    const target = WEEKDAY[nextWd[1]];
+    // "next Monday" means the Monday AFTER the coming one.
+    // First find days until the next occurrence (same day → treat as 7, not 0),
+    // then add another 7 to land on the week after that.
+    const daysToNext = ((target - todayDay + 7) % 7) || 7;
+    return addDays(today, daysToNext + 7);
+  }
+
+  // "this <weekday>" or bare "<weekday>"
+  const bareOrThis = lower.match(/^(?:this\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/);
+  if (bareOrThis) {
+    const target = WEEKDAY[bareOrThis[1]];
+    // Same weekday as call → assume customer means NEXT week (not today)
+    const delta = ((target - todayDay + 7) % 7) || 7;
+    return addDays(today, delta);
+  }
+
+  // "Month Day[ordinal][ , Year]"  e.g. "June 3", "June 3rd", "Jun 3, 2026"
+  const MONTHS = {
+    january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2,
+    april: 3, apr: 3, may: 4, june: 5, jun: 5,
+    july: 6, jul: 6, august: 7, aug: 7, september: 8, sep: 8, sept: 8,
+    october: 9, oct: 9, november: 10, nov: 10, december: 11, dec: 11,
+  };
+  const monthDay = lower.match(/^([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?$/);
+  if (monthDay && MONTHS[monthDay[1]] !== undefined) {
+    const month = MONTHS[monthDay[1]];
+    const day = parseInt(monthDay[2], 10);
+    const year = monthDay[3] ? parseInt(monthDay[3], 10) : today.getUTCFullYear();
+    const candidate = new Date(Date.UTC(year, month, day));
+    // If no explicit year and the date is already past, bump to next year
+    if (!monthDay[3] && candidate < today) {
+      candidate.setUTCFullYear(today.getUTCFullYear() + 1);
+    }
+    return candidate.toISOString().slice(0, 10);
+  }
+
+  return null;
+}
+
+// Calculate pickup date from a resolved delivery ISO date and a rental duration string.
+function calculatePickupDate(deliveryDateISO, rentalDuration) {
+  if (!deliveryDateISO || !rentalDuration) return null;
+  const days = parseRentalDays(rentalDuration);
+  if (!days) return null;
+  return addDaysToISO(deliveryDateISO, days);
+}
+
+module.exports = { autoAssignDumpster, parseRentalDays, addDaysToISO, normalizeSize, resolveDeliveryDate, calculatePickupDate };

@@ -109,8 +109,8 @@ export const HOME_SERVICES_FIELD_PACKS = {
     industryFields: [
       { key: 'dumpsterSize', label: 'Dumpster Size', type: 'text' },
       { key: 'debrisType', label: 'Debris Type', type: 'text' },
-      { key: 'deliveryDate', label: 'Delivery Date', type: 'text' },
-      { key: 'pickupDate', label: 'Pickup Date', type: 'text' },
+      { key: 'deliveryDate', label: 'Delivery Date', type: 'date', rawKey: 'rawDeliveryDate' },
+      { key: 'pickupDate', label: 'Pickup Date', type: 'date' },
       { key: 'rentalDuration', label: 'Rental Duration', type: 'text' },
       { key: 'permitNeeded', label: 'Permit Needed', type: 'bool' },
       { key: 'deliveryAddress', label: 'Delivery Address', type: 'text', span: 2 },

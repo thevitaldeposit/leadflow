@@ -8,7 +8,7 @@ const { extractFromTranscript } = require('../services/extractionEngine');
 const { extractFromTranscriptVertical, VERTICAL_CONFIGS } = require('../services/verticalExtractionEngine');
 const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
-const { autoAssignDumpster, parseRentalDays, addDaysToISO } = require('../services/inventoryService');
+const { autoAssignDumpster, parseRentalDays, addDaysToISO, resolveDeliveryDate, calculatePickupDate } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
@@ -127,6 +127,39 @@ async function processRecording(payload) {
           const local = digits.slice(-10);
           commonFields.phone = `${local.slice(0, 3)}-${local.slice(3, 6)}-${local.slice(6)}`;
           commonFields.phone_confidence = 0.7;
+        }
+      }
+
+      // Post-extraction date resolution for home_services.
+      // Node.js date math is more reliable than asking the AI to compute ISO dates.
+      if (isHomeServices) {
+        // Prefer rawDeliveryDate; fall back to deliveryDate if it looks like a phrase not an ISO
+        const rawDateStr = verticalData.rawDeliveryDate
+          || (verticalData.deliveryDate && !/^\d{4}-\d{2}-\d{2}$/.test(verticalData.deliveryDate)
+              ? verticalData.deliveryDate : null);
+
+        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date());
+        if (resolvedISO) {
+          verticalData.deliveryDateISO = resolvedISO;
+          verticalData.deliveryDate = resolvedISO;
+          commonFields.delivery_date = resolvedISO;
+          // Preserve the original phrase so the UI can show "Customer said: Monday"
+          if (rawDateStr && !commonFields.raw_delivery_date) {
+            commonFields.raw_delivery_date = rawDateStr;
+            verticalData.rawDeliveryDate = rawDateStr;
+          }
+          console.log(`[webhook] Resolved delivery date "${rawDateStr}" → ${resolvedISO}`);
+        }
+
+        // Auto-calculate pickup date when it's missing but delivery + duration are known
+        const deliveryISO = commonFields.delivery_date || null;
+        if (deliveryISO && verticalData.rentalDuration && !commonFields.pickup_date) {
+          const pickupISO = calculatePickupDate(deliveryISO, verticalData.rentalDuration);
+          if (pickupISO) {
+            commonFields.pickup_date = pickupISO;
+            verticalData.pickupDate = pickupISO;
+            console.log(`[webhook] Calculated pickup date from "${verticalData.rentalDuration}" → ${pickupISO}`);
+          }
         }
       }
 
