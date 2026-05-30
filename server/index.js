@@ -10,6 +10,38 @@ const { init: initSocket } = require('./socket');
 // Initialize DB and run migrations on startup
 require('./db/migrations');
 
+// ── Database path audit ──────────────────────────────────────────────────────
+// On Railway, DATABASE_PATH must point to a persistent volume (e.g. /data/leadflow.db).
+// A path inside the project directory (./server/db/...) is wiped on every redeploy.
+const _dbPath = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : path.join(__dirname, 'db/leadflow.db');
+console.log(`[startup] Database path: ${_dbPath}`);
+if (!_dbPath.startsWith('/data')) {
+  console.warn('[startup] WARNING: DATABASE_PATH is not on a persistent volume.');
+  console.warn('[startup] Fix: add a Railway volume mounted at /data and set DATABASE_PATH=/data/leadflow.db');
+}
+
+// ── Startup backup ───────────────────────────────────────────────────────────
+// Best-effort JSON export written alongside the DB so a recoverable copy
+// exists even if the DB file is accidentally overwritten.
+try {
+  const _leadCount = db.prepare('SELECT COUNT(*) as n FROM leads').get().n;
+  if (_leadCount > 0) {
+    const _backupPath = path.join(path.dirname(_dbPath), 'leadflow-backup.json');
+    const _leads = db.prepare('SELECT * FROM leads').all();
+    let _dumpsters = [];
+    try { _dumpsters = db.prepare('SELECT * FROM dumpsters').all(); } catch { /* table may not exist yet */ }
+    fs.writeFileSync(
+      _backupPath,
+      JSON.stringify({ exportedAt: new Date().toISOString(), leadCount: _leadCount, leads: _leads, dumpsters: _dumpsters }, null, 2)
+    );
+    console.log(`[startup] Backed up ${_leadCount} leads → ${_backupPath}`);
+  }
+} catch (_backupErr) {
+  console.error('[startup] Backup failed (non-fatal):', _backupErr.message);
+}
+
 const _k = process.env.OPENAI_API_KEY || '';
 console.log(
   `[startup] OPENAI_API_KEY ${_k ? `loaded (${_k.slice(0, 8)}...${_k.slice(-4)}, len ${_k.length})` : 'MISSING'}`

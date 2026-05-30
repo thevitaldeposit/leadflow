@@ -13,6 +13,7 @@ import {
   Calendar,
   Package,
   CheckSquare,
+  Database,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Navbar from './Navbar';
@@ -28,6 +29,7 @@ const PAGE_TITLES = {
   '/inventory': 'Inventory',
   '/completed': 'Completed',
   '/leads': 'All Leads',
+  '/all-leads': 'All Leads (Unfiltered)',
   '/new/transcript': 'New Lead — Transcript',
   '/new/upsheet': 'New Lead — Up Sheet',
   '/new/audio': 'New Lead — Audio Recording',
@@ -211,6 +213,11 @@ export default function Layout({ children }) {
               </div>
             )}
           </div>
+
+          <NavLink to="/all-leads" className={linkClass}>
+            <Database size={18} />
+            All Leads
+          </NavLink>
 
           <NavLink to="/settings" className={linkClass}>
             <Settings size={18} />

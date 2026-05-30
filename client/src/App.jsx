@@ -8,6 +8,7 @@ import SettingsPage from './pages/SettingsPage';
 import InventoryPage from './pages/InventoryPage';
 import FilteredLeadsPage from './pages/FilteredLeadsPage';
 import SchedulePage from './pages/SchedulePage';
+import AllLeadsPage from './pages/AllLeadsPage';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/booked" element={<FilteredLeadsPage mode="booked" />} />
           <Route path="/schedule" element={<SchedulePage />} />
           <Route path="/completed" element={<FilteredLeadsPage mode="completed" />} />
+          <Route path="/all-leads" element={<AllLeadsPage />} />
         </Routes>
       </Layout>
     </BrowserRouter>

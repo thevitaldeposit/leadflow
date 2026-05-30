@@ -65,6 +65,17 @@ router.get('/', (req, res) => {
   }
 });
 
+// GET /api/leads/all — raw debug view: every lead, no filtering whatsoever
+router.get('/all', (req, res) => {
+  try {
+    const leads = db.prepare('SELECT * FROM leads ORDER BY created_at DESC').all();
+    res.json(leads);
+  } catch (err) {
+    console.error('GET /leads/all error:', err);
+    res.status(500).json({ error: 'Failed to retrieve leads' });
+  }
+});
+
 // GET /api/leads/:id
 router.get('/:id', (req, res) => {
   try {
