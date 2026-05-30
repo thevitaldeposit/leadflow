@@ -11,9 +11,25 @@ function parseExtractionResponse(rawText) {
   let text = rawText.trim();
 
   // Strip markdown code fences if present
-  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
 
-  return JSON.parse(text);
+  // Attempt 1: direct parse
+  try {
+    return JSON.parse(text);
+  } catch (_) {}
+
+  // Attempt 2: extract the outermost { ... } block in case there's surrounding prose
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+    } catch (_) {}
+  }
+
+  // All attempts failed — log the raw response so we can debug
+  console.error('[extraction] Model returned non-JSON. Raw response:\n', rawText.slice(0, 800));
+  throw new SyntaxError(`Extraction model returned non-JSON. First 200 chars: ${rawText.slice(0, 200)}`);
 }
 
 function flattenExtraction(extracted) {
@@ -130,12 +146,13 @@ async function extractFromTranscript(transcript) {
     messages: [
       {
         role: 'user',
-        content: `Extract all lead information from this sales call transcript:\n\n${transcript}`,
+        content: `Extract all lead information from this sales call transcript and respond with JSON only:\n\n${transcript}`,
       },
+      { role: 'assistant', content: '{' },
     ],
   });
 
-  const rawText = response.content[0].text;
+  const rawText = '{' + response.content[0].text;
   const extracted = parseExtractionResponse(rawText);
   return flattenExtraction(extracted);
 }
@@ -174,14 +191,15 @@ async function extractFromImage(imagePath) {
           },
           {
             type: 'text',
-            text: 'Extract all lead information from this handwritten up sheet image.',
+            text: 'Extract all lead information from this handwritten up sheet image and respond with JSON only.',
           },
         ],
       },
+      { role: 'assistant', content: '{' },
     ],
   });
 
-  const rawText = response.content[0].text;
+  const rawText = '{' + response.content[0].text;
   const extracted = parseExtractionResponse(rawText);
   return flattenExtraction(extracted);
 }

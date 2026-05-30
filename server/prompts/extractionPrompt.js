@@ -93,7 +93,7 @@ Array of any other notable information that does not fit structured fields. Exam
 
 ## OUTPUT FORMAT
 
-Return ONLY valid JSON. No markdown formatting, no backticks, no preamble, no explanation. Just the raw JSON object.
+Respond with ONLY a valid JSON object. No preamble, no explanation, no markdown code blocks, no backticks. Your entire response must be parseable by JSON.parse(). Start your response with { and end with }.
 
 {
   "extraction_type": "transcript" | "upsheet_image",

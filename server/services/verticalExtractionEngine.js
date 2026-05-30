@@ -185,15 +185,34 @@ Provide an overall confidence score (0-100) reflecting how complete and reliable
 5. If the call is clearly personal (chatting with friends/family, no business context), set confidence to 0 and callSummary to "Personal call — no business lead captured."
 
 ## OUTPUT FORMAT
-Return ONLY valid JSON matching this schema. No markdown, no backticks, no explanation.
+Respond with ONLY a valid JSON object. No preamble, no explanation, no markdown code blocks, no backticks. Your entire response must be parseable by JSON.parse(). Start your response with { and end with }.
 
 ${config.outputSchema}`;
 }
 
 function parseResponse(rawText) {
   let text = rawText.trim();
-  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
-  return JSON.parse(text);
+
+  // Strip markdown code fences (```json ... ``` or ``` ... ```)
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+
+  // Attempt 1: direct parse
+  try {
+    return JSON.parse(text);
+  } catch (_) {}
+
+  // Attempt 2: extract the outermost { ... } block in case there's surrounding prose
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+    } catch (_) {}
+  }
+
+  // All attempts failed — log the raw response so we can debug the model output
+  console.error('[extraction] Model returned non-JSON. Raw response:\n', rawText.slice(0, 800));
+  throw new SyntaxError(`Extraction model returned non-JSON. First 200 chars: ${rawText.slice(0, 200)}`);
 }
 
 function splitCustomerName(fullName) {
@@ -310,6 +329,8 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
   const { resolvedSubVertical } = resolveConfig(vertical, subVertical);
   const systemPrompt = buildSystemPrompt(vertical, subVertical);
 
+  const todayISO = new Date().toISOString().slice(0, 10);
+
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 2048,
@@ -317,12 +338,17 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     messages: [
       {
         role: 'user',
-        content: `Extract all lead information from this call transcript:\n\n${transcript}`,
+        content: `Today's date is ${todayISO}. Extract all lead information from this call transcript and respond with JSON only:\n\n${transcript}`,
       },
+      // Assistant prefill: forces the model to begin its response with '{',
+      // making it structurally impossible to emit conversational preamble.
+      // The API returns only the text AFTER this prefill, so we prepend '{' below.
+      { role: 'assistant', content: '{' },
     ],
   });
 
-  const rawText = response.content[0].text;
+  // Prepend the prefilled '{' that the API stripped from the completion
+  const rawText = '{' + response.content[0].text;
   const extracted = parseResponse(rawText);
 
   const { first, last } = splitCustomerName(extracted.customerName);
