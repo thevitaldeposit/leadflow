@@ -31,6 +31,9 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN delivery_date TEXT',
   'ALTER TABLE leads ADD COLUMN pickup_date TEXT',
   'ALTER TABLE leads ADD COLUMN estimated_revenue REAL',
+  // Phase 2: auto-booking detection
+  'ALTER TABLE leads ADD COLUMN auto_booked INTEGER DEFAULT 0',
+  'ALTER TABLE leads ADD COLUMN needs_dumpster_assignment INTEGER DEFAULT 0',
 ];
 
 function runMigrations() {

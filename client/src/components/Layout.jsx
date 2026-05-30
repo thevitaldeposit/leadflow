@@ -64,7 +64,18 @@ export default function Layout({ children }) {
         sub = [lead.voi_make, lead.voi_model].filter(Boolean).join(' ') || null;
       }
 
-      const toast = { id: ++toastIdCounter, title: name ? `New lead: ${name}` : 'New lead captured', sub, leadId: lead.id };
+      const isAutoBooked = lead.auto_booked === 1;
+      let toastTitle;
+      if (isAutoBooked) {
+        const size = vd.dumpsterSize ? `${vd.dumpsterSize} dumpster` : 'dumpster';
+        const date = lead.delivery_date ? `, delivery ${lead.delivery_date}` : '';
+        toastTitle = `Job auto-booked: ${name || 'Unknown'}`;
+        sub = `${size}${date}`;
+      } else {
+        toastTitle = name ? `New lead: ${name}` : 'New lead captured';
+      }
+
+      const toast = { id: ++toastIdCounter, title: toastTitle, sub, leadId: lead.id, autoBooked: isAutoBooked };
       setToasts(prev => [...prev, toast]);
 
       if (lead.vertical === 'home_services') {

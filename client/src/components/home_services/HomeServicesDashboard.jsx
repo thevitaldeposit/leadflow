@@ -325,11 +325,17 @@ export default function HomeServicesDashboard() {
       setLeads(prev => prev.some(l => l.id === lead.id) ? prev : [lead, ...prev]);
       playChime();
     };
+    const handleLeadUpdated = (lead) => {
+      if (lead.vertical !== 'home_services') return;
+      setLeads(prev => prev.map(l => l.id === lead.id ? lead : l));
+    };
     const handleReconnect = () => { loadRef.current().catch(console.error); };
     socket.on('new_lead', handleNewLead);
+    socket.on('lead_updated', handleLeadUpdated);
     socket.io.on('reconnect', handleReconnect);
     return () => {
       socket.off('new_lead', handleNewLead);
+      socket.off('lead_updated', handleLeadUpdated);
       socket.io.off('reconnect', handleReconnect);
     };
   }, []);

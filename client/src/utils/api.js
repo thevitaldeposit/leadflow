@@ -61,4 +61,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
   deleteDumpster: (id) => request(`/dumpsters/${id}`, { method: 'DELETE' }),
+
+  // Schedule
+  getAvailability: (deliveryDate, rentalDuration) =>
+    request(`/schedule/availability?delivery_date=${encodeURIComponent(deliveryDate)}&rental_duration=${encodeURIComponent(rentalDuration)}`),
+  getCalendar: (year, month) =>
+    request(`/schedule/calendar?year=${year}&month=${month}`),
 };

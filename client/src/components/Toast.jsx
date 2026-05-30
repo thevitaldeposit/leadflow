@@ -23,7 +23,7 @@ function Toast({ toast, onDismiss }) {
       onClick={handleClick}
       className="flex items-start gap-3 bg-white border border-gray-200 rounded-xl shadow-lg p-4 cursor-pointer hover:shadow-xl transition-shadow max-w-sm w-full animate-slide-in"
     >
-      <div className="flex-shrink-0 w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
+      <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${toast.autoBooked ? 'bg-emerald-500' : 'bg-accent'}`}>
         <Zap size={15} className="text-white" />
       </div>
       <div className="flex-1 min-w-0">

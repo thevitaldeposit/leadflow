@@ -8,6 +8,7 @@ const { extractFromTranscript } = require('../services/extractionEngine');
 const { extractFromTranscriptVertical, VERTICAL_CONFIGS } = require('../services/verticalExtractionEngine');
 const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
+const { autoAssignDumpster, parseRentalDays, addDaysToISO } = require('../services/inventoryService');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 
@@ -145,13 +146,37 @@ async function processRecording(payload) {
         confidence: confidence || 0,
       };
 
-      const lead = insertLead(leadData);
+      let lead = insertLead(leadData);
 
       // Vertical prompt sets confidence to 0 for personal/non-business calls
       if (!confidence) {
         db.prepare('UPDATE leads SET discarded = 1 WHERE id = ?').run(lead.id);
         console.log(`[webhook] Auto-discarded zero-confidence call (lead ${lead.id})`);
         return;
+      }
+
+      // Auto-assign inventory when AI detected a confirmed booking
+      if (verticalData.autoBooked === true && lead.delivery_date) {
+        let pickupDate = lead.pickup_date;
+        if (!pickupDate && verticalData.rentalDuration) {
+          const days = parseRentalDays(verticalData.rentalDuration);
+          if (days) pickupDate = addDaysToISO(lead.delivery_date, days);
+        }
+        if (pickupDate) {
+          if (!lead.pickup_date) {
+            db.prepare('UPDATE leads SET pickup_date = ?, updated_at = ? WHERE id = ?')
+              .run(pickupDate, new Date().toISOString(), lead.id);
+          }
+          const assignResult = autoAssignDumpster(lead.id, verticalData.dumpsterSize, lead.delivery_date, pickupDate);
+          if (!assignResult.assigned) {
+            console.log(`[webhook] Auto-booked lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching'} dumpster available`);
+          } else {
+            console.log(`[webhook] Auto-assigned dumpster ${assignResult.dumpster.asset_number} to lead ${lead.id}`);
+          }
+        } else {
+          db.prepare('UPDATE leads SET needs_dumpster_assignment = 1 WHERE id = ?').run(lead.id);
+        }
+        lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
       }
 
       const io = getIO();

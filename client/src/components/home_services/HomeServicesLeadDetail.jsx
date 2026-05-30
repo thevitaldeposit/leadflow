@@ -7,6 +7,7 @@ import {
   Check,
   X,
   Sparkles,
+  Zap,
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import {
@@ -216,8 +217,64 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   const displayedCustomerName = vd.customerName
     || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ');
 
+  const isAutoBooked = lead.auto_booked === 1;
+  const bookingSignals = vd.bookingSignalsDetected || [];
+  const bookingConfidence = vd.bookingConfidence || null;
+
+  const SIGNAL_LABELS = {
+    price_agreed: 'Price agreed',
+    size_confirmed: 'Size confirmed',
+    delivery_date_set: 'Delivery date set',
+    location_given: 'Location given',
+    payment_intent: 'Payment intent',
+  };
+
   return (
     <div className="space-y-4">
+      {/* Auto-Booked badge */}
+      {isAutoBooked && (
+        <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+          <Zap size={16} className="text-emerald-600 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-emerald-800">Auto-Booked</p>
+            <p className="text-xs text-emerald-600">All 5 booking signals detected — job was automatically confirmed from the call.</p>
+          </div>
+          {bookingSignals.length > 0 && (
+            <div className="ml-auto flex flex-wrap gap-1 justify-end">
+              {bookingSignals.map(s => (
+                <span key={s} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                  {SIGNAL_LABELS[s] || s}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {!isAutoBooked && bookingConfidence && bookingConfidence !== 'none' && bookingSignals.length > 0 && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <Zap size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800">
+              Booking signals detected
+              <span className="ml-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300">
+                {bookingConfidence}
+              </span>
+            </p>
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {['price_agreed', 'size_confirmed', 'delivery_date_set', 'location_given', 'payment_intent'].map(s => (
+                <span key={s} className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                  bookingSignals.includes(s)
+                    ? 'bg-amber-100 text-amber-700 border-amber-300'
+                    : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                }`}>
+                  {SIGNAL_LABELS[s]}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Job Status + Outcome + Follow-up controls */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
         <div className="grid grid-cols-2 gap-4">

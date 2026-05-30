@@ -8,6 +8,7 @@ const { transcribe } = require('../services/transcriptionService');
 const { extractFromTranscriptVertical } = require('../services/verticalExtractionEngine');
 const { sendToAll } = require('../services/apns');
 const { getIO } = require('../socket');
+const { autoAssignDumpster, parseRentalDays, addDaysToISO } = require('../services/inventoryService');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -114,7 +115,33 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
       confidence: confidence || 0,
     };
 
-    const lead = insertLead(leadData);
+    let lead = insertLead(leadData);
+
+    // Auto-assign inventory when AI detected a confirmed booking
+    if (verticalData.autoBooked === true && lead.delivery_date) {
+      let pickupDate = lead.pickup_date;
+      if (!pickupDate && verticalData.rentalDuration) {
+        const days = parseRentalDays(verticalData.rentalDuration);
+        if (days) pickupDate = addDaysToISO(lead.delivery_date, days);
+      }
+      if (pickupDate) {
+        // Store computed pickup_date if we derived it
+        if (!lead.pickup_date) {
+          db.prepare('UPDATE leads SET pickup_date = ?, updated_at = ? WHERE id = ?')
+            .run(pickupDate, new Date().toISOString(), lead.id);
+        }
+        const assignResult = autoAssignDumpster(lead.id, verticalData.dumpsterSize, lead.delivery_date, pickupDate);
+        if (!assignResult.assigned) {
+          console.log(`[upload] Auto-booked lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching'} dumpster available for ${lead.delivery_date}→${pickupDate}`);
+        } else {
+          console.log(`[upload] Auto-assigned dumpster ${assignResult.dumpster.asset_number} to lead ${lead.id}`);
+        }
+      } else {
+        db.prepare('UPDATE leads SET needs_dumpster_assignment = 1 WHERE id = ?').run(lead.id);
+      }
+      // Re-fetch lead to include any assignment changes
+      lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+    }
 
     const io = getIO();
     if (io) io.emit('new_lead', lead);

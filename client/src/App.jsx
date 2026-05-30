@@ -7,6 +7,7 @@ import LeadListPage from './pages/LeadListPage';
 import SettingsPage from './pages/SettingsPage';
 import InventoryPage from './pages/InventoryPage';
 import FilteredLeadsPage from './pages/FilteredLeadsPage';
+import SchedulePage from './pages/SchedulePage';
 
 export default function App() {
   return (
@@ -23,7 +24,7 @@ export default function App() {
           <Route path="/action-queue" element={<FilteredLeadsPage mode="action_queue" />} />
           <Route path="/opportunities" element={<FilteredLeadsPage mode="opportunities" />} />
           <Route path="/booked" element={<FilteredLeadsPage mode="booked" />} />
-          <Route path="/schedule" element={<FilteredLeadsPage mode="schedule" />} />
+          <Route path="/schedule" element={<SchedulePage />} />
           <Route path="/completed" element={<FilteredLeadsPage mode="completed" />} />
         </Routes>
       </Layout>

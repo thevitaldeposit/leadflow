@@ -58,13 +58,31 @@ const HOME_SERVICES_ACTION_RULE = `ACTION INTELLIGENCE: You must also produce si
 - outcome: REQUIRED, never null. Use: "quote_requested" if customer asked for a price, "quote_sent" if a price was given on the call, "booked" if customer agreed to price AND date, "not_serviceable" if outside service area or wrong service. Default: "quote_requested".
 - estimatedRevenue: numeric dollars (no currency symbol) parsed from quotedPrice if a clear price was discussed, otherwise null. If quotedPrice is a range ("$300-$400"), use the midpoint.`;
 
+const BOOKING_SIGNAL_RULE = `BOOKING DETECTION: After extracting all fields, evaluate whether a booking occurred by checking for these 5 signals:
+1. price_agreed — The customer explicitly accepted a quoted price (e.g. "sounds good", "that works", "ok", "I'll take it", "let's do it", "perfect", "deal").
+2. size_confirmed — A specific dumpster size was discussed and not rejected.
+3. delivery_date_set — A specific delivery date or day was given (e.g. "Monday", "June 3rd", "next Tuesday").
+4. location_given — A delivery address or at minimum a city/neighborhood was provided.
+5. payment_intent — Any signal that the customer intends to pay: "send me a payment link", "I'll pay when it arrives", "you can charge my card", "I'll pay online", "cash on delivery", "send invoice", "I'll venmo you", "call me back with payment", "I'll call back with my card", or any equivalent.
+
+Set bookingSignalsDetected to an array of all signal keys found (e.g. ["price_agreed", "size_confirmed"]).
+Set bookingConfidence based on what was found:
+- "confirmed" if ALL 5 signals are present → set autoBooked to true, set outcome to "booked"
+- "likely" if signals 1-4 are present but payment_intent is missing → set autoBooked to false, set outcome to "booked", set intentLevel to "high", set aiRecommendation to "Confirm payment method — customer agreed to price, size, date and location"
+- "possible" if 2-3 signals are present → set autoBooked to false, outcome based on other signals
+- "none" if fewer than 2 signals → set autoBooked to false
+
+Set autoBooked to true ONLY when bookingConfidence is "confirmed".`;
+
 const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
   dumpster_rental: {
     promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency, This Week if this week, Next Week if next week, otherwise Flexible.
 
 ${HOME_SERVICES_NAME_RULE}
 
-${HOME_SERVICES_ACTION_RULE}`,
+${HOME_SERVICES_ACTION_RULE}
+
+${BOOKING_SIGNAL_RULE}`,
     outputSchema: `{
   "customerName": string | null,
   "customerPhone": string | null,
@@ -89,6 +107,9 @@ ${HOME_SERVICES_ACTION_RULE}`,
   "aiRecommendation": string | null,
   "outcome": "quote_requested" | "quote_sent" | "booked" | "not_serviceable",
   "estimatedRevenue": number | null,
+  "bookingSignalsDetected": array of zero or more from ["price_agreed", "size_confirmed", "delivery_date_set", "location_given", "payment_intent"],
+  "bookingConfidence": "confirmed" | "likely" | "possible" | "none",
+  "autoBooked": boolean,
   "notes": string | null,
   "confidence": number (0-100),
   "callSummary": string
@@ -330,8 +351,26 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
       verticalSpecific.outcome = 'quote_requested';
     }
 
-    // job_status always starts as inquiry for new leads
-    verticalSpecific.job_status = 'inquiry';
+    // Booking signal logic: override job_status and intent based on bookingConfidence
+    const bc = verticalSpecific.bookingConfidence || 'none';
+    if (bc === 'confirmed' && verticalSpecific.autoBooked === true) {
+      verticalSpecific.job_status = 'booked';
+      verticalSpecific.outcome = 'booked';
+    } else if (bc === 'likely') {
+      verticalSpecific.job_status = 'opportunity';
+      verticalSpecific.intentLevel = 'high';
+      if (!verticalSpecific.aiRecommendation) {
+        verticalSpecific.aiRecommendation = 'Confirm payment method — customer agreed to price, size, date and location';
+      }
+    } else if (bc === 'possible') {
+      verticalSpecific.job_status = 'opportunity';
+    } else {
+      // none or unrecognized
+      verticalSpecific.job_status = 'inquiry';
+    }
+
+    // Normalize autoBooked to a strict boolean
+    verticalSpecific.autoBooked = bc === 'confirmed' && verticalSpecific.autoBooked === true;
   }
 
   let phone = extracted.customerPhone;
@@ -359,6 +398,8 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     if (verticalSpecific.rawDeliveryDate) flatExtra.raw_delivery_date = verticalSpecific.rawDeliveryDate;
     if (verticalSpecific.deliveryDateISO) flatExtra.delivery_date = verticalSpecific.deliveryDateISO;
     if (typeof verticalSpecific.estimatedRevenue === 'number') flatExtra.estimated_revenue = verticalSpecific.estimatedRevenue;
+    if (verticalSpecific.autoBooked === true) flatExtra.auto_booked = 1;
+    if (verticalSpecific.pickupDate) flatExtra.pickup_date = verticalSpecific.pickupDate;
   }
 
   return {
