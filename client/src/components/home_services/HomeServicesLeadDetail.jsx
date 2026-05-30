@@ -7,14 +7,7 @@ import {
   Check,
   X,
   Sparkles,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Edit3,
 } from 'lucide-react';
-import HomeServicesStatusBadge from './HomeServicesStatusBadge';
-import UrgencyBadge from './UrgencyBadge';
-import IntentBadge from './IntentBadge';
 import { api } from '../../utils/api';
 import {
   HOME_SERVICES_STATUSES,
@@ -25,7 +18,6 @@ import {
   parseVerticalData,
   getFieldPack,
   getSubVertical,
-  getLeadActionState,
 } from '../../utils/verticalConfig';
 
 function EditableText({ label, value, onSave, multiline = false }) {
@@ -177,13 +169,15 @@ function FollowUpEditor({ value, onSave }) {
   );
 }
 
+// Body of the Home Services lead detail page — everything *below* the sticky
+// customer header (rendered separately by LeadDetailPage). Keeps responsibility
+// narrow: editable form fields and source data.
 export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) {
   const [lead, setLead] = useState(initialLead);
   const [saving, setSaving] = useState(false);
   const vd = parseVerticalData(lead);
   const subVertical = getSubVertical(lead);
   const pack = getFieldPack(lead);
-  const state = getLeadActionState(lead);
 
   const applyUpdate = async (body) => {
     setSaving(true);
@@ -221,62 +215,8 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   const displayedCustomerName = vd.customerName
     || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ');
 
-  const summary = state.summaryDetail || vd.serviceType || null;
-
   return (
     <div className="space-y-4">
-      {/* TOP: Customer header + sticky action bar — action first, data second. */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden sticky top-0 z-10">
-        <div className="p-4 border-b border-gray-100">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="min-w-0">
-              <h2 className="text-xl font-bold text-gray-900">{displayedCustomerName || 'Unknown Customer'}</h2>
-              {summary && <p className="text-sm text-gray-600 mt-0.5">{summary}</p>}
-            </div>
-            <div className="flex items-center gap-1.5 flex-wrap justify-end">
-              <IntentBadge value={state.intent} size="md" />
-              <UrgencyBadge value={vd.urgency} size="md" />
-              <HomeServicesStatusBadge status={lead.status} size="lg" />
-            </div>
-          </div>
-          {state.recommendation && (
-            <div className="mt-3 flex items-start gap-2 text-sm text-gray-700 bg-blue-50 px-3 py-2 rounded-lg">
-              <Sparkles size={14} className="text-accent mt-0.5 flex-shrink-0" />
-              <span>{state.recommendation}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Sticky action bar — Mark Booked, Mark Lost, Set Follow Up, Edit */}
-        <div className="px-4 py-3 bg-white flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => applyUpdate({ status: 'booked' })}
-            disabled={saving}
-            className="flex items-center gap-1.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
-          >
-            <CheckCircle2 size={14} /> Mark Booked
-          </button>
-          <button
-            onClick={() => applyUpdate({ status: 'lost' })}
-            disabled={saving}
-            className="flex items-center gap-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
-          >
-            <XCircle size={14} /> Mark Lost
-          </button>
-          <button
-            onClick={() => applyUpdate({ status: 'needs_follow_up' })}
-            disabled={saving}
-            className="flex items-center gap-1.5 text-sm font-medium text-amber-800 bg-amber-100 hover:bg-amber-200 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
-          >
-            <Clock size={14} /> Set Follow Up
-          </button>
-          <div className="flex items-center gap-1.5 ml-auto text-xs text-gray-400">
-            <Edit3 size={12} />
-            <span>Edit fields below</span>
-          </div>
-        </div>
-      </div>
-
       {/* Status + Outcome + Follow-up controls */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
         <div className="grid grid-cols-2 gap-4">

@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Trash2, CheckCircle, Mic, ChevronDown, ChevronUp } from 'lucide-react';
 import LeadCardExpanded from '../components/LeadCardExpanded';
 import HomeServicesLeadDetail from '../components/home_services/HomeServicesLeadDetail';
+import HomeServicesStickyHeader from '../components/home_services/HomeServicesStickyHeader';
 import { api } from '../utils/api';
 
 function AudioSection({ lead }) {
@@ -112,6 +113,53 @@ export default function LeadDetailPage() {
   const isAudio = lead.extraction_type === 'audio_upload' || lead.extraction_type === 'phone_auto' || lead.extraction_type === 'ios_callkit';
   const isHomeServices = lead.vertical === 'home_services';
 
+  // Home Services and Auto Dealer use different page layouts. Home Services
+  // needs the sticky customer header as an immediate child of the page's
+  // scrollable wrapper so it stays stuck through ALL content (cards, audio,
+  // transcript). Auto Dealer keeps its original chrome.
+  if (isHomeServices) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <HomeServicesStickyHeader lead={lead} onUpdate={setLead} />
+
+        {/* Secondary top bar — back / delete. Lives below the sticky so it
+            scrolls away with the rest of the page (the sticky carries the
+            primary actions). */}
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
+          >
+            <ArrowLeft size={15} />
+            Back
+          </button>
+          <div className="flex items-center gap-2">
+            {isFresh && (
+              <div className="flex items-center gap-1.5 text-sm text-green-600 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">
+                <CheckCircle size={14} />
+                Lead extracted and saved
+              </div>
+            )}
+            <button
+              onClick={handleDelete}
+              className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              <Trash2 size={14} />
+              Delete Lead
+            </button>
+          </div>
+        </div>
+
+        <HomeServicesLeadDetail lead={lead} onUpdate={setLead} />
+
+        <p className="text-xs text-gray-400 px-1 mt-4">
+          {extractionLabel(lead.extraction_type)} · {new Date(lead.created_at).toLocaleString()}
+        </p>
+        {isAudio && <div className="mt-3"><AudioSection lead={lead} /></div>}
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       {/* Top bar */}
@@ -140,30 +188,15 @@ export default function LeadDetailPage() {
         </div>
       </div>
 
-      {/* Header — suppressed for Home Services since its sticky header carries
-          the customer name and action bar at the top of the detail body. */}
-      {!isHomeServices && (
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">{fullName}</h2>
-          <p className="text-sm text-gray-400 mt-0.5">
-            {extractionLabel(lead.extraction_type)} · {new Date(lead.created_at).toLocaleString()}
-          </p>
-        </div>
-      )}
-
-      {isHomeServices
-        ? <HomeServicesLeadDetail lead={lead} onUpdate={setLead} />
-        : <LeadCardExpanded lead={lead} onUpdate={setLead} />}
-
-      {/* Source metadata + audio + transcript for audio leads. For Home Services
-          these live below the action-focused detail body so the day-driving
-          controls stay top-of-screen. */}
-      {isHomeServices && (
-        <p className="text-xs text-gray-400 px-1">
+      <div>
+        <h2 className="text-xl font-bold text-gray-900">{fullName}</h2>
+        <p className="text-sm text-gray-400 mt-0.5">
           {extractionLabel(lead.extraction_type)} · {new Date(lead.created_at).toLocaleString()}
         </p>
-      )}
+      </div>
+
       {isAudio && <AudioSection lead={lead} />}
+      <LeadCardExpanded lead={lead} onUpdate={setLead} />
     </div>
   );
 }

@@ -3,6 +3,15 @@
 @tailwind utilities;
 
 @layer base {
+  html, body {
+    height: 100%;
+    /* Lock html/body so the only scrollable area is Layout's <main>. Without
+       this, sub-pixel rounding or oversized inner content can occasionally
+       push the body past the viewport and produce a second scrollbar next to
+       the intended one. */
+    overflow: hidden;
+  }
+
   body {
     @apply bg-app-bg text-gray-900 antialiased;
     margin: 0;
