@@ -22,10 +22,15 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN vertical_data TEXT',
   'ALTER TABLE leads ADD COLUMN confidence INTEGER DEFAULT 0',
   'ALTER TABLE leads ADD COLUMN sub_vertical TEXT',
-  // Home Services Phase 1 redesign: outcome lives alongside status so users can
-  // track funnel stage (Quote Sent, Appointment Scheduled, etc.) independently
-  // of pipeline state (Needs Follow Up, Booked, Lost).
+  // Home Services Phase 1 redesign
   'ALTER TABLE leads ADD COLUMN outcome TEXT',
+  // Phase 2: full job lifecycle model
+  'ALTER TABLE leads ADD COLUMN job_status TEXT DEFAULT \'inquiry\'',
+  'ALTER TABLE leads ADD COLUMN assigned_dumpster_id INTEGER',
+  'ALTER TABLE leads ADD COLUMN raw_delivery_date TEXT',
+  'ALTER TABLE leads ADD COLUMN delivery_date TEXT',
+  'ALTER TABLE leads ADD COLUMN pickup_date TEXT',
+  'ALTER TABLE leads ADD COLUMN estimated_revenue REAL',
 ];
 
 function runMigrations() {
@@ -70,6 +75,20 @@ function runMigrations() {
       call_sid TEXT PRIMARY KEY,
       from_number TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Dumpster inventory for Phase 2
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dumpsters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_number TEXT NOT NULL UNIQUE,
+      size TEXT,
+      status TEXT DEFAULT 'available',
+      current_job_id INTEGER,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 

@@ -3,7 +3,7 @@ export const VERTICALS = [
   { id: 'home_services', label: 'Home Services' },
 ];
 
-// Pipeline state — answers "where does this lead sit in my day?"
+// Legacy pipeline state — kept for backward compatibility; job_status drives Phase 2 UI.
 export const HOME_SERVICES_STATUSES = [
   { value: 'new', label: 'New' },
   { value: 'needs_follow_up', label: 'Needs Follow Up' },
@@ -13,6 +13,34 @@ export const HOME_SERVICES_STATUSES = [
   { value: 'spam', label: 'Spam' },
 ];
 
+// Phase 2: full job lifecycle
+export const JOB_STATUSES = [
+  { value: 'inquiry', label: 'Inquiry' },
+  { value: 'opportunity', label: 'Opportunity' },
+  { value: 'booked', label: 'Booked' },
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'delivered', label: 'Delivered' },
+  { value: 'active_rental', label: 'Active Rental' },
+  { value: 'picked_up', label: 'Picked Up' },
+  { value: 'completed', label: 'Completed' },
+  // Non-job terminal states
+  { value: 'lost', label: 'Lost' },
+  { value: 'spam', label: 'Spam' },
+];
+
+export const JOB_STATUS_STYLES = {
+  inquiry: 'bg-blue-100 text-blue-700 border-blue-200',
+  opportunity: 'bg-amber-100 text-amber-700 border-amber-200',
+  booked: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  scheduled: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  delivered: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  active_rental: 'bg-violet-100 text-violet-700 border-violet-200',
+  picked_up: 'bg-teal-100 text-teal-700 border-teal-200',
+  completed: 'bg-gray-100 text-gray-700 border-gray-200',
+  lost: 'bg-red-100 text-red-500 border-red-200',
+  spam: 'bg-gray-100 text-gray-400 border-gray-200',
+};
+
 export const HOME_SERVICES_STATUS_STYLES = {
   new: 'bg-blue-100 text-blue-700 border-blue-200',
   needs_follow_up: 'bg-amber-100 text-amber-700 border-amber-200',
@@ -20,10 +48,15 @@ export const HOME_SERVICES_STATUS_STYLES = {
   booked: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   lost: 'bg-gray-100 text-gray-500 border-gray-200',
   spam: 'bg-gray-100 text-gray-400 border-gray-200',
-  // Legacy values still in DB — keep visible during transition.
+  // Legacy values still in DB
   contacted: 'bg-yellow-100 text-yellow-700 border-yellow-200',
   quote_sent: 'bg-purple-100 text-purple-700 border-purple-200',
 };
+
+// Returns the display label for a job_status value
+export function getJobStatusLabel(jobStatus) {
+  return JOB_STATUSES.find(s => s.value === jobStatus)?.label || jobStatus || 'Inquiry';
+}
 
 // Funnel outcome — answers "what stage of the sale is this?"
 export const HOME_SERVICES_OUTCOMES = [
@@ -156,10 +189,12 @@ export function parseVerticalData(lead) {
 
 const MS_HOUR = 60 * 60 * 1000;
 const MS_DAY = 24 * MS_HOUR;
-// Going-cold threshold: 48 hours with no contact, per spec.
 const STALE_THRESHOLD_MS = 48 * MS_HOUR;
-// Non-actionable terminal states.
-const TERMINAL_STATUSES = new Set(['booked', 'lost', 'spam']);
+
+// Job statuses where the job is confirmed — no longer a sales lead
+export const OPERATIONAL_JOB_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up', 'completed']);
+// Non-actionable terminal states
+export const TERMINAL_JOB_STATUSES = new Set(['completed', 'lost', 'spam']);
 
 function isSameLocalDay(a, b) {
   return a.getFullYear() === b.getFullYear()
@@ -183,8 +218,16 @@ function isSameLocalDay(a, b) {
 // }
 export function getLeadActionState(lead, now = new Date()) {
   const vd = parseVerticalData(lead);
+  const jobStatus = lead?.job_status || vd.job_status || null;
   const status = lead?.status || 'new';
-  const isActive = !TERMINAL_STATUSES.has(status);
+  // isActive: not terminal — show in dashboard priority buckets
+  const isActive = jobStatus
+    ? !TERMINAL_JOB_STATUSES.has(jobStatus)
+    : !new Set(['booked', 'lost', 'spam']).has(status);
+  // isOpportunity: pre-booked, in the sales funnel (not yet confirmed as a job)
+  const isOpportunity = jobStatus
+    ? !OPERATIONAL_JOB_STATUSES.has(jobStatus) && !TERMINAL_JOB_STATUSES.has(jobStatus)
+    : isActive;
 
   // Intent: prefer AI's call, fall back to urgency/emergency cues.
   let intent = INTENT_VALUES.includes(vd.intentLevel) ? vd.intentLevel : null;
@@ -208,7 +251,7 @@ export function getLeadActionState(lead, now = new Date()) {
   const followUpDueToday = !!(followUpDate && isActive && followUpDate <= endOfDay(now));
   const followUpOverdue = !!(followUpDate && isActive && followUpDate < startOfDay(now));
   // Cold-going leads: 48h old, no follow-up resolution, still active, never contacted.
-  const neverContacted = status === 'new';
+  const neverContacted = (jobStatus === 'inquiry' || jobStatus === null) && status === 'new';
   const stale = isActive && neverContacted && ageMs >= STALE_THRESHOLD_MS;
 
   // Recommendation: AI-provided sentence wins; otherwise derive a sensible default.
@@ -265,6 +308,8 @@ export function getLeadActionState(lead, now = new Date()) {
     else if (nums && nums.length >= 2) estimatedRevenue = (Number(nums[0]) + Number(nums[1])) / 2;
   }
 
+  const isOperational = jobStatus ? OPERATIONAL_JOB_STATUSES.has(jobStatus) : false;
+
   return {
     intent,
     followUpDate,
@@ -277,6 +322,9 @@ export function getLeadActionState(lead, now = new Date()) {
     summaryDetail,
     estimatedRevenue,
     isActive,
+    isOpportunity,
+    isOperational,
+    jobStatus,
   };
 }
 

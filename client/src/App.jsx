@@ -5,6 +5,8 @@ import NewLeadPage from './pages/NewLeadPage';
 import LeadDetailPage from './pages/LeadDetailPage';
 import LeadListPage from './pages/LeadListPage';
 import SettingsPage from './pages/SettingsPage';
+import InventoryPage from './pages/InventoryPage';
+import FilteredLeadsPage from './pages/FilteredLeadsPage';
 
 export default function App() {
   return (
@@ -17,6 +19,12 @@ export default function App() {
           <Route path="/leads" element={<LeadListPage />} />
           <Route path="/leads/:id" element={<LeadDetailPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/action-queue" element={<FilteredLeadsPage mode="action_queue" />} />
+          <Route path="/opportunities" element={<FilteredLeadsPage mode="opportunities" />} />
+          <Route path="/booked" element={<FilteredLeadsPage mode="booked" />} />
+          <Route path="/schedule" element={<FilteredLeadsPage mode="schedule" />} />
+          <Route path="/completed" element={<FilteredLeadsPage mode="completed" />} />
         </Routes>
       </Layout>
     </BrowserRouter>

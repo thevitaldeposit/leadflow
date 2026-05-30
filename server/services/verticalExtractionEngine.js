@@ -49,10 +49,13 @@ const HOME_SERVICES_NAME_RULE = `IMPORTANT NAME RULE: customerName must be extra
 const HOME_SERVICES_ACTION_RULE = `ACTION INTELLIGENCE: You must also produce signals that help the owner know what to do next.
 
 - intentLevel: "high" if the customer requested pricing, a delivery date, an appointment, or availability; "warm" if the customer expressed interest but made no specific request; "cold" if the customer said they were comparing prices, just gathering info, or non-committal.
-- followUpSignal: one of "callback_today" (customer asked to be called back today / ASAP), "callback_tomorrow" (customer said tomorrow), "callback_next_week" (customer said next week), "comparing_prices" (customer is shopping around or needs to think about it), "before_delivery" (customer requested a specific future delivery/service date — set followUpAnchorDate to that date in ISO YYYY-MM-DD), "next_business_day" (high intent but no explicit callback request), "unknown" (no clear signal).
-- followUpAnchorDate: the specific date the customer mentioned, in YYYY-MM-DD, if relevant. Otherwise null.
+- followUpSignal: one of "callback_today" (customer said ASAP/today/emergency), "callback_tomorrow" (customer said tomorrow), "callback_next_week" (customer said next week or call me back [day]), "comparing_prices" (customer is shopping around or needs to think about it), "before_delivery" (customer gave a specific future delivery/service date — set followUpAnchorDate to that date in ISO YYYY-MM-DD), "next_business_day" (high intent but no explicit callback request), "unknown" (no clear signal).
+- followUpAnchorDate: the specific date the customer mentioned, in YYYY-MM-DD, if relevant. Otherwise null. Resolve relative dates ("Monday", "next Friday", "June 3") to absolute ISO dates using the current date context.
+- rawDeliveryDate: the exact phrase the customer used to describe when they want delivery (e.g. "Monday", "next week", "June 3rd"). Null if not mentioned.
+- deliveryDateISO: the resolved ISO date (YYYY-MM-DD) for delivery, calculated from rawDeliveryDate. Null if not mentioned.
 - followUpReason: one short sentence explaining why this follow-up timing was chosen (e.g. "Customer requested callback tomorrow morning").
-- aiRecommendation: one concise action sentence the owner can read at a glance (e.g. "Call today — customer requested pricing and a delivery date").
+- aiRecommendation: one concise action sentence the owner can read at a glance (e.g. "Call back today — customer agreed to $545 for Monday delivery").
+- outcome: REQUIRED, never null. Use: "quote_requested" if customer asked for a price, "quote_sent" if a price was given on the call, "booked" if customer agreed to price AND date, "not_serviceable" if outside service area or wrong service. Default: "quote_requested".
 - estimatedRevenue: numeric dollars (no currency symbol) parsed from quotedPrice if a clear price was discussed, otherwise null. If quotedPrice is a range ("$300-$400"), use the midpoint.`;
 
 const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
@@ -69,6 +72,8 @@ ${HOME_SERVICES_ACTION_RULE}`,
   "deliveryAddress": string | null,
   "dumpsterSize": string | null,
   "deliveryDate": string | null,
+  "rawDeliveryDate": string | null,
+  "deliveryDateISO": string | null,
   "pickupDate": string | null,
   "rentalDuration": string | null,
   "debrisType": string | null,
@@ -82,6 +87,7 @@ ${HOME_SERVICES_ACTION_RULE}`,
   "followUpAnchorDate": string | null,
   "followUpReason": string | null,
   "aiRecommendation": string | null,
+  "outcome": "quote_requested" | "quote_sent" | "booked" | "not_serviceable",
   "estimatedRevenue": number | null,
   "notes": string | null,
   "confidence": number (0-100),
@@ -215,26 +221,42 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, no
 
   switch (signal) {
     case 'callback_today':
+      // ASAP / today / emergency → 2 hours from call
       date = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-      reason = reason || 'Customer requested a callback today';
+      reason = reason || 'Customer requested a callback today — follow up within 2 hours';
       break;
     case 'callback_tomorrow':
       date = atHour(addDays(now, 1), 9, 0);
-      reason = reason || 'Customer requested a callback tomorrow';
+      reason = reason || 'Customer requested a callback tomorrow at 9am';
       break;
     case 'callback_next_week':
       date = nextMondayAt9(now);
       reason = reason || 'Customer requested a callback next week';
       break;
     case 'comparing_prices':
-      date = new Date(now.getTime() + 48 * 60 * 60 * 1000);
-      reason = reason || 'Customer is comparing prices — follow up in 48 hours';
+      // Comparing prices → 3 days (not 2 days per spec)
+      date = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+      reason = reason || 'Customer is comparing prices — follow up in 3 days';
       break;
     case 'before_delivery': {
       const anchor = parseAnchor(anchorDate);
       if (anchor) {
-        date = atHour(addDays(anchor, -1), 9, 0);
-        reason = reason || `Confirm the day before scheduled service (${anchorDate})`;
+        // Days until delivery determines lead time
+        const daysUntil = Math.round((anchor - now) / (24 * 60 * 60 * 1000));
+        if (daysUntil <= 14) {
+          // 1-2 weeks away → follow up 5 days before project date
+          date = atHour(addDays(anchor, -5), 9, 0);
+          reason = reason || `Project is ${daysUntil} days away — follow up 5 days before (${anchorDate})`;
+        } else {
+          // 3+ weeks away → follow up 7 days before project date
+          date = atHour(addDays(anchor, -7), 9, 0);
+          reason = reason || `Project is ${daysUntil} days away — follow up 7 days before (${anchorDate})`;
+        }
+        // Don't schedule follow-up in the past
+        if (date < now) {
+          date = nextBusinessDayAt9(now);
+          reason = reason || `Delivery soon — follow up the next business day`;
+        }
       } else {
         date = nextBusinessDayAt9(now);
         reason = reason || 'Follow up to confirm service date';
@@ -243,7 +265,7 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, no
     }
     case 'next_business_day':
       date = nextBusinessDayAt9(now);
-      reason = reason || 'High intent — follow up the next business day';
+      reason = reason || 'High intent — follow up the next business day at 9am';
       break;
     case 'unknown':
     case null:
@@ -251,10 +273,11 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, no
     default:
       if (intentLevel === 'high') {
         date = nextBusinessDayAt9(now);
-        reason = reason || 'High intent lead — follow up the next business day';
+        reason = reason || 'High intent lead — follow up the next business day at 9am';
       } else {
-        date = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-        reason = reason || 'No explicit follow-up signal — default to 24 hours';
+        // No signal → 2 business days at 9am
+        date = nextBusinessDayAt9(nextBusinessDayAt9(now));
+        reason = reason || 'No explicit follow-up signal — follow up in 2 business days';
       }
       break;
   }
@@ -291,6 +314,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
 
   // Home Services: compute the absolute follow-up date from the AI signal so
   // the dashboard's prioritization logic can sort on a single timestamp.
+  // Also ensure outcome is always set and job_status defaults to 'inquiry'.
   if (vertical === 'home_services') {
     const { followUpDate, followUpReason } = computeFollowUpDate(
       verticalSpecific.followUpSignal,
@@ -300,6 +324,14 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     );
     verticalSpecific.followUpDate = followUpDate;
     verticalSpecific.followUpReason = followUpReason;
+
+    // outcome must never be blank — default to quote_requested
+    if (!verticalSpecific.outcome) {
+      verticalSpecific.outcome = 'quote_requested';
+    }
+
+    // job_status always starts as inquiry for new leads
+    verticalSpecific.job_status = 'inquiry';
   }
 
   let phone = extracted.customerPhone;
@@ -319,6 +351,16 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     if (flags.length) augmentedSummary = `${augmentedSummary} ${flags.join(' ')}`;
   }
 
+  // Promote key fields to flat DB columns so queries/filters work without JSON parsing
+  const flatExtra = {};
+  if (vertical === 'home_services') {
+    if (verticalSpecific.outcome) flatExtra.outcome = verticalSpecific.outcome;
+    if (verticalSpecific.job_status) flatExtra.job_status = verticalSpecific.job_status;
+    if (verticalSpecific.rawDeliveryDate) flatExtra.raw_delivery_date = verticalSpecific.rawDeliveryDate;
+    if (verticalSpecific.deliveryDateISO) flatExtra.delivery_date = verticalSpecific.deliveryDateISO;
+    if (typeof verticalSpecific.estimatedRevenue === 'number') flatExtra.estimated_revenue = verticalSpecific.estimatedRevenue;
+  }
+
   return {
     commonFields: {
       customer_first_name: first,
@@ -330,6 +372,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
       email: extracted.customerEmail,
       email_confidence: extracted.customerEmail ? (confidence / 100) : 0,
       call_summary: augmentedSummary,
+      ...flatExtra,
     },
     verticalData: verticalSpecific,
     confidence: confidence || 0,

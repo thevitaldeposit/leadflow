@@ -5,7 +5,7 @@ const db = require('../db/database');
 // GET /api/leads
 router.get('/', (req, res) => {
   try {
-    const { status, intent, search, sort, order, discarded, vertical } = req.query;
+    const { status, job_status, intent, search, sort, order, discarded, vertical } = req.query;
 
     let query = 'SELECT * FROM leads WHERE 1=1';
     const params = [];
@@ -18,6 +18,11 @@ router.get('/', (req, res) => {
     if (status) {
       query += ' AND status = ?';
       params.push(status);
+    }
+
+    if (job_status) {
+      query += ' AND job_status = ?';
+      params.push(job_status);
     }
 
     if (intent) {
@@ -78,6 +83,7 @@ router.put('/:id', (req, res) => {
 
     const allowedFields = [
       'status', 'discarded', 'sub_vertical', 'outcome',
+      'job_status', 'assigned_dumpster_id', 'raw_delivery_date', 'delivery_date', 'pickup_date', 'estimated_revenue',
       'customer_first_name', 'customer_last_name', 'phone', 'email', 'address',
       'voi_year', 'voi_make', 'voi_model', 'voi_trim', 'voi_color',
       'voi_stock_number', 'voi_vin', 'voi_new_or_used',

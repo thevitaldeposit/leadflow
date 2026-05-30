@@ -12,6 +12,7 @@ import { api } from '../../utils/api';
 import {
   HOME_SERVICES_STATUSES,
   HOME_SERVICES_OUTCOMES,
+  JOB_STATUSES,
   URGENCY_VALUES,
   INTENT_VALUES,
   INTENT_LABELS,
@@ -217,17 +218,17 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
 
   return (
     <div className="space-y-4">
-      {/* Status + Outcome + Follow-up controls */}
+      {/* Job Status + Outcome + Follow-up controls */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Status</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Job Status</p>
             <select
-              value={lead.status || 'new'}
-              onChange={e => applyUpdate({ status: e.target.value })}
+              value={lead.job_status || 'inquiry'}
+              onChange={e => applyUpdate({ job_status: e.target.value })}
               className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
             >
-              {HOME_SERVICES_STATUSES.map(s => (
+              {JOB_STATUSES.map(s => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>

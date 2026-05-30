@@ -42,4 +42,23 @@ export const api = {
 
   // Dashboard
   getDashboardStats: () => request('/dashboard/stats'),
+
+  // Dumpsters
+  getDumpsters: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/dumpsters${qs ? `?${qs}` : ''}`);
+  },
+  createDumpster: (body) =>
+    request('/dumpsters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateDumpster: (id, body) =>
+    request(`/dumpsters/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteDumpster: (id) => request(`/dumpsters/${id}`, { method: 'DELETE' }),
 };

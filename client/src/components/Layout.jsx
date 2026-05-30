@@ -2,12 +2,17 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   PlusCircle,
-  List,
   Settings,
   FileText,
   Image,
   Mic,
   Zap,
+  Inbox,
+  List,
+  CalendarCheck2,
+  Calendar,
+  Package,
+  CheckSquare,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Navbar from './Navbar';
@@ -16,6 +21,12 @@ import socket from '../socket';
 
 const PAGE_TITLES = {
   '/': 'Dashboard',
+  '/action-queue': 'Action Queue',
+  '/opportunities': 'All Opportunities',
+  '/booked': 'Booked Jobs',
+  '/schedule': 'Schedule',
+  '/inventory': 'Inventory',
+  '/completed': 'Completed',
   '/leads': 'All Leads',
   '/new/transcript': 'New Lead — Transcript',
   '/new/upsheet': 'New Lead — Up Sheet',
@@ -29,6 +40,8 @@ export default function Layout({ children }) {
   const location = useLocation();
   const [newOpen, setNewOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [attentionCount, setAttentionCount] = useState(0);
+
   const title = PAGE_TITLES[location.pathname] || 'Lead Detail';
 
   const dismissToast = useCallback((id) => {
@@ -37,9 +50,6 @@ export default function Layout({ children }) {
 
   useEffect(() => {
     const handleNewLead = (lead) => {
-      // Pull a sensible subtitle per vertical so the toast feels useful even
-      // when the call has no flat customer name yet (common for Home Services
-      // where customerName lives in vertical_data).
       let vd = {};
       if (lead.vertical_data) {
         try { vd = JSON.parse(lead.vertical_data); } catch { /* ignore */ }
@@ -49,27 +59,25 @@ export default function Layout({ children }) {
 
       let sub = null;
       if (lead.vertical === 'home_services') {
-        sub = vd.dumpsterSize
-          || vd.serviceType
-          || vd.deliveryAddress
-          || vd.propertyAddress
-          || null;
+        sub = vd.dumpsterSize || vd.serviceType || vd.deliveryAddress || vd.propertyAddress || null;
       } else {
         sub = [lead.voi_make, lead.voi_model].filter(Boolean).join(' ') || null;
       }
 
-      const toast = {
-        id: ++toastIdCounter,
-        title: name ? `New lead: ${name}` : 'New lead captured',
-        sub,
-        leadId: lead.id,
-      };
+      const toast = { id: ++toastIdCounter, title: name ? `New lead: ${name}` : 'New lead captured', sub, leadId: lead.id };
       setToasts(prev => [...prev, toast]);
+
+      if (lead.vertical === 'home_services') {
+        setAttentionCount(n => n + 1);
+      }
     };
 
     socket.on('new_lead', handleNewLead);
     return () => socket.off('new_lead', handleNewLead);
   }, []);
+
+  const isHomeServices = location.pathname === '/' ||
+    ['/action-queue', '/opportunities', '/booked', '/schedule', '/inventory', '/completed'].some(p => location.pathname.startsWith(p));
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -96,6 +104,54 @@ export default function Layout({ children }) {
             <LayoutDashboard size={18} />
             Dashboard
           </NavLink>
+
+          {/* Home Services nav group */}
+          <div className="pt-2 pb-1">
+            <p className="px-4 text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1">Home Services</p>
+          </div>
+
+          <NavLink to="/action-queue" className={({ isActive }) =>
+            `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive ? 'bg-sidebar-active text-white' : 'text-gray-400 hover:bg-sidebar-hover hover:text-white'
+            }`
+          }>
+            <Inbox size={18} />
+            <span className="flex-1">Action Queue</span>
+            {attentionCount > 0 && (
+              <span className="text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                {attentionCount}
+              </span>
+            )}
+          </NavLink>
+
+          <NavLink to="/opportunities" className={linkClass}>
+            <List size={18} />
+            All Opportunities
+          </NavLink>
+
+          <NavLink to="/booked" className={linkClass}>
+            <CalendarCheck2 size={18} />
+            Booked Jobs
+          </NavLink>
+
+          <NavLink to="/schedule" className={linkClass}>
+            <Calendar size={18} />
+            Schedule
+          </NavLink>
+
+          <NavLink to="/inventory" className={linkClass}>
+            <Package size={18} />
+            Inventory
+          </NavLink>
+
+          <NavLink to="/completed" className={linkClass}>
+            <CheckSquare size={18} />
+            Completed
+          </NavLink>
+
+          <div className="pt-2 pb-1">
+            <p className="px-4 text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1">Tools</p>
+          </div>
 
           {/* New Lead with sub-items */}
           <div>
@@ -125,11 +181,6 @@ export default function Layout({ children }) {
             )}
           </div>
 
-          <NavLink to="/leads" className={linkClass}>
-            <List size={18} />
-            All Leads
-          </NavLink>
-
           <NavLink to="/settings" className={linkClass}>
             <Settings size={18} />
             Settings
@@ -138,7 +189,7 @@ export default function Layout({ children }) {
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-white/10">
-          <p className="text-xs text-gray-500">LeadFlow v1.0</p>
+          <p className="text-xs text-gray-500">LeadFlow v2.0</p>
         </div>
       </aside>
 

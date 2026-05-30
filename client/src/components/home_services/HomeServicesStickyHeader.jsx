@@ -1,94 +1,244 @@
+import { useState } from 'react';
 import {
   Sparkles,
   CheckCircle2,
   XCircle,
-  Clock,
-  Edit3,
+  Package,
 } from 'lucide-react';
 import HomeServicesStatusBadge from './HomeServicesStatusBadge';
 import UrgencyBadge from './UrgencyBadge';
 import IntentBadge from './IntentBadge';
 import { api } from '../../utils/api';
-import { parseVerticalData, getLeadActionState } from '../../utils/verticalConfig';
+import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES } from '../../utils/verticalConfig';
 
-// Renders the action-first customer header that sticks to the top of <main>
-// while the rest of the lead detail content scrolls underneath. Lives at the
-// page level (rendered by LeadDetailPage) rather than inside
-// HomeServicesLeadDetail so its containing block spans the entire scrolled
-// content — otherwise it would un-stick as soon as the user scrolled past
-// the lead's section cards but before the audio/transcript sections.
-//
-// Layout notes:
-// - `-mx-6 -mt-6` cancel <main>'s p-6 so the bar reaches the top + side edges
-//   of the scroll container, covering content cleanly when stuck.
-// - `z-20` sits above section cards (shadow-sm) but below toasts.
-// - No `overflow-hidden` here — that's not needed and can interact awkwardly
-//   with sticky positioning in some engines.
+function getLeadName(lead) {
+  try {
+    const vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {};
+    return vd.customerName || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown Customer';
+  } catch {
+    return [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown Customer';
+  }
+}
+
+function BookedModal({ lead, onConfirm, onClose }) {
+  const [date, setDate] = useState('');
+  const [dumpsters, setDumpsters] = useState(null);
+  const [dumpsterId, setDumpsterId] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Lazy-load available dumpsters when modal opens
+  if (dumpsters === null && !loading) {
+    setLoading(true);
+    api.getDumpsters({ status: 'available' }).then(d => {
+      setDumpsters(d);
+      setLoading(false);
+    }).catch(() => { setDumpsters([]); setLoading(false); });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+        <h3 className="text-lg font-bold text-gray-900 mb-1">Confirm Booking</h3>
+        <p className="text-sm text-gray-500 mb-5">{getLeadName(lead)}</p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Delivery Date</label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Assign Dumpster
+            </label>
+            {loading ? (
+              <p className="text-xs text-gray-400">Loading inventory...</p>
+            ) : (
+              <select
+                value={dumpsterId}
+                onChange={e => setDumpsterId(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+              >
+                <option value="">— Skip for now —</option>
+                {(dumpsters || []).map(d => (
+                  <option key={d.id} value={d.id}>{d.asset_number} · {d.size}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={() => onConfirm({ date, dumpsterId: dumpsterId ? Number(dumpsterId) : null })}
+            className="flex-1 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 rounded-xl transition-colors"
+          >
+            Confirm Booking
+          </button>
+          <button onClick={onClose} className="px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 rounded-xl transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssignDumpsterModal({ lead, onConfirm, onClose }) {
+  const [dumpsters, setDumpsters] = useState(null);
+  const [dumpsterId, setDumpsterId] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  if (dumpsters === null && !loading) {
+    setLoading(true);
+    api.getDumpsters({ status: 'available' }).then(d => { setDumpsters(d); setLoading(false); })
+      .catch(() => { setDumpsters([]); setLoading(false); });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Assign Dumpster</h3>
+        {loading ? (
+          <p className="text-xs text-gray-400 mb-4">Loading inventory...</p>
+        ) : (dumpsters || []).length === 0 ? (
+          <p className="text-sm text-red-500 mb-4">No dumpsters currently available.</p>
+        ) : (
+          <select
+            value={dumpsterId}
+            onChange={e => setDumpsterId(e.target.value)}
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white mb-4"
+          >
+            <option value="">Select a dumpster</option>
+            {(dumpsters || []).map(d => (
+              <option key={d.id} value={d.id}>{d.asset_number} · {d.size}</option>
+            ))}
+          </select>
+        )}
+        <div className="flex gap-3">
+          <button
+            disabled={!dumpsterId}
+            onClick={() => onConfirm(Number(dumpsterId))}
+            className="flex-1 text-sm font-medium text-white bg-accent hover:bg-accent/90 disabled:opacity-50 px-4 py-2.5 rounded-xl transition-colors"
+          >
+            Assign
+          </button>
+          <button onClick={onClose} className="px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 rounded-xl transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function HomeServicesStickyHeader({ lead, onUpdate }) {
+  const [showBooked, setShowBooked] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
   const vd = parseVerticalData(lead);
   const state = getLeadActionState(lead);
 
-  const displayedName = vd.customerName
-    || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ')
-    || 'Unknown Customer';
+  const displayedName = getLeadName(lead);
   const summary = state.summaryDetail || vd.serviceType || null;
+  const jobStatus = lead.job_status || vd.job_status || 'inquiry';
+  const jobStatusStyle = JOB_STATUS_STYLES[jobStatus] || 'bg-gray-100 text-gray-500';
 
-  const applyStatus = async (status) => {
+  const applyUpdate = async (body) => {
     try {
-      const updated = await api.updateLead(lead.id, { status });
+      const updated = await api.updateLead(lead.id, body);
       onUpdate?.(updated);
     } catch (err) {
       console.error('Sticky action failed:', err);
     }
   };
 
+  const handleBookedConfirm = async ({ date, dumpsterId }) => {
+    const updates = { job_status: 'booked', status: 'booked' };
+    if (date) { updates.delivery_date = date; updates.vertical_data = { deliveryDateISO: date }; }
+    if (dumpsterId) {
+      await api.updateDumpster(dumpsterId, { status: 'on_job', current_job_id: lead.id });
+      updates.assigned_dumpster_id = dumpsterId;
+    }
+    await applyUpdate(updates);
+    setShowBooked(false);
+  };
+
+  const handleAssignConfirm = async (dumpsterId) => {
+    await api.updateDumpster(dumpsterId, { status: 'on_job', current_job_id: lead.id });
+    await applyUpdate({ assigned_dumpster_id: dumpsterId });
+    setShowAssign(false);
+  };
+
   return (
-    <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-4 bg-white border-b border-gray-200 shadow-sm">
-      <div className="max-w-3xl mx-auto px-6 py-4">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0">
-            <h2 className="text-xl font-bold text-gray-900">{displayedName}</h2>
-            {summary && <p className="text-sm text-gray-600 mt-0.5">{summary}</p>}
+    <>
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-4 bg-white border-b border-gray-200 shadow-sm">
+        <div className="max-w-3xl mx-auto px-6 py-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-gray-900">{displayedName}</h2>
+              {summary && <p className="text-sm text-gray-600 mt-0.5">{summary}</p>}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              <IntentBadge value={state.intent} size="md" />
+              <UrgencyBadge value={vd.urgency} size="md" />
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${jobStatusStyle}`}>
+                {getJobStatusLabel(jobStatus)}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap justify-end">
-            <IntentBadge value={state.intent} size="md" />
-            <UrgencyBadge value={vd.urgency} size="md" />
-            <HomeServicesStatusBadge status={lead.status} size="lg" />
-          </div>
-        </div>
 
-        {state.recommendation && (
-          <div className="mt-3 flex items-start gap-2 text-sm text-gray-700 bg-blue-50 px-3 py-2 rounded-lg">
-            <Sparkles size={14} className="text-accent mt-0.5 flex-shrink-0" />
-            <span>{state.recommendation}</span>
-          </div>
-        )}
+          {state.recommendation && (
+            <div className="mt-3 flex items-start gap-2 text-sm text-gray-700 bg-blue-50 px-3 py-2 rounded-lg">
+              <Sparkles size={14} className="text-accent mt-0.5 flex-shrink-0" />
+              <span>{state.recommendation}</span>
+            </div>
+          )}
 
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => applyStatus('booked')}
-            className="flex items-center gap-1.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-2 rounded-lg transition-colors"
-          >
-            <CheckCircle2 size={14} /> Mark Booked
-          </button>
-          <button
-            onClick={() => applyStatus('lost')}
-            className="flex items-center gap-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors"
-          >
-            <XCircle size={14} /> Mark Lost
-          </button>
-          <button
-            onClick={() => applyStatus('needs_follow_up')}
-            className="flex items-center gap-1.5 text-sm font-medium text-amber-800 bg-amber-100 hover:bg-amber-200 px-3 py-2 rounded-lg transition-colors"
-          >
-            <Clock size={14} /> Set Follow Up
-          </button>
-          <div className="flex items-center gap-1.5 ml-auto text-xs text-gray-400">
-            <Edit3 size={12} />
-            <span>Edit fields below</span>
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            {!state.isOperational && (
+              <button
+                onClick={() => setShowBooked(true)}
+                className="flex items-center gap-1.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-2 rounded-lg transition-colors"
+              >
+                <CheckCircle2 size={14} /> Mark Booked
+              </button>
+            )}
+            {!state.isOperational && (
+              <button
+                onClick={() => applyUpdate({ job_status: 'lost', status: 'lost' })}
+                className="flex items-center gap-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors"
+              >
+                <XCircle size={14} /> Mark Lost
+              </button>
+            )}
+            <button
+              onClick={() => setShowAssign(true)}
+              className="flex items-center gap-1.5 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg transition-colors"
+            >
+              <Package size={14} /> Assign Dumpster
+            </button>
+            {/* Job status quick selector */}
+            <select
+              value={jobStatus}
+              onChange={e => applyUpdate({ job_status: e.target.value })}
+              className="ml-auto text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent bg-white text-gray-600"
+            >
+              {JOB_STATUSES.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
-    </div>
+
+      {showBooked && (
+        <BookedModal lead={lead} onConfirm={handleBookedConfirm} onClose={() => setShowBooked(false)} />
+      )}
+      {showAssign && (
+        <AssignDumpsterModal lead={lead} onConfirm={handleAssignConfirm} onClose={() => setShowAssign(false)} />
+      )}
+    </>
   );
 }
