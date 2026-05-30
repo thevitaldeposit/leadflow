@@ -40,6 +40,7 @@ const NEW_COLUMNS = [
 ];
 
 function runMigrations() {
+  console.log('[migrations] Starting schema migrations…');
   const schemaPath = path.join(__dirname, 'schema.sql');
   const schema = fs.readFileSync(schemaPath, 'utf-8');
   db.exec(schema);
@@ -110,6 +111,11 @@ function runMigrations() {
   console.log('Database migrations completed successfully.');
 }
 
-runMigrations();
+try {
+  runMigrations();
+} catch (err) {
+  console.error('[migrations] Migration failed:', err.message);
+  throw err;
+}
 
 module.exports = { runMigrations };
