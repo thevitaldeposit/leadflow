@@ -8,6 +8,8 @@ import {
   X,
   Sparkles,
   Zap,
+  Link,
+  Send,
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import {
@@ -167,6 +169,118 @@ function FollowUpEditor({ value, onSave }) {
         onChange={(e) => onSave(fromLocalInput(e.target.value))}
         className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
       />
+    </div>
+  );
+}
+
+const PAYMENT_BASE = 'https://leadflow-production-9c02.up.railway.app';
+
+function PaymentLinkSection({ lead, onUpdate }) {
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState(null);
+
+  const paymentUrl = `${PAYMENT_BASE}/pay/${lead.id}`;
+  const isPaid = !!lead.paid_at;
+
+  const handleResend = async () => {
+    setResending(true);
+    setResendMsg(null);
+    try {
+      const result = await api.resendPaymentSms(lead.id);
+      if (result.sent) {
+        onUpdate?.(result.lead);
+        setResendMsg('Payment link resent successfully.');
+      } else {
+        setResendMsg(result.reason === 'no_phone'
+          ? 'No phone number on file — add one in Contact section.'
+          : result.reason === 'disabled'
+            ? 'SMS is disabled in Settings.'
+            : result.reason === 'no_credentials'
+              ? 'Twilio not configured.'
+              : 'Could not send SMS.');
+      }
+    } catch {
+      setResendMsg('Failed to send — check server logs.');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const togglePaid = async () => {
+    const paidAt = isPaid ? null : new Date().toISOString();
+    try {
+      const updated = await api.updateLead(lead.id, { paid_at: paidAt });
+      onUpdate?.(updated);
+    } catch (e) {
+      console.error('Toggle paid error:', e);
+    }
+  };
+
+  const smsSentDate = lead.payment_sms_sent_at
+    ? new Date(lead.payment_sms_sent_at).toLocaleString()
+    : null;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <SectionHeader title="Payment Link" icon={Link} />
+      <div className="p-4 space-y-3">
+        {/* URL */}
+        <div>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Payment URL</p>
+          <a
+            href={paymentUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-accent hover:underline break-all"
+          >
+            {paymentUrl}
+          </a>
+        </div>
+
+        {/* SMS status */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">SMS Status</p>
+            {smsSentDate
+              ? <p className="text-sm text-gray-700">Sent on {smsSentDate}</p>
+              : <p className="text-sm text-gray-400 italic">Not sent yet</p>}
+          </div>
+          <button
+            onClick={handleResend}
+            disabled={resending}
+            className="flex items-center gap-1.5 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+          >
+            <Send size={13} />
+            {resending ? 'Sending…' : smsSentDate ? 'Resend Payment Link' : 'Send Payment Link'}
+          </button>
+        </div>
+
+        {resendMsg && (
+          <p className={`text-xs px-2 py-1.5 rounded-lg ${resendMsg.includes('success') ? 'text-green-700 bg-green-50' : 'text-red-600 bg-red-50'}`}>
+            {resendMsg}
+          </p>
+        )}
+
+        {/* Payment status toggle */}
+        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">Payment Status</p>
+            <p className={`text-sm font-semibold ${isPaid ? 'text-green-700' : 'text-amber-600'}`}>
+              {isPaid ? `Paid ${new Date(lead.paid_at).toLocaleDateString()}` : 'Unpaid'}
+            </p>
+          </div>
+          <button
+            onClick={togglePaid}
+            className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg transition-colors ${
+              isPaid
+                ? 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+                : 'text-green-700 bg-green-50 hover:bg-green-100'
+            }`}
+          >
+            {isPaid ? <><X size={13} /> Mark Unpaid</> : <><Check size={13} /> Mark Paid</>}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -365,6 +479,11 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
           ))}
         </div>
       </div>
+
+      {/* Payment Link — only shown for booked jobs */}
+      {(lead.job_status === 'booked' || lead.payment_sms_sent_at || lead.paid_at) && (
+        <PaymentLinkSection lead={lead} onUpdate={(updated) => { setLead(updated); onUpdate?.(updated); }} />
+      )}
 
       {/* Notes */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">

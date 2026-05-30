@@ -67,4 +67,17 @@ export const api = {
     request(`/schedule/availability?delivery_date=${encodeURIComponent(deliveryDate)}&rental_duration=${encodeURIComponent(rentalDuration)}`),
   getCalendar: (year, month) =>
     request(`/schedule/calendar?year=${year}&month=${month}`),
+
+  // Settings (server-side, used by payment page)
+  getSettings: () => request('/settings'),
+  updateSettings: (body) =>
+    request('/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  // Payment SMS
+  resendPaymentSms: (id) =>
+    request(`/leads/${id}/resend-payment-sms`, { method: 'POST' }),
 };

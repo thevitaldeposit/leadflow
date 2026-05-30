@@ -9,6 +9,7 @@ const { extractFromTranscriptVertical, VERTICAL_CONFIGS } = require('../services
 const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
 const { autoAssignDumpster, parseRentalDays, addDaysToISO } = require('../services/inventoryService');
+const { sendPaymentSms } = require('../services/smsService');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 
@@ -179,8 +180,23 @@ async function processRecording(payload) {
         lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
       }
 
-      const io = getIO();
-      if (io) io.emit('new_lead', lead);
+      // Send payment SMS for auto-booked home services jobs
+      if (verticalData.autoBooked === true) {
+        sendPaymentSms(lead).then((smsResult) => {
+          if (smsResult.sent) {
+            lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+          }
+          const io = getIO();
+          if (io) io.emit('new_lead', lead);
+        }).catch((err) => {
+          console.error('[webhook] SMS error:', err);
+          const io = getIO();
+          if (io) io.emit('new_lead', lead);
+        });
+      } else {
+        const io = getIO();
+        if (io) io.emit('new_lead', lead);
+      }
       console.log(`[webhook] Lead ${lead.id} created from Twilio recording ${RecordingSid} (vertical: ${defaultVertical})`);
       return;
     }

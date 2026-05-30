@@ -28,6 +28,8 @@ const uploadRouter = require('./routes/upload');
 const devicesRouter = require('./routes/devices');
 const dumpsterRouter = require('./routes/dumpsters');
 const scheduleRouter = require('./routes/schedule');
+const settingsRouter = require('./routes/settings');
+const paymentRouter = require('./routes/payment');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -110,6 +112,9 @@ app.use('/api/extract', extractRouter);
 app.use('/api/webhook', webhookRouter);
 app.use('/api/upload', uploadRouter);
 app.use('/api/devices', devicesRouter);
+app.use('/api/settings', settingsRouter);
+// Public payment page — must be before the SPA catch-all
+app.use('/pay', paymentRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

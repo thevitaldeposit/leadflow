@@ -65,11 +65,14 @@ export default function Layout({ children }) {
       }
 
       const isAutoBooked = lead.auto_booked === 1;
+      const smsSent = !!lead.payment_sms_sent_at;
       let toastTitle;
       if (isAutoBooked) {
         const size = vd.dumpsterSize ? `${vd.dumpsterSize} dumpster` : 'dumpster';
         const date = lead.delivery_date ? `, delivery ${lead.delivery_date}` : '';
-        toastTitle = `Job auto-booked: ${name || 'Unknown'}`;
+        toastTitle = smsSent
+          ? `Job auto-booked & payment link sent to ${name || 'customer'}`
+          : `Job auto-booked: ${name || 'Unknown'}`;
         sub = `${size}${date}`;
       } else {
         toastTitle = name ? `New lead: ${name}` : 'New lead captured';
@@ -83,8 +86,25 @@ export default function Layout({ children }) {
       }
     };
 
+    const handleSmsSent = ({ leadId, customerName, phone }) => {
+      const displayName = customerName || 'customer';
+      const displayPhone = phone || '';
+      const toast = {
+        id: ++toastIdCounter,
+        title: `Payment link sent to ${displayName}`,
+        sub: displayPhone,
+        leadId,
+        autoBooked: false,
+      };
+      setToasts(prev => [...prev, toast]);
+    };
+
     socket.on('new_lead', handleNewLead);
-    return () => socket.off('new_lead', handleNewLead);
+    socket.on('payment_sms_sent', handleSmsSent);
+    return () => {
+      socket.off('new_lead', handleNewLead);
+      socket.off('payment_sms_sent', handleSmsSent);
+    };
   }, []);
 
   const isHomeServices = location.pathname === '/' ||

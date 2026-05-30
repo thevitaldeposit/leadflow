@@ -34,6 +34,9 @@ const NEW_COLUMNS = [
   // Phase 2: auto-booking detection
   'ALTER TABLE leads ADD COLUMN auto_booked INTEGER DEFAULT 0',
   'ALTER TABLE leads ADD COLUMN needs_dumpster_assignment INTEGER DEFAULT 0',
+  // Payment system
+  'ALTER TABLE leads ADD COLUMN paid_at TEXT',
+  'ALTER TABLE leads ADD COLUMN payment_sms_sent_at TEXT',
 ];
 
 function runMigrations() {
@@ -91,6 +94,15 @@ function runMigrations() {
       current_job_id INTEGER,
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Settings key-value store (used by payment page and SMS service)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);

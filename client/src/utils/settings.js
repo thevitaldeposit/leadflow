@@ -3,6 +3,10 @@ const STORAGE_KEY = 'leadflow:settings';
 const DEFAULTS = {
   businessName: 'Valley Binz',
   ownerFirstName: 'Austin',
+  cashAppHandle: '',
+  venmoHandle: '',
+  squareApiKey: '',
+  smsEnabled: true,
 };
 
 export function getSettings() {

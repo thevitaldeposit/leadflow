@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { sendPaymentSms } = require('../services/smsService');
+const { getIO } = require('../socket');
 
 // GET /api/leads
 router.get('/', (req, res) => {
@@ -96,6 +98,7 @@ router.put('/:id', (req, res) => {
       'salesperson_name', 'lead_source',
       'call_summary', 'additional_notes', 'objections',
       'flag_urgent', 'flag_needs_manager', 'flag_duplicate_suspect', 'flag_reason',
+      'paid_at',
     ];
 
     const updates = {};
@@ -126,10 +129,58 @@ router.put('/:id', (req, res) => {
     db.prepare(`UPDATE leads SET ${setClauses} WHERE id = ?`).run(...values);
 
     const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+
+    // Trigger payment SMS when a job transitions to booked for the first time
+    const wasBooked = existing.job_status === 'booked';
+    const isNowBooked = updated.job_status === 'booked';
+    const isHomeServices = updated.vertical === 'home_services';
+    if (!wasBooked && isNowBooked && isHomeServices && !updated.payment_sms_sent_at) {
+      sendPaymentSms(updated).then((result) => {
+        if (result.sent) {
+          const io = getIO();
+          if (io) {
+            io.emit('payment_sms_sent', {
+              leadId: updated.id,
+              customerName: result.customerName,
+              phone: result.phone,
+            });
+          }
+        }
+      }).catch((err) => console.error('[leads] SMS send error:', err));
+    }
+
     res.json(updated);
   } catch (err) {
     console.error('PUT /leads/:id error:', err);
     res.status(500).json({ error: 'Failed to update lead' });
+  }
+});
+
+// POST /api/leads/:id/resend-payment-sms
+router.post('/:id/resend-payment-sms', async (req, res) => {
+  try {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const result = await sendPaymentSms(lead, true);
+
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+
+    if (result.sent) {
+      const io = getIO();
+      if (io) {
+        io.emit('payment_sms_sent', {
+          leadId: updated.id,
+          customerName: result.customerName,
+          phone: result.phone,
+        });
+      }
+    }
+
+    res.json({ ...result, lead: updated });
+  } catch (err) {
+    console.error('POST /leads/:id/resend-payment-sms error:', err);
+    res.status(500).json({ error: 'Failed to resend payment SMS' });
   }
 });
 
