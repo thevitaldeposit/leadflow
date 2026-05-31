@@ -25,13 +25,17 @@ function AudioSection({ lead }) {
               </span>
             )}
           </div>
-          <audio
-            controls
-            className="w-full h-10"
-            src={lead.audio_file_path}
-          >
-            Your browser does not support audio playback.
-          </audio>
+          {lead.recording_deleted_at ? (
+            <p className="text-xs text-gray-400 italic">Recording deleted after 30 days</p>
+          ) : (
+            <audio
+              controls
+              className="w-full h-10"
+              src={lead.audio_file_path}
+            >
+              Your browser does not support audio playback.
+            </audio>
+          )}
         </div>
       )}
 

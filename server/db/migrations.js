@@ -37,6 +37,8 @@ const NEW_COLUMNS = [
   // Payment system
   'ALTER TABLE leads ADD COLUMN paid_at TEXT',
   'ALTER TABLE leads ADD COLUMN payment_sms_sent_at TEXT',
+  // Recording lifecycle
+  'ALTER TABLE leads ADD COLUMN recording_deleted_at TEXT',
 ];
 
 function runMigrations() {
