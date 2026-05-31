@@ -6,9 +6,15 @@ import { api } from '../utils/api';
 // ── helpers ────────────────────────────────────────────────────────────────────
 
 function addDays(isoDate, days) {
-  const d = new Date(isoDate + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  // Stay in local-calendar space throughout so the YYYY-MM-DD string we return
+  // is the same calendar day a user would write on paper, regardless of TZ.
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + days);
+  const yy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }
 
 function formatDate(iso) {
@@ -230,7 +236,9 @@ function CalendarSection() {
   const monthLabel = new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const firstDow = new Date(year, month - 1, 1).getDay(); // 0=Sun
   const daysInMonth = new Date(year, month, 0).getDate();
-  const todayStr = today.toISOString().slice(0, 10);
+  // Local-calendar today; toISOString() would shift to UTC and mis-highlight
+  // "today" in negative-offset timezones.
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   // Build calendar grid cells
   const cells = [];

@@ -61,6 +61,17 @@ function getGreeting() {
   return 'Good evening';
 }
 
+// Parse a YYYY-MM-DD string as a local-calendar date.  Avoids the UTC-midnight
+// shift that `new Date("YYYY-MM-DD")` produces in negative-offset timezones —
+// e.g. "2026-06-01" landing on May 31 23:00 local in EST/CDT.
+function parseLocalDate(iso) {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso));
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 function MetricCard({ icon: Icon, label, value, color = 'bg-gray-50', textColor = 'text-gray-700' }) {
@@ -522,13 +533,16 @@ export default function HomeServicesDashboard() {
       if (!SCHEDULE_STATUSES.has(lead.job_status)) continue;
       const deliveryStr = lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate;
       const pickupStr = lead.pickup_date || vd.pickupDate;
+      // parseLocalDate keeps the calendar date intact across the UTC→local
+      // boundary; using new Date("YYYY-MM-DD") here would mis-bucket dates by
+      // one day for users west of UTC.
       if (deliveryStr) {
-        const d = new Date(deliveryStr); d.setHours(0,0,0,0);
-        if (d >= today && d <= in7days) scheduleEntries.push({ lead, date: d, type: 'delivery', time: vd.deliveryTime || null });
+        const d = parseLocalDate(deliveryStr);
+        if (d && d >= today && d <= in7days) scheduleEntries.push({ lead, date: d, type: 'delivery', time: vd.deliveryTime || null });
       }
       if (pickupStr) {
-        const d = new Date(pickupStr); d.setHours(0,0,0,0);
-        if (d >= today && d <= in7days) scheduleEntries.push({ lead, date: d, type: 'pickup', time: null });
+        const d = parseLocalDate(pickupStr);
+        if (d && d >= today && d <= in7days) scheduleEntries.push({ lead, date: d, type: 'pickup', time: null });
       }
     }
     scheduleEntries.sort((a, b) => a.date - b.date);
