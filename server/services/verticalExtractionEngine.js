@@ -48,7 +48,10 @@ const HOME_SERVICES_NAME_RULE = `IMPORTANT NAME RULE: customerName must be extra
 
 const HOME_SERVICES_ACTION_RULE = `ACTION INTELLIGENCE: You must also produce signals that help the owner know what to do next.
 
-- intentLevel: "high" if the customer requested pricing, a delivery date, an appointment, or availability; "warm" if the customer expressed interest but made no specific request; "cold" if the customer said they were comparing prices, just gathering info, or non-committal.
+- intentLevel: Classify in this strict priority order — earlier rules win.
+    1. "high" if urgency is "ASAP" OR the customer agreed to a specific price AND size AND date (payment may still be pending). ASAP urgency wins over every other signal — including price shopping, "just gathering info", or "still thinking about it".
+    2. "warm" if the customer is interested with a real near-term project: gave specifics like dumpster size, delivery date or date range, delivery address, or debris type; OR is comparing prices BUT has a specific project, timeline, or urgent need. Price shopping or non-committal language alone does NOT make a lead cold when there is a real project on the table.
+    3. "cold" ONLY when the customer is very early stage — NO specific project details, NO timeline, no commitment signals (e.g. "just curious what these usually cost", "researching for a friend", "no project yet, just pricing things out"). Cold requires BOTH no urgency AND no project specifics.
 - followUpSignal: one of "callback_today" (customer said ASAP/today/emergency), "callback_tomorrow" (customer said tomorrow), "callback_next_week" (customer said next week or call me back [day]), "comparing_prices" (customer is shopping around or needs to think about it), "before_delivery" (customer gave a specific future delivery/service date — set followUpAnchorDate to that date in ISO YYYY-MM-DD), "next_business_day" (high intent but no explicit callback request), "unknown" (no clear signal).
 - followUpAnchorDate: the specific date the customer mentioned, in YYYY-MM-DD, if relevant. Otherwise null. Resolve relative dates ("Monday", "next Friday", "June 3") to absolute ISO dates using the current date context.
 - rawDeliveryDate: the exact phrase the customer used to describe when they want delivery (e.g. "Monday", "next week", "June 3rd"). Null if not mentioned.
