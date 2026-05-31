@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Sparkles,
   CheckCircle2,
@@ -11,6 +11,25 @@ import IntentBadge from './IntentBadge';
 import { api } from '../../utils/api';
 import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES } from '../../utils/verticalConfig';
 
+function parseRentalDays(str) {
+  if (!str) return null;
+  const s = String(str).toLowerCase().trim();
+  const num = parseFloat(s);
+  if (isNaN(num)) return null;
+  if (s.includes('week')) return Math.round(num * 7);
+  if (s.includes('month')) return Math.round(num * 30);
+  return Math.round(num);
+}
+
+function calcPickupFromDuration(deliveryISO, rentalDuration) {
+  if (!deliveryISO || !rentalDuration) return null;
+  const days = parseRentalDays(rentalDuration);
+  if (!days) return null;
+  const d = new Date(deliveryISO + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function getLeadName(lead) {
   try {
     const vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {};
@@ -21,19 +40,31 @@ function getLeadName(lead) {
 }
 
 function BookedModal({ lead, onConfirm, onClose }) {
-  const [date, setDate] = useState('');
-  const [dumpsters, setDumpsters] = useState(null);
+  const vd = parseVerticalData(lead);
+  const [date, setDate] = useState(lead.delivery_date || '');
+  const [dumpsters, setDumpsters] = useState([]);
   const [dumpsterId, setDumpsterId] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  // Lazy-load available dumpsters when modal opens
-  if (dumpsters === null && !loading) {
+  // Re-fetch available dumpsters whenever the delivery date changes, using
+  // date-overlap filtering so only truly available units are shown.
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    api.getDumpsters({ status: 'available' }).then(d => {
-      setDumpsters(d);
-      setLoading(false);
-    }).catch(() => { setDumpsters([]); setLoading(false); });
-  }
+    const params = { status: 'available' };
+    if (date) {
+      const pickup = lead.pickup_date || calcPickupFromDuration(date, vd.rentalDuration);
+      if (pickup) {
+        params.delivery_date = date;
+        params.pickup_date = pickup;
+        params.exclude_lead_id = lead.id;
+      }
+    }
+    api.getDumpsters(params)
+      .then(d => { if (!cancelled) { setDumpsters(d); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setDumpsters([]); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [date, lead.id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -53,9 +84,12 @@ function BookedModal({ lead, onConfirm, onClose }) {
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
               Assign Dumpster
+              {date && <span className="ml-1 font-normal text-gray-400 normal-case">(available for selected date)</span>}
             </label>
             {loading ? (
               <p className="text-xs text-gray-400">Loading inventory...</p>
+            ) : dumpsters.length === 0 ? (
+              <p className="text-xs text-amber-600">No dumpsters available for this date.</p>
             ) : (
               <select
                 value={dumpsterId}
@@ -63,7 +97,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
                 className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
               >
                 <option value="">— Skip for now —</option>
-                {(dumpsters || []).map(d => (
+                {dumpsters.map(d => (
                   <option key={d.id} value={d.id}>{d.asset_number} · {d.size}</option>
                 ))}
               </select>
@@ -87,15 +121,23 @@ function BookedModal({ lead, onConfirm, onClose }) {
 }
 
 function AssignDumpsterModal({ lead, onConfirm, onClose }) {
-  const [dumpsters, setDumpsters] = useState(null);
+  const [dumpsters, setDumpsters] = useState([]);
   const [dumpsterId, setDumpsterId] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  if (dumpsters === null && !loading) {
-    setLoading(true);
-    api.getDumpsters({ status: 'available' }).then(d => { setDumpsters(d); setLoading(false); })
-      .catch(() => { setDumpsters([]); setLoading(false); });
-  }
+  useEffect(() => {
+    let cancelled = false;
+    const params = { status: 'available' };
+    if (lead.delivery_date && lead.pickup_date) {
+      params.delivery_date = lead.delivery_date;
+      params.pickup_date = lead.pickup_date;
+      params.exclude_lead_id = lead.id;
+    }
+    api.getDumpsters(params)
+      .then(d => { if (!cancelled) { setDumpsters(d); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setDumpsters([]); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [lead.id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

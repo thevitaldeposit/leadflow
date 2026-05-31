@@ -126,6 +126,25 @@ function SectionHeader({ title, icon: Icon, badge }) {
   );
 }
 
+function clientParseRentalDays(str) {
+  if (!str) return null;
+  const s = String(str).toLowerCase().trim();
+  const num = parseFloat(s);
+  if (isNaN(num)) return null;
+  if (s.includes('week')) return Math.round(num * 7);
+  if (s.includes('month')) return Math.round(num * 30);
+  return Math.round(num);
+}
+
+function clientCalcPickup(deliveryISO, rentalDuration) {
+  if (!deliveryISO || !rentalDuration) return null;
+  const days = clientParseRentalDays(rentalDuration);
+  if (!days) return null;
+  const d = new Date(deliveryISO + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function formatISODate(iso) {
   if (!iso) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
@@ -203,9 +222,9 @@ function DateField({ label, value, rawValue, onSave, showTBDWhenEmpty = false })
 }
 
 // Render a single field-pack entry as an editable control.
-function PackField({ field, vd, saveVertical }) {
+function PackField({ field, vd, saveVertical, customSave }) {
   const value = vd[field.key];
-  const onSave = saveVertical(field.key);
+  const onSave = customSave ?? saveVertical(field.key);
   const cls = field.span === 2 ? 'col-span-2' : '';
   if (field.type === 'bool') {
     return <div className={cls}><EditableBool label={field.label} value={value} onSave={onSave} /></div>;
@@ -404,6 +423,24 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   // transcript, AI summary, and untouched fields are never overwritten.
   const saveVertical = (field) => (value) => applyUpdate({ vertical_data: { [field]: value } });
 
+  // When delivery date is saved, also auto-calculate and persist pickup date
+  // if rental duration is known — saves the dispatcher a manual step.
+  const saveDeliveryDate = (deliveryISO) => {
+    const vdNow = parseVerticalData(lead);
+    const body = {
+      delivery_date: deliveryISO || null,
+      vertical_data: { deliveryDate: deliveryISO || null, deliveryDateISO: deliveryISO || null },
+    };
+    if (deliveryISO && vdNow.rentalDuration) {
+      const pickup = clientCalcPickup(deliveryISO, vdNow.rentalDuration);
+      if (pickup) {
+        body.pickup_date = pickup;
+        body.vertical_data.pickupDate = pickup;
+      }
+    }
+    return applyUpdate(body);
+  };
+
   // Save Customer Name to vertical_data.customerName AND split into flat
   // first/last columns so search-by-name continues to work.
   const saveCustomerName = (fullName) => {
@@ -555,7 +592,13 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
         <SectionHeader title="Industry Details" icon={Wrench} badge={pack.label} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
           {pack.industryFields.map(field => (
-            <PackField key={field.key} field={field} vd={vd} saveVertical={saveVertical} />
+            <PackField
+              key={field.key}
+              field={field}
+              vd={vd}
+              saveVertical={saveVertical}
+              customSave={field.key === 'deliveryDate' ? saveDeliveryDate : undefined}
+            />
           ))}
         </div>
       </div>

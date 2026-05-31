@@ -3,16 +3,40 @@ const router = express.Router();
 const db = require('../db/database');
 
 // GET /api/dumpsters
+// Optional params: status, delivery_date, pickup_date, exclude_lead_id
+// When delivery_date + pickup_date are provided, dumpsters with overlapping
+// confirmed bookings are excluded (same overlap logic as the schedule checker).
 router.get('/', (req, res) => {
   try {
-    const { status } = req.query;
-    let query = 'SELECT * FROM dumpsters';
+    const { status, delivery_date, pickup_date, exclude_lead_id } = req.query;
+    const conditions = [];
     const params = [];
+
     if (status) {
-      query += ' WHERE status = ?';
+      conditions.push('status = ?');
       params.push(status);
     }
+
+    if (delivery_date && pickup_date) {
+      let subquery = `id NOT IN (
+        SELECT assigned_dumpster_id FROM leads
+        WHERE assigned_dumpster_id IS NOT NULL
+        AND job_status IN ('booked','scheduled','delivered','active_rental','picked_up')
+        AND delivery_date < ?
+        AND pickup_date > ?`;
+      params.push(pickup_date, delivery_date);
+      if (exclude_lead_id) {
+        subquery += ' AND id != ?';
+        params.push(exclude_lead_id);
+      }
+      subquery += ')';
+      conditions.push(subquery);
+    }
+
+    let query = 'SELECT * FROM dumpsters';
+    if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
     query += ' ORDER BY asset_number ASC';
+
     const dumpsters = db.prepare(query).all(...params);
     res.json(dumpsters);
   } catch (err) {

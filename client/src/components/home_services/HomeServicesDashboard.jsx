@@ -386,6 +386,7 @@ export default function HomeServicesDashboard() {
           e.state.isAsapActive ||
           (e.state.followUpDate && e.state.followUpDate <= endOfToday) ||
           e.state.highIntentUncontacted ||
+          e.state.noConfirmedDelivery ||
           e.state.stale
         );
       })

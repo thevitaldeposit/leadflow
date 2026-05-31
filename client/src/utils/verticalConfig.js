@@ -258,12 +258,18 @@ export function getLeadActionState(lead, now = new Date()) {
   const isAsapActive = !!(isOpportunity && isActive && vd.urgency === 'ASAP');
   // High intent with no action taken after 2 hours — don't let these sit in All Opportunities.
   const highIntentUncontacted = !!(isOpportunity && isActive && intent === 'high' && ageMs > 2 * MS_HOUR && neverContacted);
+  // High-intent lead with no confirmed delivery date — needs a follow-up call to lock in the date.
+  const noConfirmedDelivery = !!(
+    isOpportunity && isActive && intent === 'high' && !lead?.delivery_date &&
+    (jobStatus === 'inquiry' || jobStatus === 'opportunity' || jobStatus === null)
+  );
 
   // Recommendation: AI-provided sentence wins; otherwise derive a sensible default.
   let recommendation = vd.aiRecommendation && String(vd.aiRecommendation).trim();
   if (!recommendation) {
     if (isAsapActive) recommendation = 'Customer needs service ASAP — call back immediately.';
     else if (followUpDueToday) recommendation = 'Follow up today — scheduled callback is due.';
+    else if (noConfirmedDelivery) recommendation = 'Confirm delivery date — customer agreed to price and size but no date was set.';
     else if (stale) recommendation = 'Lead is going cold — reach out to re-engage.';
     else if (intent === 'high') recommendation = 'Call today — high-intent lead with no follow-up yet.';
     else if (status === 'waiting_on_customer') recommendation = 'Check back with the customer.';
@@ -276,6 +282,7 @@ export function getLeadActionState(lead, now = new Date()) {
   if (isAsapActive) bucket = 'asap';
   else if (followUpDueToday) bucket = 'follow_up_due';
   else if (highIntentUncontacted) bucket = 'high_intent_new';
+  else if (noConfirmedDelivery) bucket = 'no_delivery_date';
   else if (stale) bucket = 'stale';
   else if (status === 'waiting_on_customer') bucket = 'waiting';
 
@@ -285,6 +292,7 @@ export function getLeadActionState(lead, now = new Date()) {
     asap: 5000,
     follow_up_due: 4000,
     high_intent_new: 3000,
+    no_delivery_date: 2500,
     stale: 2000,
     waiting: 1000,
     other: 0,
@@ -327,6 +335,7 @@ export function getLeadActionState(lead, now = new Date()) {
     stale,
     isAsapActive,
     highIntentUncontacted,
+    noConfirmedDelivery,
     priority,
     bucket,
     recommendation,
