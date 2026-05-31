@@ -119,12 +119,29 @@ router.put('/:id', (req, res) => {
       }
     }
 
-    // vertical_data is stored as a JSON blob. Allow partial merges: the client
-    // sends an object of keys to set, we merge into the existing JSON.
-    if (req.body.vertical_data && typeof req.body.vertical_data === 'object') {
+    // vertical_data is stored as a JSON blob. Allow partial merges, and auto-mirror
+    // the flat delivery_date / pickup_date columns into vertical_data so the Lead
+    // Detail page's field-pack display picks up changes from any caller (Confirm
+    // Booking modal, schedule editor, etc.) without each caller needing to
+    // duplicate the keys.
+    const vdPatch = (req.body.vertical_data && typeof req.body.vertical_data === 'object')
+      ? req.body.vertical_data
+      : null;
+    const needsVdMerge = vdPatch !== null
+      || updates.delivery_date !== undefined
+      || updates.pickup_date !== undefined;
+
+    if (needsVdMerge) {
       let current = {};
       try { current = JSON.parse(existing.vertical_data || '{}'); } catch { current = {}; }
-      const merged = { ...current, ...req.body.vertical_data };
+      const merged = { ...current, ...(vdPatch || {}) };
+      if (updates.delivery_date !== undefined) {
+        merged.deliveryDate = updates.delivery_date;
+        merged.deliveryDateISO = updates.delivery_date;
+      }
+      if (updates.pickup_date !== undefined) {
+        merged.pickupDate = updates.pickup_date;
+      }
       updates.vertical_data = JSON.stringify(merged);
     }
 

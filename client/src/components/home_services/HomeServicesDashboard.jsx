@@ -445,10 +445,18 @@ export default function HomeServicesDashboard() {
       };
       if (date) {
         updates.delivery_date = date;
-        const vd = { deliveryDateISO: date };
+        // Write the keys the Industry Details field pack reads from (camelCase)
+        // alongside the legacy deliveryDateISO for back-compat with older readers.
+        const vd = {
+          deliveryDate: date,
+          deliveryDateISO: date,
+        };
         if (rentalDays >= 1) {
           const pickup = calcPickupFromDuration(date, String(rentalDays));
-          if (pickup) updates.pickup_date = pickup;
+          if (pickup) {
+            updates.pickup_date = pickup;
+            vd.pickupDate = pickup;
+          }
           vd.rentalDuration = `${rentalDays} days`;
         }
         updates.vertical_data = vd;
