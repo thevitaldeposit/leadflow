@@ -399,6 +399,7 @@ export default function HomeServicesDashboard() {
   const [dumpsters, setDumpsters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bookingLead, setBookingLead] = useState(null);
+  const [bookedRange, setBookedRange] = useState('7d');
   const settings = getSettings();
   const greeting = getGreeting();
 
@@ -608,6 +609,21 @@ export default function HomeServicesDashboard() {
     };
   }, [leads]);
 
+  // Booked Jobs panel filter — client-side window over the already-computed list.
+  // 1D = today + tomorrow, 7D = next 7 days, 30D = next 30 days.
+  const filteredBookedJobs = useMemo(() => {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    const offset = bookedRange === '1d' ? 1 : bookedRange === '30d' ? 30 : 7;
+    end.setDate(end.getDate() + offset);
+    return bookedJobs.filter(({ lead, vd }) => {
+      const deliveryStr = lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate;
+      if (!deliveryStr) return false;
+      const d = parseLocalDate(deliveryStr);
+      return d && d >= start && d <= end;
+    });
+  }, [bookedJobs, bookedRange]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -715,11 +731,28 @@ export default function HomeServicesDashboard() {
                 <h2 className="text-sm font-bold text-gray-900">Booked Jobs</h2>
               </div>
             </div>
-            {bookedJobs.length === 0 ? (
-              <p className="px-4 py-6 text-center text-xs text-gray-400">No booked jobs yet.</p>
+            <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-end gap-1">
+              {['1d', '7d', '30d'].map(r => (
+                <button
+                  key={r}
+                  onClick={() => setBookedRange(r)}
+                  className={`text-[10px] font-semibold tracking-wide px-2 py-1 rounded transition-colors ${
+                    bookedRange === r
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {r.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            {filteredBookedJobs.length === 0 ? (
+              <p className="px-4 py-6 text-center text-xs text-gray-400">
+                {bookedJobs.length === 0 ? 'No booked jobs yet.' : 'No booked jobs in this period.'}
+              </p>
             ) : (
               <div className="divide-y divide-gray-50 px-2 py-1">
-                {bookedJobs.slice(0, 8).map(({ lead }) => (
+                {filteredBookedJobs.slice(0, 8).map(({ lead }) => (
                   <BookedJobRow key={lead.id} lead={lead} />
                 ))}
               </div>
