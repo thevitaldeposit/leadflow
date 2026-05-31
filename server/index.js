@@ -4,47 +4,15 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+
+// Importing the DB proxy is safe at load time — it holds no open connection yet.
+// Routes also import it at their load time; the proxy forwards calls to the real
+// db only after initDatabase() resolves, which happens before app.listen().
 const db = require('./db/database');
+const { initDatabase } = require('./db/database');
 const { init: initSocket } = require('./socket');
 
-// Initialize DB and run migrations on startup
-require('./db/migrations');
-
-// ── Startup backup ───────────────────────────────────────────────────────────
-// Best-effort JSON export written alongside the DB so a recoverable copy
-// exists even if the DB file is accidentally overwritten.
-// db.js already logged the resolved path; read it back via the module itself.
-try {
-  const _leadCount = db.prepare('SELECT COUNT(*) as n FROM leads').get().n;
-  if (_leadCount > 0) {
-    const _resolvedDb = process.env.DATABASE_PATH
-      ? path.resolve(process.env.DATABASE_PATH)
-      : path.join(__dirname, 'db/leadflow.db');
-    const _backupPath = path.join(path.dirname(_resolvedDb), 'leadflow-backup.json');
-    const _leads = db.prepare('SELECT * FROM leads').all();
-    let _dumpsters = [];
-    try { _dumpsters = db.prepare('SELECT * FROM dumpsters').all(); } catch { /* table may not exist yet */ }
-    fs.writeFileSync(
-      _backupPath,
-      JSON.stringify({ exportedAt: new Date().toISOString(), leadCount: _leadCount, leads: _leads, dumpsters: _dumpsters }, null, 2)
-    );
-    console.log(`[startup] Backed up ${_leadCount} leads → ${_backupPath}`);
-  }
-} catch (_backupErr) {
-  console.error('[startup] Backup failed (non-fatal):', _backupErr.message);
-}
-
-const _k = process.env.OPENAI_API_KEY || '';
-console.log(
-  `[startup] OPENAI_API_KEY ${_k ? `loaded (${_k.slice(0, 8)}...${_k.slice(-4)}, len ${_k.length})` : 'MISSING'}`
-);
-
-// Ensure recordings directory exists
-const RECORDINGS_DIR = path.join(__dirname, 'uploads/recordings');
-if (!fs.existsSync(RECORDINGS_DIR)) {
-  fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
-}
-
+// Route modules register handlers; they do not call the DB at require time.
 const leadsRouter = require('./routes/leads');
 const extractRouter = require('./routes/extract');
 const webhookRouter = require('./routes/webhook');
@@ -66,6 +34,12 @@ app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Ensure recordings directory exists
+const RECORDINGS_DIR = path.join(__dirname, 'uploads/recordings');
+if (!fs.existsSync(RECORDINGS_DIR)) {
+  fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
+}
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -161,12 +135,64 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app);
 initSocket(server);
 
-// Schedule the 8am Morning Priorities push for Home Services devices.
-require('./services/morningPriorities').start();
+async function startServer() {
+  const maxRetries = 10;
+  const retryDelay = 2000;
 
-// Schedule daily 2am deletion of Twilio recordings older than 30 days.
-require('./services/recordingCleanup').start();
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      initDatabase();
+      console.log('[db] Database ready');
+      break;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        console.error('[db] Failed to initialize after', maxRetries, 'attempts:', err.message);
+        process.exit(1);
+      }
+      console.log(`[db] Volume not ready, waiting ${retryDelay / 1000}s... (attempt ${attempt}/${maxRetries})`);
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
+  }
 
-server.listen(PORT, () => {
-  console.log(`LeadFlow server running on http://localhost:${PORT}`);
-});
+  // Run schema migrations now that the DB is confirmed open.
+  require('./db/migrations');
+
+  // Best-effort JSON export alongside the DB so a recoverable copy exists even
+  // if the DB file is accidentally overwritten on redeploy.
+  try {
+    const leadCount = db.prepare('SELECT COUNT(*) as n FROM leads').get().n;
+    if (leadCount > 0) {
+      const resolvedDb = process.env.DATABASE_PATH
+        ? path.resolve(process.env.DATABASE_PATH)
+        : path.join(__dirname, 'db/leadflow.db');
+      const backupPath = path.join(path.dirname(resolvedDb), 'leadflow-backup.json');
+      const leads = db.prepare('SELECT * FROM leads').all();
+      let dumpsters = [];
+      try { dumpsters = db.prepare('SELECT * FROM dumpsters').all(); } catch { /* table may not exist yet */ }
+      fs.writeFileSync(
+        backupPath,
+        JSON.stringify({ exportedAt: new Date().toISOString(), leadCount, leads, dumpsters }, null, 2)
+      );
+      console.log(`[startup] Backed up ${leadCount} leads → ${backupPath}`);
+    }
+  } catch (backupErr) {
+    console.error('[startup] Backup failed (non-fatal):', backupErr.message);
+  }
+
+  const k = process.env.OPENAI_API_KEY || '';
+  console.log(
+    `[startup] OPENAI_API_KEY ${k ? `loaded (${k.slice(0, 8)}...${k.slice(-4)}, len ${k.length})` : 'MISSING'}`
+  );
+
+  // Schedule the 8am Morning Priorities push for Home Services devices.
+  require('./services/morningPriorities').start();
+
+  // Schedule daily 2am deletion of Twilio recordings older than 30 days.
+  require('./services/recordingCleanup').start();
+
+  server.listen(PORT, () => {
+    console.log(`LeadFlow server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

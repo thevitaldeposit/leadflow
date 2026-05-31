@@ -29,35 +29,48 @@ function openDatabase(dbPath) {
 
   ensureWritable(dbDir);
 
-  const db = new DatabaseSync(dbPath);
-  db.exec('PRAGMA journal_mode = WAL');
-  db.exec('PRAGMA foreign_keys = ON');
+  const instance = new DatabaseSync(dbPath);
+  instance.exec('PRAGMA journal_mode = WAL');
+  instance.exec('PRAGMA foreign_keys = ON');
   console.log('[db] Database opened successfully:', dbPath);
-  return db;
+  return instance;
 }
 
-let db;
-const primaryPath = resolveDbPath();
+let _db = null;
 
-try {
-  db = openDatabase(primaryPath);
-} catch (err) {
-  console.error('[db] Failed to open database at', primaryPath);
-  console.error('[db] Error:', err.message);
+// Transparent proxy — route modules `require('./database')` at load time safely.
+// Actual DB calls are deferred to request-handling time, after initDatabase() runs.
+const proxy = new Proxy({}, {
+  get(_, prop) {
+    // initDatabase must be reachable before _db is set
+    if (prop === 'initDatabase') return initDatabase;
+    // Symbols are accessed by JS internals and Promise-detection — pass through safely
+    if (typeof prop === 'symbol') return undefined;
+    // 'then' check prevents accidental Promise-wrapping by frameworks
+    if (prop === 'then') return undefined;
+    if (!_db) throw new Error('[db] Database not ready — initDatabase() has not been called yet');
+    const val = _db[prop];
+    return typeof val === 'function' ? val.bind(_db) : val;
+  },
+});
 
-  if (primaryPath !== FALLBACK_PATH) {
-    console.warn('[db] Falling back to local database:', FALLBACK_PATH);
-    try {
-      db = openDatabase(FALLBACK_PATH);
+// Called by startServer() in index.js inside the retry loop.
+// Throws if the volume is not writable yet — the caller handles retries.
+function initDatabase() {
+  const primaryPath = resolveDbPath();
+  try {
+    _db = openDatabase(primaryPath);
+  } catch (err) {
+    console.error('[db] Failed to open database at', primaryPath, '—', err.message);
+    if (primaryPath !== FALLBACK_PATH) {
+      console.warn('[db] Falling back to local database:', FALLBACK_PATH);
+      _db = openDatabase(FALLBACK_PATH);
       console.warn('[db] WARNING: running on fallback DB — data will not persist across redeploys.');
       console.warn('[db] Fix: ensure the Railway volume at /data is mounted and writable.');
-    } catch (fallbackErr) {
-      console.error('[db] Fallback also failed:', fallbackErr.message);
-      throw fallbackErr;
+    } else {
+      throw err;
     }
-  } else {
-    throw err;
   }
 }
 
-module.exports = db;
+module.exports = proxy;
