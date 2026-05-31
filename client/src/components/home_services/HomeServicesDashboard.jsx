@@ -730,21 +730,21 @@ export default function HomeServicesDashboard() {
                 <CalendarCheck2 size={15} className="text-emerald-600" />
                 <h2 className="text-sm font-bold text-gray-900">Booked Jobs</h2>
               </div>
-            </div>
-            <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-end gap-1">
-              {['1d', '7d', '30d'].map(r => (
-                <button
-                  key={r}
-                  onClick={() => setBookedRange(r)}
-                  className={`text-[10px] font-semibold tracking-wide px-2 py-1 rounded transition-colors ${
-                    bookedRange === r
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {r.toUpperCase()}
-                </button>
-              ))}
+              <div className="flex items-center gap-1">
+                {['1d', '7d', '30d'].map(r => (
+                  <button
+                    key={r}
+                    onClick={() => setBookedRange(r)}
+                    className={`text-[10px] font-semibold tracking-wide px-2 py-1 rounded transition-colors ${
+                      bookedRange === r
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {r.toUpperCase()}
+                  </button>
+                ))}
+              </div>
             </div>
             {filteredBookedJobs.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-gray-400">
