@@ -135,14 +135,16 @@ function formatISODate(iso) {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-function DateField({ label, value, rawValue, onSave }) {
+function DateField({ label, value, rawValue, onSave, showTBDWhenEmpty = false }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || '');
 
   const isISO = value && /^\d{4}-\d{2}-\d{2}$/.test(value);
   const formatted = formatISODate(value);
-  // Show the raw phrase only when it differs from the resolved ISO value
+  // Show the raw phrase as a subtle note when we resolved it successfully
   const showRaw = rawValue && isISO && rawValue.trim() !== value.trim();
+  // Warn when the customer gave a date phrase but we couldn't pin it to a specific day
+  const unconfirmed = !value && rawValue;
 
   const commit = () => {
     setEditing(false);
@@ -168,11 +170,27 @@ function DateField({ label, value, rawValue, onSave }) {
           onClick={() => { setDraft(value || ''); setEditing(true); }}
           className="text-sm text-left text-gray-800 hover:text-accent hover:bg-blue-50 px-1 py-0.5 rounded transition-colors min-h-[26px]"
         >
-          {formatted || <span className="text-gray-300 italic">—</span>}
+          {formatted
+            ? formatted
+            : showTBDWhenEmpty
+              ? <span className="text-gray-400 italic">TBD</span>
+              : <span className="text-gray-300 italic">—</span>
+          }
         </button>
       )}
-      {showRaw && !editing && (
+      {unconfirmed && !editing && (
+        <div className="flex items-start gap-1 mt-0.5">
+          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-xs font-medium">
+            <AlertCircle size={11} />
+            Date not confirmed — update before scheduling
+          </span>
+        </div>
+      )}
+      {!unconfirmed && showRaw && !editing && (
         <span className="text-xs text-gray-400 px-1">Customer said: &ldquo;{rawValue}&rdquo;</span>
+      )}
+      {unconfirmed && !editing && rawValue && (
+        <span className="text-xs text-gray-500 px-1">Customer said: &ldquo;{rawValue}&rdquo;</span>
       )}
     </div>
   );
@@ -191,7 +209,17 @@ function PackField({ field, vd, saveVertical }) {
   }
   if (field.type === 'date') {
     const rawValue = field.rawKey ? vd[field.rawKey] : null;
-    return <div className={cls}><DateField label={field.label} value={value} rawValue={rawValue} onSave={onSave} /></div>;
+    return (
+      <div className={cls}>
+        <DateField
+          label={field.label}
+          value={value}
+          rawValue={rawValue}
+          onSave={onSave}
+          showTBDWhenEmpty={field.showTBDWhenEmpty}
+        />
+      </div>
+    );
   }
   return (
     <div className={cls}>

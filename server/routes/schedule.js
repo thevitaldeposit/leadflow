@@ -169,7 +169,7 @@ router.get('/calendar', (req, res) => {
       FROM leads
       WHERE vertical = 'home_services'
         AND (discarded = 0 OR discarded IS NULL)
-        AND job_status NOT IN ('lost', 'spam')
+        AND job_status IN ('booked', 'scheduled', 'delivered', 'active_rental', 'picked_up')
         AND (
           (delivery_date >= ? AND delivery_date <= ?)
           OR (pickup_date >= ? AND pickup_date <= ?)

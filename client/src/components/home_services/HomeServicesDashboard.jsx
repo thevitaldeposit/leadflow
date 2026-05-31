@@ -398,15 +398,18 @@ export default function HomeServicesDashboard() {
         return da < db2 ? -1 : da > db2 ? 1 : 0;
       });
 
-    // Schedule: upcoming deliveries and pickups grouped by date
+    // Schedule: upcoming deliveries and pickups grouped by date.
+    // Only confirmed jobs (booked → picked_up) appear — not inquiries or opportunities.
+    const SCHEDULE_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up']);
     const today = new Date(); today.setHours(0,0,0,0);
     const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
     const in7days = new Date(today); in7days.setDate(in7days.getDate() + 7);
 
     const scheduleEntries = [];
     for (const { lead, vd } of enriched) {
+      if (!SCHEDULE_STATUSES.has(lead.job_status)) continue;
       const deliveryStr = lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate;
-      const pickupStr = vd.pickupDate;
+      const pickupStr = lead.pickup_date || vd.pickupDate;
       if (deliveryStr) {
         const d = new Date(deliveryStr); d.setHours(0,0,0,0);
         if (d >= today && d <= in7days) scheduleEntries.push({ lead, date: d, type: 'delivery', time: vd.deliveryTime || null });

@@ -78,14 +78,34 @@ function addDaysToISO(isoDate, days) {
 }
 
 // Resolve a human-readable delivery date string to YYYY-MM-DD using the
-// call timestamp as "today". Returns null if the string cannot be resolved.
+// call timestamp as "today". Returns null if the string cannot be resolved
+// OR if the customer gave an ambiguous/non-specific date.
 function resolveDeliveryDate(rawDate, callTimestamp = new Date()) {
   if (!rawDate) return null;
 
   const raw = String(rawDate).trim();
 
-  // Already a valid ISO date — return as-is
+  // ISO passthrough first — this is already a resolved date, skip ambiguity check.
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  // Reject ambiguous language — we must not guess a specific date from a vague phrase.
+  // Better to store null and prompt the user to confirm than to schedule the wrong day.
+  const lower0 = raw.toLowerCase();
+  if (
+    lower0.includes(' or ') ||          // "today or tomorrow", "Monday or Tuesday"
+    lower0.includes('maybe') ||          // "maybe Monday"
+    lower0.includes('sometime') ||       // "sometime this week"
+    lower0.includes('flexible') ||       // "flexible"
+    lower0.includes('not sure') ||       // "not sure yet"
+    lower0.includes('unsure') ||
+    lower0.includes('possibly') ||
+    lower0.includes('probably') ||
+    lower0.includes('around ') ||        // "around Monday", "around the 5th"
+    lower0.includes('ish') ||            // "Mondayish"
+    /^\d{1,2}\s*[-–]\s*\d{1,2}$/.test(raw.trim())  // bare "5-6" or "5 - 6" day range
+  ) {
+    return null;
+  }
 
   const lower = raw.toLowerCase();
 
