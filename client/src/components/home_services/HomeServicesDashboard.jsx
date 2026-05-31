@@ -236,11 +236,63 @@ function ScheduleGroup({ date, leads }) {
 }
 
 // Mark Booked modal
-function BookedModal({ lead, dumpsters, onConfirm, onClose }) {
-  const [date, setDate] = useState('');
+function parseRentalDays(str) {
+  if (!str) return null;
+  const s = String(str).toLowerCase().trim();
+  const num = parseFloat(s);
+  if (isNaN(num)) return null;
+  if (s.includes('week')) return Math.round(num * 7);
+  if (s.includes('month')) return Math.round(num * 30);
+  return Math.round(num);
+}
+
+function calcPickupFromDuration(deliveryISO, rentalDuration) {
+  if (!deliveryISO || !rentalDuration) return null;
+  const days = parseRentalDays(rentalDuration);
+  if (!days) return null;
+  const d = new Date(deliveryISO + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function BookedModal({ lead, onConfirm, onClose }) {
+  const vd = parseVerticalData(lead);
+  // Pre-populate from flat column first, then vertical_data fallback (both should match post-extraction)
+  const [date, setDate] = useState(lead.delivery_date || vd.deliveryDate || '');
+  const [dumpsters, setDumpsters] = useState([]);
   const [dumpsterId, setDumpsterId] = useState('');
-  const available = dumpsters.filter(d => d.status === 'available');
+  const [loading, setLoading] = useState(true);
   const name = getLeadName(lead);
+
+  // Re-fetch when the delivery date changes.  No status filter — availability is
+  // determined solely by date-overlap, matching the schedule page checker.
+  // on_job dumpsters whose current job ends before this delivery date will appear.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const params = {};
+    if (date) {
+      const pickup = lead.pickup_date || calcPickupFromDuration(date, vd.rentalDuration);
+      if (pickup) {
+        // Date-availability mode: server excludes needs_service/out_of_service
+        // and any unit with a conflicting confirmed booking.
+        params.delivery_date = date;
+        params.pickup_date = pickup;
+        params.exclude_lead_id = lead.id;
+      } else {
+        // Date entered but rental duration unknown — can't compute pickup.
+        // Fall back to showing all serviceable units so dispatcher can pick one.
+        params.exclude_unserviceable = '1';
+      }
+    } else {
+      // No date selected yet — show serviceable inventory so dispatcher can browse.
+      params.exclude_unserviceable = '1';
+    }
+    api.getDumpsters(params)
+      .then(d => { if (!cancelled) { setDumpsters(d); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setDumpsters([]); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [date, lead.id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -259,18 +311,25 @@ function BookedModal({ lead, dumpsters, onConfirm, onClose }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              Assign Dumpster {available.length === 0 && <span className="text-red-500">(none available)</span>}
+              Assign Dumpster
+              {date && <span className="ml-1 font-normal text-gray-400 normal-case">(available for selected date)</span>}
             </label>
-            <select
-              value={dumpsterId}
-              onChange={e => setDumpsterId(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
-            >
-              <option value="">— Skip for now —</option>
-              {available.map(d => (
-                <option key={d.id} value={d.id}>{d.asset_number} · {d.size}</option>
-              ))}
-            </select>
+            {loading ? (
+              <p className="text-xs text-gray-400">Loading inventory...</p>
+            ) : dumpsters.length === 0 ? (
+              <p className="text-xs text-amber-600">No dumpsters available for this date.</p>
+            ) : (
+              <select
+                value={dumpsterId}
+                onChange={e => setDumpsterId(e.target.value)}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+              >
+                <option value="">— Skip for now —</option>
+                {dumpsters.map(d => (
+                  <option key={d.id} value={d.id}>{d.asset_number} · {d.size}</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
         <div className="flex gap-3 mt-6">
@@ -667,7 +726,6 @@ export default function HomeServicesDashboard() {
       {bookingLead && (
         <BookedModal
           lead={bookingLead}
-          dumpsters={dumpsters}
           onConfirm={handleBookedConfirm}
           onClose={() => setBookingLead(null)}
         />
