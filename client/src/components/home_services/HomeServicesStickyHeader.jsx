@@ -277,7 +277,16 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
 
   return (
     <>
-      <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-4 bg-white border-b border-gray-200 shadow-sm">
+      {/* The header is rendered as a direct child of <main> (LeadDetailPage
+          passes us in a fragment, not inside the max-w-3xl wrapper) so the
+          scroll container itself is the sticky's containing block and the
+          header stays pinned through every section below. -mt-6 cancels
+          main's p-6 top padding so the bar touches the very top of the
+          scroll port. max-w-[51rem] (max-w-3xl + 2*p-6 = 48rem + 3rem)
+          keeps the bar's outer width identical to the prior design, where
+          the inner max-w-3xl column was bracketed by -mx-6 against the
+          page-wrapper edge. */}
+      <div className="sticky top-0 z-20 -mt-6 mb-4 max-w-[51rem] mx-auto bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-3xl mx-auto px-6 py-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="min-w-0">
