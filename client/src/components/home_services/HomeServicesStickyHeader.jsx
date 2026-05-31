@@ -30,6 +30,12 @@ function calcPickupFromDuration(deliveryISO, rentalDuration) {
   return d.toISOString().slice(0, 10);
 }
 
+function formatPickupDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso + 'T00:00:00Z');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
+
 function getLeadName(lead) {
   try {
     const vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {};
@@ -43,39 +49,42 @@ function BookedModal({ lead, onConfirm, onClose }) {
   const vd = parseVerticalData(lead);
   // Pre-populate from flat column first, then vertical_data fallback (both should match post-extraction)
   const [date, setDate] = useState(lead.delivery_date || vd.deliveryDate || '');
+  const [rentalDays, setRentalDays] = useState(() => {
+    const n = parseRentalDays(vd.rentalDuration);
+    return n ? String(n) : '';
+  });
   const [dumpsters, setDumpsters] = useState([]);
   const [dumpsterId, setDumpsterId] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Re-fetch when the delivery date changes.  No status filter — availability is
-  // determined solely by date-overlap, matching the schedule page checker.
-  // on_job dumpsters whose current job ends before this delivery date will appear.
+  const daysNum = Number(rentalDays);
+  const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
+  const isValid = !!date && daysNum >= 1;
+
+  // Re-fetch whenever delivery date OR rental duration changes.  No status filter —
+  // availability is determined solely by date-overlap on the computed window,
+  // matching the schedule page checker.  on_job dumpsters whose current job ends
+  // before this delivery date correctly appear as available.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     const params = {};
-    if (date) {
-      const pickup = lead.pickup_date || calcPickupFromDuration(date, vd.rentalDuration);
-      if (pickup) {
-        // Date-availability mode: server excludes needs_service/out_of_service
-        // and any unit with a conflicting confirmed booking.
-        params.delivery_date = date;
-        params.pickup_date = pickup;
-        params.exclude_lead_id = lead.id;
-      } else {
-        // Date entered but rental duration unknown — can't compute pickup.
-        // Fall back to showing all serviceable units so dispatcher can pick one.
-        params.exclude_unserviceable = '1';
-      }
+    if (date && pickupISO) {
+      // Date-availability mode: server excludes needs_service/out_of_service
+      // and any unit with a conflicting confirmed booking.
+      params.delivery_date = date;
+      params.pickup_date = pickupISO;
+      params.rental_duration = daysNum;
+      params.exclude_lead_id = lead.id;
     } else {
-      // No date selected yet — show serviceable inventory so dispatcher can browse.
+      // No date or no duration yet — show serviceable inventory so dispatcher can browse.
       params.exclude_unserviceable = '1';
     }
     api.getDumpsters(params)
       .then(d => { if (!cancelled) { setDumpsters(d); setLoading(false); } })
       .catch(() => { if (!cancelled) { setDumpsters([]); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [date, lead.id]);
+  }, [date, rentalDays, lead.id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -84,7 +93,9 @@ function BookedModal({ lead, onConfirm, onClose }) {
         <p className="text-sm text-gray-500 mb-5">{getLeadName(lead)}</p>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Delivery Date</label>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Delivery Date <span className="text-red-500">*</span>
+            </label>
             <input
               type="date"
               value={date}
@@ -94,13 +105,31 @@ function BookedModal({ lead, onConfirm, onClose }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Rental Duration (days) <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={rentalDays}
+              onChange={e => setRentalDays(e.target.value)}
+              placeholder="e.g. 7"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            {pickupISO ? (
+              <p className="text-xs text-gray-500 mt-1">Pickup: {formatPickupDate(pickupISO)}</p>
+            ) : (
+              <p className="text-xs text-gray-400 mt-1">Enter duration to calculate pickup date</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
               Assign Dumpster
-              {date && <span className="ml-1 font-normal text-gray-400 normal-case">(available for selected date)</span>}
+              {isValid && <span className="ml-1 font-normal text-gray-400 normal-case">(available for selected window)</span>}
             </label>
             {loading ? (
               <p className="text-xs text-gray-400">Loading inventory...</p>
             ) : dumpsters.length === 0 ? (
-              <p className="text-xs text-amber-600">No dumpsters available for this date.</p>
+              <p className="text-xs text-amber-600">No dumpsters available for this window.</p>
             ) : (
               <select
                 value={dumpsterId}
@@ -117,8 +146,9 @@ function BookedModal({ lead, onConfirm, onClose }) {
         </div>
         <div className="flex gap-3 mt-6">
           <button
-            onClick={() => onConfirm({ date, dumpsterId: dumpsterId ? Number(dumpsterId) : null })}
-            className="flex-1 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 rounded-xl transition-colors"
+            onClick={() => onConfirm({ date, dumpsterId: dumpsterId ? Number(dumpsterId) : null, rentalDays: daysNum })}
+            disabled={!isValid}
+            className="flex-1 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
           >
             Confirm Booking
           </button>
@@ -211,9 +241,18 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
     }
   };
 
-  const handleBookedConfirm = async ({ date, dumpsterId }) => {
+  const handleBookedConfirm = async ({ date, dumpsterId, rentalDays }) => {
     const updates = { job_status: 'booked', status: 'booked' };
-    if (date) { updates.delivery_date = date; updates.vertical_data = { deliveryDateISO: date }; }
+    if (date) {
+      updates.delivery_date = date;
+      const vd = { deliveryDateISO: date };
+      if (rentalDays >= 1) {
+        const pickup = calcPickupFromDuration(date, String(rentalDays));
+        if (pickup) updates.pickup_date = pickup;
+        vd.rentalDuration = `${rentalDays} days`;
+      }
+      updates.vertical_data = vd;
+    }
     if (dumpsterId) {
       await api.updateDumpster(dumpsterId, { status: 'on_job', current_job_id: lead.id });
       updates.assigned_dumpster_id = dumpsterId;
