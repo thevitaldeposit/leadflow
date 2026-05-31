@@ -254,10 +254,16 @@ export function getLeadActionState(lead, now = new Date()) {
   const neverContacted = (jobStatus === 'inquiry' || jobStatus === null) && status === 'new';
   const stale = isActive && neverContacted && ageMs >= STALE_THRESHOLD_MS;
 
+  // ASAP leads in pre-booked states must surface immediately regardless of follow-up date.
+  const isAsapActive = !!(isOpportunity && isActive && vd.urgency === 'ASAP');
+  // High intent with no action taken after 2 hours — don't let these sit in All Opportunities.
+  const highIntentUncontacted = !!(isOpportunity && isActive && intent === 'high' && ageMs > 2 * MS_HOUR && neverContacted);
+
   // Recommendation: AI-provided sentence wins; otherwise derive a sensible default.
   let recommendation = vd.aiRecommendation && String(vd.aiRecommendation).trim();
   if (!recommendation) {
-    if (followUpDueToday) recommendation = 'Follow up today — scheduled callback is due.';
+    if (isAsapActive) recommendation = 'Customer needs service ASAP — call back immediately.';
+    else if (followUpDueToday) recommendation = 'Follow up today — scheduled callback is due.';
     else if (stale) recommendation = 'Lead is going cold — reach out to re-engage.';
     else if (intent === 'high') recommendation = 'Call today — high-intent lead with no follow-up yet.';
     else if (status === 'waiting_on_customer') recommendation = 'Check back with the customer.';
@@ -265,15 +271,18 @@ export function getLeadActionState(lead, now = new Date()) {
   }
 
   // Buckets used by Today's Priorities — ordered by priority floor below.
+  // asap sits above follow_up_due so ASAP customers are never buried.
   let bucket = 'other';
-  if (followUpDueToday) bucket = 'follow_up_due';
-  else if (intent === 'high' && neverContacted) bucket = 'high_intent_new';
+  if (isAsapActive) bucket = 'asap';
+  else if (followUpDueToday) bucket = 'follow_up_due';
+  else if (highIntentUncontacted) bucket = 'high_intent_new';
   else if (stale) bucket = 'stale';
   else if (status === 'waiting_on_customer') bucket = 'waiting';
 
   // Priority floor by bucket gives stable ranking; intra-bucket tiebreaker is
   // overdueness (older follow-up date first) then lead age.
   const BUCKET_FLOOR = {
+    asap: 5000,
     follow_up_due: 4000,
     high_intent_new: 3000,
     stale: 2000,
@@ -316,6 +325,8 @@ export function getLeadActionState(lead, now = new Date()) {
     followUpDueToday,
     followUpOverdue,
     stale,
+    isAsapActive,
+    highIntentUncontacted,
     priority,
     bucket,
     recommendation,

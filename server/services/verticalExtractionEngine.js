@@ -225,7 +225,7 @@ function splitCustomerName(fullName) {
 // Translate the AI-emitted followUpSignal into an absolute follow-up timestamp,
 // applying the rules from the product spec. `now` is injectable for tests.
 // Returns { followUpDate, followUpReason } — followUpDate is an ISO string.
-function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, now = new Date()) {
+function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, urgency, now = new Date()) {
   function atHour(d, hour, minute = 0) {
     const copy = new Date(d);
     copy.setHours(hour, minute, 0, 0);
@@ -259,9 +259,17 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, no
   let date;
   let reason = providedReason || null;
 
+  // Rule 1 — ASAP urgency overrides everything: call within 2 hours, no exceptions.
+  if (urgency === 'ASAP') {
+    date = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+    return {
+      followUpDate: date.toISOString(),
+      followUpReason: 'Customer needs dumpster today or tomorrow — call back within 2 hours',
+    };
+  }
+
   switch (signal) {
     case 'callback_today':
-      // ASAP / today / emergency → 2 hours from call
       date = new Date(now.getTime() + 2 * 60 * 60 * 1000);
       reason = reason || 'Customer requested a callback today — follow up within 2 hours';
       break;
@@ -273,29 +281,43 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, no
       date = nextMondayAt9(now);
       reason = reason || 'Customer requested a callback next week';
       break;
-    case 'comparing_prices':
-      // Comparing prices → 3 days (not 2 days per spec)
-      date = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-      reason = reason || 'Customer is comparing prices — follow up in 3 days';
+    case 'comparing_prices': {
+      // Use delivery/project date proximity to decide urgency
+      const anchor = parseAnchor(anchorDate);
+      if (anchor) {
+        const daysUntil = Math.round((anchor - now) / (24 * 60 * 60 * 1000));
+        if (daysUntil <= 3) {
+          // Imminent — follow up within 3 hours before they book elsewhere
+          date = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+          reason = 'Customer is shopping prices for an imminent project — follow up within hours before they book elsewhere';
+        } else if (daysUntil <= 7) {
+          // 4-7 days out — 2 days from call at 9am
+          date = atHour(addDays(now, 2), 9, 0);
+          reason = reason || `Customer is comparing prices with project ${daysUntil} days away — follow up in 2 days`;
+        } else {
+          // >7 days — 5 days before project date
+          date = atHour(addDays(anchor, -5), 9, 0);
+          if (date < now) date = atHour(addDays(now, 2), 9, 0);
+          reason = reason || `Customer is comparing prices — follow up 5 days before project (${anchorDate})`;
+        }
+      } else {
+        // No delivery date known — standard 2 days
+        date = atHour(addDays(now, 2), 9, 0);
+        reason = reason || 'Customer is comparing prices — follow up in 2 days';
+      }
       break;
+    }
     case 'before_delivery': {
       const anchor = parseAnchor(anchorDate);
       if (anchor) {
-        // Days until delivery determines lead time
         const daysUntil = Math.round((anchor - now) / (24 * 60 * 60 * 1000));
-        if (daysUntil <= 14) {
-          // 1-2 weeks away → follow up 5 days before project date
-          date = atHour(addDays(anchor, -5), 9, 0);
-          reason = reason || `Project is ${daysUntil} days away — follow up 5 days before (${anchorDate})`;
-        } else {
-          // 3+ weeks away → follow up 7 days before project date
-          date = atHour(addDays(anchor, -7), 9, 0);
-          reason = reason || `Project is ${daysUntil} days away — follow up 7 days before (${anchorDate})`;
-        }
-        // Don't schedule follow-up in the past
+        // Follow up 5 days before the project date
+        date = atHour(addDays(anchor, -5), 9, 0);
+        reason = reason || `Project is ${daysUntil} days away — follow up 5 days before (${anchorDate})`;
+        // Don't schedule in the past
         if (date < now) {
           date = nextBusinessDayAt9(now);
-          reason = reason || `Delivery soon — follow up the next business day`;
+          reason = reason || 'Delivery soon — follow up the next business day';
         }
       } else {
         date = nextBusinessDayAt9(now);
@@ -315,7 +337,6 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, no
         date = nextBusinessDayAt9(now);
         reason = reason || 'High intent lead — follow up the next business day at 9am';
       } else {
-        // No signal → 2 business days at 9am
         date = nextBusinessDayAt9(nextBusinessDayAt9(now));
         reason = reason || 'No explicit follow-up signal — follow up in 2 business days';
       }
@@ -362,7 +383,8 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
       verticalSpecific.followUpSignal,
       verticalSpecific.followUpAnchorDate,
       verticalSpecific.followUpReason,
-      verticalSpecific.intentLevel
+      verticalSpecific.intentLevel,
+      verticalSpecific.urgency
     );
     verticalSpecific.followUpDate = followUpDate;
     verticalSpecific.followUpReason = followUpReason;

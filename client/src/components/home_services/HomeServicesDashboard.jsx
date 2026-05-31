@@ -373,14 +373,22 @@ export default function HomeServicesDashboard() {
     const now = new Date();
     const enriched = leads.map(l => ({ lead: l, state: getLeadActionState(l, now), vd: parseVerticalData(l) }));
 
-    // Needs Attention = active opportunities with follow-up due within 1 day
-    const endOfTomorrow = new Date(now); endOfTomorrow.setDate(endOfTomorrow.getDate() + 1); endOfTomorrow.setHours(23,59,59,999);
+    // Needs Attention — a lead belongs here if ANY of these are true:
+    // 1. urgency is ASAP and still pre-booked (must surface immediately)
+    // 2. follow_up_date is in the past or today
+    // 3. high intent and created more than 2 hours ago with no follow-up taken
+    // 4. stale (48h+ with no contact)
+    const endOfToday = new Date(now); endOfToday.setHours(23,59,59,999);
     const needsAttention = enriched
-      .filter(e => e.state.isOpportunity && e.state.isActive && (
-        (e.state.followUpDate && e.state.followUpDate <= endOfTomorrow) ||
-        e.state.stale ||
-        (e.state.intent === 'high' && !e.state.jobStatus)
-      ))
+      .filter(e => {
+        if (!e.state.isOpportunity || !e.state.isActive) return false;
+        return (
+          e.state.isAsapActive ||
+          (e.state.followUpDate && e.state.followUpDate <= endOfToday) ||
+          e.state.highIntentUncontacted ||
+          e.state.stale
+        );
+      })
       .sort((a, b) => b.state.priority - a.state.priority);
 
     // All Opportunities = pre-booked, not requiring immediate action
