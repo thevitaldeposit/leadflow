@@ -41,24 +41,35 @@ function getLeadName(lead) {
 
 function BookedModal({ lead, onConfirm, onClose }) {
   const vd = parseVerticalData(lead);
-  const [date, setDate] = useState(lead.delivery_date || '');
+  // Pre-populate from flat column first, then vertical_data fallback (both should match post-extraction)
+  const [date, setDate] = useState(lead.delivery_date || vd.deliveryDate || '');
   const [dumpsters, setDumpsters] = useState([]);
   const [dumpsterId, setDumpsterId] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Re-fetch available dumpsters whenever the delivery date changes, using
-  // date-overlap filtering so only truly available units are shown.
+  // Re-fetch when the delivery date changes.  No status filter — availability is
+  // determined solely by date-overlap, matching the schedule page checker.
+  // on_job dumpsters whose current job ends before this delivery date will appear.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const params = { status: 'available' };
+    const params = {};
     if (date) {
       const pickup = lead.pickup_date || calcPickupFromDuration(date, vd.rentalDuration);
       if (pickup) {
+        // Date-availability mode: server excludes needs_service/out_of_service
+        // and any unit with a conflicting confirmed booking.
         params.delivery_date = date;
         params.pickup_date = pickup;
         params.exclude_lead_id = lead.id;
+      } else {
+        // Date entered but rental duration unknown — can't compute pickup.
+        // Fall back to showing all serviceable units so dispatcher can pick one.
+        params.exclude_unserviceable = '1';
       }
+    } else {
+      // No date selected yet — show serviceable inventory so dispatcher can browse.
+      params.exclude_unserviceable = '1';
     }
     api.getDumpsters(params)
       .then(d => { if (!cancelled) { setDumpsters(d); setLoading(false); } })
@@ -127,11 +138,15 @@ function AssignDumpsterModal({ lead, onConfirm, onClose }) {
 
   useEffect(() => {
     let cancelled = false;
-    const params = { status: 'available' };
+    const params = {};
     if (lead.delivery_date && lead.pickup_date) {
+      // Date-availability mode — same overlap logic as booking modal and schedule page
       params.delivery_date = lead.delivery_date;
       params.pickup_date = lead.pickup_date;
       params.exclude_lead_id = lead.id;
+    } else {
+      // No confirmed dates — show serviceable units
+      params.exclude_unserviceable = '1';
     }
     api.getDumpsters(params)
       .then(d => { if (!cancelled) { setDumpsters(d); setLoading(false); } })
