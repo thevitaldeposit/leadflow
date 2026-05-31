@@ -286,7 +286,7 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
           keeps the bar's outer width identical to the prior design, where
           the inner max-w-3xl column was bracketed by -mx-6 against the
           page-wrapper edge. */}
-      <div className="sticky top-0 z-20 -mt-6 mb-4 max-w-[51rem] mx-auto bg-white border-b border-gray-200 shadow-sm">
+      <div className="-mt-6 mb-4 max-w-[51rem] mx-auto bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-3xl mx-auto px-6 py-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="min-w-0">
