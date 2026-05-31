@@ -139,12 +139,20 @@ function DateField({ label, value, rawValue, onSave, showTBDWhenEmpty = false })
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || '');
 
+  // A confirmed date is a valid ISO YYYY-MM-DD string.
   const isISO = value && /^\d{4}-\d{2}-\d{2}$/.test(value);
-  const formatted = formatISODate(value);
-  // Show the raw phrase as a subtle note when we resolved it successfully
-  const showRaw = rawValue && isISO && rawValue.trim() !== value.trim();
-  // Warn when the customer gave a date phrase but we couldn't pin it to a specific day
-  const unconfirmed = !value && rawValue;
+  const formatted = isISO ? formatISODate(value) : null;
+
+  // The customer's original phrase: either the explicit rawValue field, or the
+  // non-ISO value itself (handles old leads where the ambiguous string landed in value).
+  const effectiveRaw = rawValue || (!isISO && value ? value : null);
+
+  // Unconfirmed: we have something the customer said but no resolved ISO date.
+  const unconfirmed = !isISO && !!effectiveRaw;
+
+  // Show a subtle "Customer said" note only when the date resolved cleanly and the
+  // raw phrase differs from the ISO value (e.g. "Monday" → "2026-06-02").
+  const showRawNote = !unconfirmed && rawValue && isISO && rawValue.trim() !== value.trim();
 
   const commit = () => {
     setEditing(false);
@@ -167,30 +175,28 @@ function DateField({ label, value, rawValue, onSave, showTBDWhenEmpty = false })
         />
       ) : (
         <button
-          onClick={() => { setDraft(value || ''); setEditing(true); }}
+          onClick={() => { setDraft(isISO ? value : ''); setEditing(true); }}
           className="text-sm text-left text-gray-800 hover:text-accent hover:bg-blue-50 px-1 py-0.5 rounded transition-colors min-h-[26px]"
         >
           {formatted
             ? formatted
             : showTBDWhenEmpty
               ? <span className="text-gray-400 italic">TBD</span>
-              : <span className="text-gray-300 italic">—</span>
+              : <span className="text-gray-300 italic">Not specified</span>
           }
         </button>
       )}
       {unconfirmed && !editing && (
-        <div className="flex items-start gap-1 mt-0.5">
-          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-xs font-medium">
+        <div className="flex flex-col gap-0.5 mt-0.5">
+          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-xs font-medium w-fit">
             <AlertCircle size={11} />
-            Date not confirmed — update before scheduling
+            Unconfirmed — update before scheduling
           </span>
+          <span className="text-xs text-gray-500 px-1">Customer said: &ldquo;{effectiveRaw}&rdquo;</span>
         </div>
       )}
-      {!unconfirmed && showRaw && !editing && (
+      {showRawNote && !editing && (
         <span className="text-xs text-gray-400 px-1">Customer said: &ldquo;{rawValue}&rdquo;</span>
-      )}
-      {unconfirmed && !editing && rawValue && (
-        <span className="text-xs text-gray-500 px-1">Customer said: &ldquo;{rawValue}&rdquo;</span>
       )}
     </div>
   );

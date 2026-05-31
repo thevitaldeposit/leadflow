@@ -149,6 +149,17 @@ async function processRecording(payload) {
             verticalData.rawDeliveryDate = rawDateStr;
           }
           console.log(`[webhook] Resolved delivery date "${rawDateStr}" → ${resolvedISO}`);
+        } else if (rawDateStr) {
+          // Ambiguous or unresolvable phrase — store what the customer said but leave
+          // delivery_date null so it never shows as plain text on the detail page.
+          commonFields.raw_delivery_date = rawDateStr;
+          verticalData.rawDeliveryDate = rawDateStr;
+          verticalData.deliveryDate = null;
+          verticalData.deliveryDateISO = null;
+          // Pickup date is meaningless without a confirmed delivery date.
+          verticalData.pickupDate = null;
+          commonFields.pickup_date = null;
+          console.log(`[webhook] Ambiguous delivery date "${rawDateStr}" — stored as raw_delivery_date, delivery_date left null`);
         }
 
         // Auto-calculate pickup date when it's missing but delivery + duration are known
