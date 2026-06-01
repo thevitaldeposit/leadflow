@@ -581,7 +581,7 @@ export default function HomeServicesDashboard() {
     const monthBooked = leads.filter(l => (l.job_status === 'booked' || l.status === 'booked') && new Date(l.created_at) >= monthStart).length;
     const bookingRate = monthLeads > 0 ? Math.round((monthBooked / monthLeads) * 100) : 0;
     const revenue = leads
-      .filter(l => ['booked','completed'].includes(l.job_status || '') || ['booked'].includes(l.status || ''))
+      .filter(l => (['booked','completed'].includes(l.job_status || '') || ['booked'].includes(l.status || '')) && new Date(l.updated_at) >= monthStart)
       .reduce((sum, l) => sum + (l.estimated_revenue || 0), 0);
 
     // AI insights
