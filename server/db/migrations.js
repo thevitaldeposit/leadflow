@@ -87,19 +87,53 @@ function runMigrations() {
     )
   `);
 
-  // Dumpster inventory for Phase 2
+  // Pool-based inventory (replaces the legacy per-asset `dumpsters` table).
+  // Inventory is tracked as a count of units per size; availability for a date
+  // range is computed by comparing owned quantity against jobs of that size that
+  // are active during the range. `units_in_service` temporarily reduces the
+  // available count for units that are down for maintenance.
   db.exec(`
-    CREATE TABLE IF NOT EXISTS dumpsters (
+    CREATE TABLE IF NOT EXISTS inventory_pool (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      asset_number TEXT NOT NULL UNIQUE,
-      size TEXT,
-      status TEXT DEFAULT 'available',
-      current_job_id INTEGER,
+      size TEXT NOT NULL UNIQUE,
+      quantity INTEGER NOT NULL DEFAULT 0,
+      units_in_service INTEGER NOT NULL DEFAULT 0,
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // One-time migration from the legacy per-asset `dumpsters` table: group assets
+  // by size, with quantity = unit count and units_in_service = count of units that
+  // were flagged needs_service. Retired (out_of_service) units are excluded from
+  // owned quantity. Runs only while the old table still exists and the pool is
+  // empty, then drops the old table.
+  const dumpstersExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='dumpsters'"
+  ).get();
+  if (dumpstersExists) {
+    const poolCount = db.prepare('SELECT COUNT(*) AS n FROM inventory_pool').get().n;
+    if (poolCount === 0) {
+      const grouped = db.prepare(`
+        SELECT COALESCE(NULLIF(TRIM(size), ''), 'Unspecified') AS size,
+               COUNT(*) AS quantity,
+               SUM(CASE WHEN status = 'needs_service' THEN 1 ELSE 0 END) AS units_in_service
+        FROM dumpsters
+        WHERE status != 'out_of_service'
+        GROUP BY COALESCE(NULLIF(TRIM(size), ''), 'Unspecified')
+      `).all();
+      const insertPool = db.prepare(
+        'INSERT INTO inventory_pool (size, quantity, units_in_service) VALUES (?, ?, ?)'
+      );
+      for (const row of grouped) {
+        insertPool.run(row.size, row.quantity, row.units_in_service || 0);
+      }
+      console.log(`[migrations] Migrated ${grouped.length} size group(s) from dumpsters → inventory_pool`);
+    }
+    db.exec('DROP TABLE dumpsters');
+    console.log('[migrations] Dropped legacy dumpsters table');
+  }
 
   // Settings key-value store (used by payment page and SMS service)
   db.exec(`

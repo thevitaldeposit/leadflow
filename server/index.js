@@ -18,7 +18,7 @@ const extractRouter = require('./routes/extract');
 const webhookRouter = require('./routes/webhook');
 const uploadRouter = require('./routes/upload');
 const devicesRouter = require('./routes/devices');
-const dumpsterRouter = require('./routes/dumpsters');
+const dumpsterRouter = require('./routes/inventory');
 const scheduleRouter = require('./routes/schedule');
 const settingsRouter = require('./routes/settings');
 const paymentRouter = require('./routes/payment');
@@ -167,11 +167,11 @@ async function startServer() {
         : path.join(__dirname, 'db/leadflow.db');
       const backupPath = path.join(path.dirname(resolvedDb), 'leadflow-backup.json');
       const leads = db.prepare('SELECT * FROM leads').all();
-      let dumpsters = [];
-      try { dumpsters = db.prepare('SELECT * FROM dumpsters').all(); } catch { /* table may not exist yet */ }
+      let inventory = [];
+      try { inventory = db.prepare('SELECT * FROM inventory_pool').all(); } catch { /* table may not exist yet */ }
       fs.writeFileSync(
         backupPath,
-        JSON.stringify({ exportedAt: new Date().toISOString(), leadCount, leads, dumpsters }, null, 2)
+        JSON.stringify({ exportedAt: new Date().toISOString(), leadCount, leads, inventory }, null, 2)
       );
       console.log(`[startup] Backed up ${leadCount} leads → ${backupPath}`);
     }

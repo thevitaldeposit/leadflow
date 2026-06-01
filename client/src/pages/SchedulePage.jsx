@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, Calendar, Package } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar, Package } from 'lucide-react';
 import { api } from '../utils/api';
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -23,11 +23,6 @@ function formatDate(iso) {
   return new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatDateShort(iso) {
-  if (!iso) return '—';
-  const [y, m, d] = iso.split('-');
-  return new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 // ── Availability Checker ───────────────────────────────────────────────────────
 
@@ -113,15 +108,10 @@ function AvailabilitySection() {
       {results && results.bySizes && (
         <div className="px-5 pb-5 space-y-4">
           {results.bySizes.length === 0 ? (
-            <p className="text-sm text-gray-400">No dumpsters in inventory.</p>
+            <p className="text-sm text-gray-400">No inventory configured yet.</p>
           ) : (
             results.bySizes.map(group => (
-              <SizeGroup
-                key={group.size}
-                group={group}
-                deliveryDate={results.deliveryDate}
-                pickupDate={results.pickupDate}
-              />
+              <SizeGroup key={group.size} group={group} />
             ))
           )}
         </div>
@@ -136,59 +126,23 @@ function AvailabilitySection() {
   );
 }
 
-function SizeGroup({ group, deliveryDate, pickupDate }) {
-  const allUnavailable = group.availableCount === 0;
+function SizeGroup({ group }) {
+  const { size, ownedCount, unitsInService, bookedCount, availableCount } = group;
+  const none = availableCount <= 0;
 
   return (
-    <div className={`rounded-xl border ${allUnavailable ? 'border-red-100 bg-red-50/30' : 'border-gray-100'} overflow-hidden`}>
-      {/* Size header */}
-      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-        <span className="text-sm font-bold text-gray-800">{group.size}</span>
-        <div className="flex items-center gap-2">
-          <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
-            group.availableCount > 0
-              ? 'bg-emerald-100 text-emerald-700'
-              : 'bg-red-100 text-red-600'
-          }`}>
-            {group.availableCount} available
-          </span>
-          <span className="text-xs text-gray-400">{group.totalCount} total</span>
-        </div>
+    <div className={`rounded-xl border ${none ? 'border-red-100 bg-red-50/30' : 'border-gray-100'} px-4 py-3 flex items-center justify-between gap-3`}>
+      <div className="min-w-0">
+        <p className="text-sm font-bold text-gray-800">{size}</p>
+        <p className="text-xs text-gray-400 mt-0.5">
+          {ownedCount} owned · {bookedCount} on jobs{unitsInService > 0 ? ` · ${unitsInService} in service` : ''}
+        </p>
       </div>
-
-      <div className="divide-y divide-gray-100">
-        {/* Available */}
-        {group.available.map(d => (
-          <div key={d.id} className="flex items-center gap-3 px-4 py-2.5">
-            <CheckCircle2 size={15} className="text-emerald-500 flex-shrink-0" />
-            <span className="text-sm font-semibold text-gray-800">{d.asset_number}</span>
-            <span className="text-xs text-emerald-600 font-medium">Available</span>
-          </div>
-        ))}
-
-        {/* Unavailable */}
-        {group.unavailable.map(d => (
-          <div key={d.id} className="flex items-center gap-3 px-4 py-2.5 bg-red-50/40">
-            <XCircle size={15} className="text-red-400 flex-shrink-0" />
-            <span className="text-sm font-semibold text-gray-700">{d.asset_number}</span>
-            {d.conflict && (
-              <span className="text-xs text-red-500">
-                Booked {formatDateShort(d.conflict.deliveryDate)} → {formatDateShort(d.conflict.pickupDate)}
-                {d.conflict.customerName && ` · ${d.conflict.customerName}`}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Suggestion row when fully unavailable */}
-      {allUnavailable && group.nextAvailableDate && (
-        <div className="px-4 py-2.5 bg-amber-50 border-t border-amber-100">
-          <p className="text-xs text-amber-700">
-            <span className="font-semibold">Next available:</span> {formatDate(group.nextAvailableDate)} (returns from prior job)
-          </p>
-        </div>
-      )}
+      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 ${
+        none ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700'
+      }`}>
+        {none ? `No ${size} available` : `${availableCount} of ${ownedCount} available`}
+      </span>
     </div>
   );
 }

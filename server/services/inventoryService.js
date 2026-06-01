@@ -8,54 +8,78 @@ function normalizeSize(s) {
   return m ? parseInt(m[0], 10) : null;
 }
 
-// Find an available dumpster for a date window and optionally a requested size,
-// assign it to the lead, and return the result.
+// Job statuses that occupy a unit from the pool while active.
+const ACTIVE_JOB_STATUSES = ['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up'];
+
+// Count confirmed jobs, grouped by normalized size, whose [delivery, pickup)
+// window overlaps the requested window. Job size is read from
+// vertical_data.dumpsterSize. Returns Map<normalizedSize:number, count>.
 //
 // deliveryDate / pickupDate: YYYY-MM-DD strings
-// requestedSize: raw size string from AI ("10 yard", "20 yard dumpster", etc.) or null
-//
-// Returns { assigned: true, dumpster } or { assigned: false }
-function autoAssignDumpster(leadId, requestedSize, deliveryDate, pickupDate) {
-  const requestedNum = normalizeSize(requestedSize);
-
-  // All active dumpsters
-  const dumpsters = db.prepare(
-    "SELECT * FROM dumpsters WHERE status != 'out_of_service' ORDER BY asset_number ASC"
-  ).all();
-
-  // Dumpster IDs already locked into a conflicting job window
-  const conflictRows = db.prepare(`
-    SELECT DISTINCT assigned_dumpster_id
+// excludeLeadId: omit this lead's own booking from the count (optional)
+function getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId = null) {
+  const rows = db.prepare(`
+    SELECT id, vertical_data
     FROM leads
-    WHERE assigned_dumpster_id IS NOT NULL
+    WHERE vertical = 'home_services'
       AND delivery_date IS NOT NULL
       AND pickup_date IS NOT NULL
+      AND (discarded = 0 OR discarded IS NULL)
+      AND job_status IN (${ACTIVE_JOB_STATUSES.map(() => '?').join(', ')})
       AND delivery_date < ?
       AND pickup_date > ?
-      AND (discarded = 0 OR discarded IS NULL)
-      AND id != ?
-  `).all(pickupDate, deliveryDate, leadId);
-  const conflictSet = new Set(conflictRows.map(r => r.assigned_dumpster_id));
+  `).all(...ACTIVE_JOB_STATUSES, pickupDate, deliveryDate);
 
-  const match = dumpsters.find(d => {
-    if (conflictSet.has(d.id)) return false;
-    if (requestedNum !== null && normalizeSize(d.size) !== requestedNum) return false;
-    return true;
+  const exclude = excludeLeadId != null ? Number(excludeLeadId) : null;
+  const counts = new Map();
+  for (const r of rows) {
+    if (exclude != null && r.id === exclude) continue;
+    let size = null;
+    try {
+      const vd = r.vertical_data ? JSON.parse(r.vertical_data) : {};
+      size = vd.dumpsterSize;
+    } catch { /* ignore malformed vertical_data */ }
+    const n = normalizeSize(size);
+    if (n === null) continue;
+    counts.set(n, (counts.get(n) || 0) + 1);
+  }
+  return counts;
+}
+
+// Compute availability for every pool size for a given date window.
+// available = owned quantity − units_in_service − overlapping active jobs of that size.
+// Returns an array sorted numerically by size.
+function getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId = null) {
+  const pools = db.prepare('SELECT * FROM inventory_pool').all();
+  const counts = getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId);
+
+  const result = pools.map(p => {
+    const n = normalizeSize(p.size);
+    const booked = (n !== null ? counts.get(n) : 0) || 0;
+    const owned = p.quantity || 0;
+    const inService = p.units_in_service || 0;
+    const available = Math.max(0, owned - inService - booked);
+    return {
+      id: p.id,
+      size: p.size,
+      quantity: owned,
+      units_in_service: inService,
+      booked,
+      available,
+    };
   });
 
-  const now = new Date().toISOString();
+  result.sort((a, b) => (normalizeSize(a.size) || 999) - (normalizeSize(b.size) || 999));
+  return result;
+}
 
-  if (match) {
-    db.prepare('UPDATE leads SET assigned_dumpster_id = ?, updated_at = ? WHERE id = ?')
-      .run(match.id, now, leadId);
-    db.prepare('UPDATE dumpsters SET status = ?, current_job_id = ?, updated_at = ? WHERE id = ?')
-      .run('on_job', leadId, now, match.id);
-    return { assigned: true, dumpster: match };
-  }
-
-  db.prepare('UPDATE leads SET needs_dumpster_assignment = 1, updated_at = ? WHERE id = ?')
-    .run(now, leadId);
-  return { assigned: false };
+// Availability for a single requested size (matched by leading number).
+// Returns the size's availability row, or null if no matching pool exists.
+function getAvailabilityForSize(requestedSize, deliveryDate, pickupDate, excludeLeadId = null) {
+  const requestedNum = normalizeSize(requestedSize);
+  if (requestedNum === null) return null;
+  const all = getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId);
+  return all.find(a => normalizeSize(a.size) === requestedNum) || null;
 }
 
 // Parse a rental duration string to integer days.
@@ -182,4 +206,13 @@ function calculatePickupDate(deliveryDateISO, rentalDuration) {
   return addDaysToISO(deliveryDateISO, days);
 }
 
-module.exports = { autoAssignDumpster, parseRentalDays, addDaysToISO, normalizeSize, resolveDeliveryDate, calculatePickupDate };
+module.exports = {
+  getActiveJobCountsBySize,
+  getAvailabilityBySize,
+  getAvailabilityForSize,
+  parseRentalDays,
+  addDaysToISO,
+  normalizeSize,
+  resolveDeliveryDate,
+  calculatePickupDate,
+};

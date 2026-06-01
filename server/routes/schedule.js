@@ -1,31 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
-const { normalizeSize, addDaysToISO } = require('../services/inventoryService');
-
-// ── helpers ────────────────────────────────────────────────────────────────────
-
-function getLeadName(lead) {
-  try {
-    const vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {};
-    return vd.customerName || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || null;
-  } catch {
-    return [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || null;
-  }
-}
-
-function getLeadSize(lead) {
-  try {
-    const vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {};
-    return vd.dumpsterSize || null;
-  } catch {
-    return null;
-  }
-}
+const { addDaysToISO, getAvailabilityBySize } = require('../services/inventoryService');
 
 // ── GET /api/schedule/availability ────────────────────────────────────────────
 // Query params: delivery_date (YYYY-MM-DD), rental_duration (days, integer)
-// Returns availability grouped by dumpster size.
+// Returns per-size availability counts for the requested window.
 router.get('/availability', (req, res) => {
   try {
     const { delivery_date, rental_duration } = req.query;
@@ -40,106 +20,17 @@ router.get('/availability', (req, res) => {
 
     const pickupDate = addDaysToISO(delivery_date, days);
 
-    // All non-retired dumpsters
-    const dumpsters = db.prepare(
-      "SELECT * FROM dumpsters WHERE status != 'out_of_service' ORDER BY size ASC, asset_number ASC"
-    ).all();
+    // Pool-based availability: owned quantity − units in service − overlapping
+    // active jobs of that size.
+    const bySizes = getAvailabilityBySize(delivery_date, pickupDate).map(p => ({
+      size: p.size,
+      ownedCount: p.quantity,
+      unitsInService: p.units_in_service,
+      bookedCount: p.booked,
+      availableCount: p.available,
+    }));
 
-    // All booked leads with date windows (exclude discarded)
-    const bookedLeads = db.prepare(`
-      SELECT id, assigned_dumpster_id, delivery_date, pickup_date,
-             customer_first_name, customer_last_name, vertical_data
-      FROM leads
-      WHERE assigned_dumpster_id IS NOT NULL
-        AND delivery_date IS NOT NULL
-        AND pickup_date IS NOT NULL
-        AND (discarded = 0 OR discarded IS NULL)
-        AND job_status NOT IN ('completed', 'picked_up', 'cancelled', 'lost', 'spam')
-    `).all();
-
-    // Map dumpster id → conflicting lead (the first conflict found)
-    const conflictMap = new Map();
-    for (const lead of bookedLeads) {
-      if (lead.delivery_date < pickupDate && lead.pickup_date > delivery_date) {
-        if (!conflictMap.has(lead.assigned_dumpster_id)) {
-          conflictMap.set(lead.assigned_dumpster_id, lead);
-        }
-      }
-    }
-
-    // All future leads per dumpster (for next-available calculation)
-    // For each unavailable dumpster, find all conflicting windows and compute
-    // the earliest date after all conflicts clear.
-    const futureLeadsByDumpster = new Map();
-    for (const lead of bookedLeads) {
-      if (!futureLeadsByDumpster.has(lead.assigned_dumpster_id)) {
-        futureLeadsByDumpster.set(lead.assigned_dumpster_id, []);
-      }
-      futureLeadsByDumpster.get(lead.assigned_dumpster_id).push(lead);
-    }
-
-    // Group dumpsters by size
-    const sizeMap = new Map();
-    for (const d of dumpsters) {
-      const size = d.size || 'Unknown';
-      if (!sizeMap.has(size)) sizeMap.set(size, { available: [], unavailable: [] });
-      const group = sizeMap.get(size);
-      const conflict = conflictMap.get(d.id) || null;
-      if (conflict) {
-        group.unavailable.push({ ...d, conflict: {
-          leadId: conflict.id,
-          customerName: getLeadName(conflict),
-          deliveryDate: conflict.delivery_date,
-          pickupDate: conflict.pickup_date,
-        }});
-      } else {
-        group.available.push(d);
-      }
-    }
-
-    // Compute next available date per size
-    function nextAvailableDateForSize(size) {
-      const sizeDumpsters = dumpsters.filter(d => d.size === size);
-      let earliest = null;
-      for (const d of sizeDumpsters) {
-        const leads = futureLeadsByDumpster.get(d.id) || [];
-        // Sort conflicts by pickup_date DESC — the last pickup_date after conflicts
-        const overlapping = leads.filter(l => l.delivery_date < pickupDate && l.pickup_date > delivery_date);
-        if (overlapping.length === 0) return delivery_date; // already available
-        const lastPickup = overlapping.reduce((max, l) => l.pickup_date > max ? l.pickup_date : max, '');
-        if (!earliest || lastPickup < earliest) earliest = lastPickup;
-      }
-      return earliest; // day the last conflict returns
-    }
-
-    const result = [];
-    for (const [size, group] of sizeMap) {
-      const nextAvailable = group.available.length === 0
-        ? nextAvailableDateForSize(size)
-        : null;
-      result.push({
-        size,
-        totalCount: group.available.length + group.unavailable.length,
-        availableCount: group.available.length,
-        available: group.available.map(d => ({ id: d.id, asset_number: d.asset_number, size: d.size })),
-        unavailable: group.unavailable.map(d => ({
-          id: d.id,
-          asset_number: d.asset_number,
-          size: d.size,
-          conflict: d.conflict,
-        })),
-        nextAvailableDate: nextAvailable,
-      });
-    }
-
-    // Sort sizes numerically
-    result.sort((a, b) => {
-      const na = normalizeSize(a.size) || 999;
-      const nb = normalizeSize(b.size) || 999;
-      return na - nb;
-    });
-
-    res.json({ deliveryDate: delivery_date, pickupDate, rentalDuration: days, bySizes: result });
+    res.json({ deliveryDate: delivery_date, pickupDate, rentalDuration: days, bySizes });
   } catch (err) {
     console.error('GET /schedule/availability error:', err);
     res.status(500).json({ error: 'Failed to check availability' });
@@ -165,7 +56,7 @@ router.get('/calendar', (req, res) => {
     // - active rental spanning into the month (delivery before month-end, pickup after month-start or null)
     const leads = db.prepare(`
       SELECT id, customer_first_name, customer_last_name, vertical_data, sub_vertical,
-             job_status, delivery_date, pickup_date, estimated_revenue, assigned_dumpster_id
+             job_status, delivery_date, pickup_date, estimated_revenue
       FROM leads
       WHERE vertical = 'home_services'
         AND (discarded = 0 OR discarded IS NULL)
@@ -194,7 +85,6 @@ router.get('/calendar', (req, res) => {
         customerName: vd.customerName || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown',
         dumpsterSize: vd.dumpsterSize || null,
         address: vd.deliveryAddress || null,
-        assetNumber: null, // will look up if needed
         jobStatus: lead.job_status,
         deliveryDate: lead.delivery_date,
         pickupDate: lead.pickup_date,

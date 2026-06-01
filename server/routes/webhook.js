@@ -8,7 +8,7 @@ const { extractFromTranscript } = require('../services/extractionEngine');
 const { extractFromTranscriptVertical, VERTICAL_CONFIGS } = require('../services/verticalExtractionEngine');
 const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
-const { autoAssignDumpster, parseRentalDays, addDaysToISO, resolveDeliveryDate, calculatePickupDate } = require('../services/inventoryService');
+const { getAvailabilityForSize, parseRentalDays, addDaysToISO, resolveDeliveryDate, calculatePickupDate } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
@@ -200,7 +200,10 @@ async function processRecording(payload) {
         return;
       }
 
-      // Auto-assign inventory when AI detected a confirmed booking
+      // Auto-booking: when the AI detected a confirmed booking, persist the
+      // computed pickup date. Inventory is pool-based — no specific unit is
+      // assigned; availability is computed on demand from owned quantity vs.
+      // active jobs of the same size. We only check availability here for logging.
       if (verticalData.autoBooked === true && lead.delivery_date) {
         let pickupDate = lead.pickup_date;
         if (!pickupDate && verticalData.rentalDuration) {
@@ -212,14 +215,10 @@ async function processRecording(payload) {
             db.prepare('UPDATE leads SET pickup_date = ?, updated_at = ? WHERE id = ?')
               .run(pickupDate, new Date().toISOString(), lead.id);
           }
-          const assignResult = autoAssignDumpster(lead.id, verticalData.dumpsterSize, lead.delivery_date, pickupDate);
-          if (!assignResult.assigned) {
-            console.log(`[webhook] Auto-booked lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching'} dumpster available`);
-          } else {
-            console.log(`[webhook] Auto-assigned dumpster ${assignResult.dumpster.asset_number} to lead ${lead.id}`);
+          const avail = getAvailabilityForSize(verticalData.dumpsterSize, lead.delivery_date, pickupDate, lead.id);
+          if (!avail || avail.available <= 0) {
+            console.log(`[webhook] Auto-booked lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching size'} available for ${lead.delivery_date}→${pickupDate}`);
           }
-        } else {
-          db.prepare('UPDATE leads SET needs_dumpster_assignment = 1 WHERE id = ?').run(lead.id);
         }
         lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
       }

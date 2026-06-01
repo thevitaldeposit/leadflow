@@ -96,7 +96,7 @@ router.put('/:id', (req, res) => {
 
     const allowedFields = [
       'status', 'discarded', 'sub_vertical', 'outcome',
-      'job_status', 'assigned_dumpster_id', 'raw_delivery_date', 'delivery_date', 'pickup_date', 'estimated_revenue',
+      'job_status', 'raw_delivery_date', 'delivery_date', 'pickup_date', 'estimated_revenue',
       'customer_first_name', 'customer_last_name', 'phone', 'email', 'address',
       'voi_year', 'voi_make', 'voi_model', 'voi_trim', 'voi_color',
       'voi_stock_number', 'voi_vin', 'voi_new_or_used',

@@ -43,24 +43,24 @@ export const api = {
   // Dashboard
   getDashboardStats: () => request('/dashboard/stats'),
 
-  // Dumpsters
-  getDumpsters: (params = {}) => {
+  // Inventory pools (path stays /dumpsters for back-compat; each row is a size pool)
+  getInventory: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/dumpsters${qs ? `?${qs}` : ''}`);
   },
-  createDumpster: (body) =>
+  createInventory: (body) =>
     request('/dumpsters', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-  updateDumpster: (id, body) =>
+  updateInventory: (id, body) =>
     request(`/dumpsters/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-  deleteDumpster: (id) => request(`/dumpsters/${id}`, { method: 'DELETE' }),
+  deleteInventory: (id) => request(`/dumpsters/${id}`, { method: 'DELETE' }),
 
   // Schedule
   getAvailability: (deliveryDate, rentalDuration) =>
