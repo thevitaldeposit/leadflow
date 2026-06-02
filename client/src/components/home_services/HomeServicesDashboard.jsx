@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   AlertTriangle, TrendingUp, CalendarCheck2, Truck, CheckCircle2,
-  DollarSign, Phone, MessageSquare, Package,
+  DollarSign, Phone, MessageSquare, Package, CalendarSearch,
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import socket from '../../socket';
@@ -481,6 +481,139 @@ function BookedModal({ lead, onConfirm, onClose }) {
   );
 }
 
+// Quick Availability Check — lightweight, button-triggered availability lookup
+// for use during live calls. Reuses the shared /schedule/availability endpoint
+// (same data the SchedulePage checker and booking modal rely on); no new API.
+function QuickAvailabilityCheck() {
+  const [sizes, setSizes] = useState([]);
+  const [size, setSize] = useState('');
+  const [date, setDate] = useState('');
+  const [duration, setDuration] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null); // { status, available, owned }
+
+  // Populate the size dropdown from the inventory pools (one row per size).
+  useEffect(() => {
+    let cancelled = false;
+    api.getInventory()
+      .then(rows => {
+        if (!cancelled) setSizes((rows || []).map(r => r.size).filter(Boolean));
+      })
+      .catch(() => { if (!cancelled) setSizes([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleCheck = async () => {
+    if (!size || !date || !duration || Number(duration) < 1) {
+      setResult({ status: 'incomplete' });
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    try {
+      const data = await api.getAvailability(date, duration);
+      // Prefer an exact size match (dropdown values come from the same pools the
+      // endpoint reports); fall back to matching by leading number just in case.
+      const match = (data.bySizes || []).find(s => s.size === size)
+        || (data.bySizes || []).find(s => sizeMatches(s.size, size))
+        || null;
+      if (match && match.availableCount > 0) {
+        setResult({ status: 'available', available: match.availableCount, owned: match.ownedCount });
+      } else {
+        setResult({ status: 'none' });
+      }
+    } catch {
+      setResult({ status: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <CalendarSearch size={15} className="text-accent" />
+          <h2 className="text-sm font-bold text-gray-900">Quick Availability Check</h2>
+        </div>
+        <p className="text-xs text-gray-500 mt-0.5">Check dumpster availability in seconds</p>
+      </div>
+
+      <div className="px-4 py-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Dumpster Size
+            </label>
+            <select
+              value={size}
+              onChange={e => setSize(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-accent"
+            >
+              <option value="">Select size…</option>
+              {sizes.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Delivery Date
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Rental Duration (days)
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="365"
+              placeholder="e.g. 7"
+              value={duration}
+              onChange={e => setDuration(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={handleCheck}
+          disabled={loading}
+          className="w-full mt-3 text-sm font-medium text-white bg-accent hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2.5 rounded-lg transition-opacity"
+        >
+          {loading ? 'Checking…' : 'Check Availability'}
+        </button>
+
+        {result && (
+          <div className="mt-3">
+            {result.status === 'incomplete' && (
+              <p className="text-sm text-gray-500">Please fill in all fields</p>
+            )}
+            {result.status === 'available' && (
+              <p className="text-sm font-semibold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
+                {result.available} of {result.owned} available for {size} on {formatDeliveryDate(date)}
+              </p>
+            )}
+            {result.status === 'none' && (
+              <p className="text-sm font-semibold text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                No {size} available for selected dates
+              </p>
+            )}
+            {result.status === 'error' && (
+              <p className="text-sm text-amber-600">Could not check availability — please try again.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ─── main dashboard ────────────────────────────────────────────────────────────
 
 export default function HomeServicesDashboard() {
@@ -797,6 +930,9 @@ export default function HomeServicesDashboard() {
               </div>
             )}
           </section>
+
+          {/* Quick Availability Check */}
+          <QuickAvailabilityCheck />
         </div>
 
         {/* RIGHT COLUMN */}
