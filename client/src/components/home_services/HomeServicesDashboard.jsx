@@ -8,6 +8,7 @@ import socket from '../../socket';
 import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, JOB_STATUS_STYLES } from '../../utils/verticalConfig';
 import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
+import CriticalBadge from './CriticalBadge';
 import VoicemailBadge from './VoicemailBadge';
 import { getSettings, saveSettings } from '../../utils/settings';
 import { useNavigate } from 'react-router-dom';
@@ -294,7 +295,7 @@ function AttentionRow({ lead, state, tier, reason, onBooked, onLost }) {
       className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer rounded-lg transition-colors ${tierBorderClass(tier)}`}
       onClick={() => navigate(`/leads/${lead.id}`)}
     >
-      <IntentBadge value={state.intent} size="sm" />
+      {tier === 1 ? <CriticalBadge size="sm" /> : <IntentBadge value={state.intent} size="sm" />}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
