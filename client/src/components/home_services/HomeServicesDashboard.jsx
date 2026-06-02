@@ -208,7 +208,7 @@ function getAttentionTier(e) {
 // Left-border accent communicating tier urgency. Tier 6 gets a subtle gray so
 // card text stays aligned with the colored tiers above.
 function tierBorderClass(tier) {
-  if (tier === 1) return 'border-l-4 border-red-500';
+  if (tier === 1) return ''; // Critical badge already signals urgency; no redundant red bar
   if (tier <= 3) return 'border-l-4 border-orange-400';
   if (tier <= 5) return 'border-l-4 border-yellow-400';
   return 'border-l-4 border-gray-200';
