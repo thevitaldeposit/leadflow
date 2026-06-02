@@ -245,7 +245,7 @@ function splitCustomerName(fullName) {
 // Translate the AI-emitted followUpSignal into an absolute follow-up timestamp,
 // applying the rules from the product spec. `now` is injectable for tests.
 // Returns { followUpDate, followUpReason } — followUpDate is an ISO string.
-function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, urgency, now = new Date()) {
+function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, urgency, deliveryDateISO, now = new Date()) {
   function atHour(d, hour, minute = 0) {
     const copy = new Date(d);
     copy.setHours(hour, minute, 0, 0);
@@ -255,6 +255,16 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, ur
     const copy = new Date(d);
     copy.setDate(copy.getDate() + n);
     return copy;
+  }
+  function startOfDay(d) {
+    const copy = new Date(d);
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  }
+  // Whole calendar days from `now` to `target`, ignoring time of day so that a
+  // delivery "tomorrow" reads as 1 regardless of when the call came in.
+  function calendarDaysUntil(target) {
+    return Math.round((startOfDay(target) - startOfDay(now)) / (24 * 60 * 60 * 1000));
   }
   function nextBusinessDayAt9(from) {
     let next = addDays(from, 1);
@@ -279,12 +289,18 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, ur
   let date;
   let reason = providedReason || null;
 
-  // Rule 1 — ASAP urgency overrides everything: call within 2 hours, no exceptions.
-  if (urgency === 'ASAP') {
+  // The requested delivery date is the hard deadline — a follow-up after it is
+  // worthless because the opportunity is already gone.
+  const delivery = parseAnchor(deliveryDateISO);
+  const daysUntilDelivery = delivery ? calendarDaysUntil(delivery) : null;
+
+  // Rule 2 — delivery today or tomorrow (or explicit ASAP urgency) needs same-day
+  // attention: call back a few hours after the call came in, never the next day.
+  if ((delivery && daysUntilDelivery <= 1) || urgency === 'ASAP') {
     date = new Date(now.getTime() + 2 * 60 * 60 * 1000);
     return {
       followUpDate: date.toISOString(),
-      followUpReason: 'Customer needs dumpster today or tomorrow — call back within 2 hours',
+      followUpReason: 'Customer needs delivery today or tomorrow — call back within 2 hours',
     };
   }
 
@@ -363,6 +379,22 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, ur
       break;
   }
 
+  // Rules 1 & 3 — never let the follow-up land on or after the delivery deadline,
+  // and always leave enough lead time to actually act. The latest acceptable
+  // follow-up is the day before delivery; pull anything later back to it.
+  if (delivery) {
+    const latestAllowed = atHour(addDays(delivery, -1), 9, 0);
+    if (date > latestAllowed) {
+      date = latestAllowed;
+      reason = `Follow up the day before the ${deliveryDateISO} delivery deadline — last chance to act before the opportunity is gone`;
+    }
+    // Safety net: never schedule in the past (e.g. a late-evening call).
+    if (date < now) {
+      date = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      reason = 'Delivery deadline is imminent — call back within 2 hours';
+    }
+  }
+
   return { followUpDate: date.toISOString(), followUpReason: reason };
 }
 
@@ -401,12 +433,21 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
   // the dashboard's prioritization logic can sort on a single timestamp.
   // Also ensure outcome is always set and job_status defaults to 'inquiry'.
   if (vertical === 'home_services') {
+    // Resolve the delivery date first: it's the hard deadline that caps follow-up
+    // scheduling, so it must be known before computeFollowUpDate runs. If the model
+    // captured the raw phrase but failed to resolve it to an ISO date, do it here.
+    if (!verticalSpecific.deliveryDateISO && verticalSpecific.rawDeliveryDate) {
+      const resolved = resolveDeliveryDate(verticalSpecific.rawDeliveryDate, new Date(), getTimezone());
+      if (resolved) verticalSpecific.deliveryDateISO = resolved;
+    }
+
     const { followUpDate, followUpReason } = computeFollowUpDate(
       verticalSpecific.followUpSignal,
       verticalSpecific.followUpAnchorDate,
       verticalSpecific.followUpReason,
       verticalSpecific.intentLevel,
-      verticalSpecific.urgency
+      verticalSpecific.urgency,
+      verticalSpecific.deliveryDateISO
     );
     verticalSpecific.followUpDate = followUpDate;
     verticalSpecific.followUpReason = followUpReason;
@@ -446,13 +487,6 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
       verticalSpecific.job_status = 'inquiry';
       if (verticalSpecific.intentLevel === 'high') verticalSpecific.intentLevel = 'warm';
       if (verticalSpecific.urgency === 'ASAP') verticalSpecific.urgency = 'This Week';
-    }
-
-    // Fallback: if the model captured the raw delivery phrase but failed to
-    // resolve it to an ISO date, attempt server-side resolution.
-    if (!verticalSpecific.deliveryDateISO && verticalSpecific.rawDeliveryDate) {
-      const resolved = resolveDeliveryDate(verticalSpecific.rawDeliveryDate, new Date(), getTimezone());
-      if (resolved) verticalSpecific.deliveryDateISO = resolved;
     }
   }
 
