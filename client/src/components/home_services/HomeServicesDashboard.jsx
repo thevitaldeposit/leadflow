@@ -736,13 +736,19 @@ export default function HomeServicesDashboard() {
     const onSchedule = scheduleEntries.filter(e => e.type === 'delivery').length;
     const completedMonth = leads.filter(l => l.job_status === 'completed' && new Date(l.updated_at) >= monthStart).length;
 
-    // Month at a glance
-    const monthLeads = leads.filter(l => new Date(l.created_at) >= monthStart).length;
-    const monthBooked = leads.filter(l => (l.job_status === 'booked' || l.status === 'booked') && new Date(l.created_at) >= monthStart).length;
+    // 30 Day Snapshot — rolling 30-day window (today minus 30 days), not the
+    // current calendar month. `today` is normalized to local midnight above.
+    const thirtyDaysAgo = new Date(today); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // parseLocalDate avoids the UTC shift that new Date("YYYY-MM-DD") would cause.
+    const deliveryDateOf = (lead, vd) => parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
+    const inSnapshot = (d) => d && d >= thirtyDaysAgo && d <= today;
+
+    const monthLeads = leads.filter(l => new Date(l.created_at) >= thirtyDaysAgo).length;
+    const monthBooked = enriched.filter(({ lead, vd }) => inSnapshot(deliveryDateOf(lead, vd))).length;
     const bookingRate = monthLeads > 0 ? Math.round((monthBooked / monthLeads) * 100) : 0;
-    const revenue = leads
-      .filter(l => (['booked','completed'].includes(l.job_status || '') || ['booked'].includes(l.status || '')) && new Date(l.updated_at) >= monthStart)
-      .reduce((sum, l) => sum + (l.estimated_revenue || 0), 0);
+    const revenue = enriched
+      .filter(({ lead, vd }) => inSnapshot(deliveryDateOf(lead, vd)))
+      .reduce((sum, { lead }) => sum + (lead.estimated_revenue || 0), 0);
 
     // AI insights
     const insights = [];
@@ -752,7 +758,7 @@ export default function HomeServicesDashboard() {
       insights.push(`${highNotContacted.length} high-intent lead${highNotContacted.length === 1 ? '' : 's'} waiting for first contact. Potential revenue at risk: ${formatCurrency(potentialRev)}.`);
     }
     if (bookingRate > 0) {
-      insights.push(`Your booking rate this month is ${bookingRate}%. Leads contacted within 1 hour are 3× more likely to book.`);
+      insights.push(`Your booking rate over the last 30 days is ${bookingRate}%. Leads contacted within 1 hour are 3× more likely to book.`);
     }
     const staleCount = enriched.filter(e => e.state.stale).length;
     if (staleCount > 0) {
@@ -925,9 +931,9 @@ export default function HomeServicesDashboard() {
         </section>
       )}
 
-      {/* This Month at a Glance */}
+      {/* 30 Day Snapshot */}
       <section className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <h2 className="text-sm font-bold text-gray-700 mb-4">This Month at a Glance</h2>
+        <h2 className="text-sm font-bold text-gray-700 mb-4">30 Day Snapshot</h2>
         <div className="grid grid-cols-4 gap-4">
           <div className="text-center">
             <p className="text-2xl font-bold text-gray-900">{metrics.monthLeads}</p>
