@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Key, Database, Zap, Building2, User, DollarSign, MessageSquare, Clock } from 'lucide-react';
+import { Settings, Key, Database, Zap, Building2, User, DollarSign, MessageSquare, Clock, Inbox } from 'lucide-react';
 import { getSettings, saveSettings } from '../utils/settings';
 import { api } from '../utils/api';
 
@@ -168,6 +168,56 @@ export default function SettingsPage() {
           >
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${settings.smsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
+        </div>
+      </div>
+
+      {/* Action Queue Settings */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Inbox size={18} className="text-red-500" />
+          <h2 className="text-base font-semibold text-gray-800">Action Queue</h2>
+        </div>
+        <p className="text-xs text-gray-500 mb-6">
+          How long a lead stays in the Action Queue before it expires and moves to All Opportunities.
+          Critical issues (inventory conflicts, missing payment/address on booked jobs) never expire.
+        </p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              ASAP lead expiry after delivery date (hours)
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={settings.action_queue_asap_expiry_hours ?? 24}
+              onChange={e => update('action_queue_asap_expiry_hours', Math.max(1, Number(e.target.value) || 24))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Overdue follow-up expiry (hours)
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={settings.action_queue_followup_expiry_hours ?? 48}
+              onChange={e => update('action_queue_followup_expiry_hours', Math.max(1, Number(e.target.value) || 48))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Voicemail expiry (hours)
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={settings.action_queue_voicemail_expiry_hours ?? 24}
+              onChange={e => update('action_queue_voicemail_expiry_hours', Math.max(1, Number(e.target.value) || 24))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
         </div>
       </div>
 

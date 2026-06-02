@@ -9,7 +9,7 @@ import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, JOB_ST
 import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
 import VoicemailBadge from './VoicemailBadge';
-import { getSettings } from '../../utils/settings';
+import { getSettings, saveSettings } from '../../utils/settings';
 import { useNavigate } from 'react-router-dom';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -72,10 +72,90 @@ function parseLocalDate(iso) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-// ─── Needs Attention priority ranking ─────────────────────────────────────────
+// ─── Action Queue priority ranking ────────────────────────────────────────────
 // The queue acts like an ops manager: "if the owner can make one call right now,
 // who first?" Leads are bucketed into priority tiers (1 = most urgent) and sorted
 // tier-first, then most-overdue follow-up, then highest revenue. See getAttentionTier.
+
+const MS_HOUR = 60 * 60 * 1000;
+
+// End of a local calendar day (23:59:59.999) — used as the anchor for ASAP
+// delivery-date expiry so the grace period counts from the delivery day's close.
+function endOfLocalDay(d) {
+  const c = new Date(d); c.setHours(23, 59, 59, 999); return c;
+}
+
+// A lead carries a critical operational flag that must be manually resolved —
+// inventory conflicts or an auto-book that was blocked. These never auto-expire.
+function isCriticalLead(lead, vd) {
+  const aiRec = String(vd.aiRecommendation || '');
+  const notes = String(lead.internal_notes || '');
+  return vd.inventoryConflict === true
+    || /INVENTORY CONFLICT/i.test(aiRec)
+    || /AUTO-BOOK BLOCKED/i.test(notes);
+}
+
+// Has this lead already been expired out of the queue? Once expired we stamp
+// internal_notes so it stays out and isn't re-processed on the next load.
+function isExpiredFlagged(lead) {
+  return /Expired — no action taken/i.test(String(lead.internal_notes || ''));
+}
+
+// Decides whether an enriched lead belongs in the Action Queue right now.
+// A lead qualifies if ANY action is required immediately:
+//   • follow_up_date <= now (overdue or due today)
+//   • urgency ASAP and the delivery date hasn't passed its grace window
+//   • voicemail, not yet contacted, and within its grace window
+//   • a critical flag (inventory conflict / auto-book blocked) — never expires
+//   • a booked job delivering today/tomorrow missing address or payment — critical
+// Returns { inQueue, expired, reason }. `expired` is true when the lead had a
+// qualifying reason that has now lapsed (and isn't critical) — the caller moves
+// these to All Opportunities. `reason` is a short operational-risk string or null.
+function classifyForQueue(e, now, cfg) {
+  const { lead, state, vd } = e;
+
+  // Operational (booked/scheduled) jobs only surface for the missing
+  // address/payment risk — which is critical and never expires.
+  if (state.isOperational) {
+    const reason = bookedAttentionReason(lead, vd, now);
+    return { inQueue: !!reason, expired: false, reason };
+  }
+
+  if (!state.isOpportunity || !state.isActive) {
+    return { inQueue: false, expired: false, reason: null };
+  }
+
+  const critical = isCriticalLead(lead, vd);
+  const isVoicemail = lead.call_type === 'voicemail';
+  const neverContacted = (state.jobStatus === 'inquiry' || state.jobStatus == null) && lead.status === 'new';
+
+  // Collect every qualifying reason with whether it's still within its window.
+  const reasons = [];
+  if (critical) reasons.push({ active: true }); // never expires
+
+  if (state.followUpDate && state.followUpDate <= now) {
+    const expireAt = state.followUpDate.getTime() + cfg.followupExpiryH * MS_HOUR;
+    reasons.push({ active: now.getTime() <= expireAt });
+  }
+
+  if (String(vd.urgency || '').toLowerCase() === 'asap') {
+    const d = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
+    // No delivery date set → can't have expired by date; stays active.
+    const active = d ? now.getTime() <= endOfLocalDay(d).getTime() + cfg.asapExpiryH * MS_HOUR : true;
+    reasons.push({ active });
+  }
+
+  if (isVoicemail && neverContacted) {
+    const created = lead.created_at ? new Date(lead.created_at).getTime() : null;
+    const active = created == null ? true : now.getTime() <= created + cfg.voicemailExpiryH * MS_HOUR;
+    reasons.push({ active });
+  }
+
+  if (reasons.length === 0) return { inQueue: false, expired: false, reason: null };
+
+  const anyActive = reasons.some(r => r.active);
+  return { inQueue: anyActive, expired: !anyActive, reason: null };
+}
 
 // A booked/scheduled job delivering today or tomorrow that is still missing the
 // delivery address or payment is operational risk — it jumps to the top tier.
@@ -95,26 +175,24 @@ function bookedAttentionReason(lead, vd, now) {
   return `Delivering ${when} — missing ${missing.join(' & ')}`;
 }
 
-// Assigns a lead to a priority tier (1 = most urgent, 8 = least). `e` is the
+// Assigns a lead to a priority tier (1 = most urgent, 6 = least). `e` is the
 // enriched { lead, state, vd, bookedReason } record built in the dashboard memo.
 function getAttentionTier(e) {
   const { lead, state, vd, bookedReason } = e;
 
-  // TIER 1 — CRITICAL: inventory conflicts and at-risk booked jobs.
-  const aiRec = String(vd.aiRecommendation || state.recommendation || '');
-  const notes = String(lead.internal_notes || '');
-  if (vd.inventoryConflict === true || /INVENTORY CONFLICT/i.test(aiRec) || /AUTO-BOOK BLOCKED/i.test(notes)) return 1;
-  if (bookedReason) return 1;
+  // TIER 1 — CRITICAL: inventory conflicts, auto-book blocked, and at-risk
+  // booked jobs (missing payment/address delivering today/tomorrow).
+  if (isCriticalLead(lead, vd) || bookedReason) return 1;
 
   const isVoicemail = lead.call_type === 'voicemail';
   // "Not yet contacted": still a fresh inquiry the owner hasn't acted on.
   const neverContacted = (state.jobStatus === 'inquiry' || state.jobStatus == null) && lead.status === 'new';
 
-  // TIER 2 — NEW VOICEMAIL: highest intent, fastest callback wins.
+  // TIER 2 — VOICEMAIL UNCONTACTED: customer is waiting on a callback.
   if (isVoicemail && neverContacted) return 2;
 
-  // TIER 3 — ASAP LEADS (non-voicemail).
-  if (vd.urgency === 'ASAP' && !isVoicemail) return 3;
+  // TIER 3 — ASAP LEADS (delivery date not yet expired — handled in membership).
+  if (String(vd.urgency || '').toLowerCase() === 'asap') return 3;
 
   // TIER 4 — OVERDUE FOLLOW-UPS WITH HIGH INTENT.
   if (state.followUpOverdue && (state.intent === 'high' || state.intent === 'warm')) return 4;
@@ -123,22 +201,16 @@ function getAttentionTier(e) {
   if (state.followUpDueToday && !state.followUpOverdue) return 5;
 
   // TIER 6 — OVERDUE FOLLOW-UPS (standard, medium/low intent).
-  if (state.followUpOverdue) return 6;
-
-  // TIER 7 — WARM LEADS NEEDING CONTACT, no follow-up date set.
-  if (state.intent === 'warm' && !state.followUpDate && neverContacted) return 7;
-
-  // TIER 8 — LOW INTENT / COLD.
-  return 8;
+  return 6;
 }
 
-// Left-border accent communicating tier urgency. Tiers 7-8 get a subtle gray
-// so card text stays aligned with the colored tiers above.
+// Left-border accent communicating tier urgency. Tier 6 gets a subtle gray so
+// card text stays aligned with the colored tiers above.
 function tierBorderClass(tier) {
   if (tier === 1) return 'border-l-4 border-red-500';
   if (tier <= 3) return 'border-l-4 border-orange-400';
-  if (tier <= 6) return 'border-l-4 border-yellow-400';
-  return 'border-l-4 border-gray-100';
+  if (tier <= 5) return 'border-l-4 border-yellow-400';
+  return 'border-l-4 border-gray-200';
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
@@ -645,8 +717,19 @@ export default function HomeServicesDashboard() {
   const [loading, setLoading] = useState(true);
   const [bookingLead, setBookingLead] = useState(null);
   const [bookedRange, setBookedRange] = useState('7d');
-  const settings = getSettings();
+  const [settings, setSettings] = useState(getSettings);
   const greeting = getGreeting();
+
+  // Pull authoritative settings (incl. Action Queue grace periods) from the
+  // server so expiry windows reflect what's configured on the Settings page.
+  useEffect(() => {
+    api.getSettings().then((server) => {
+      if (server && Object.keys(server).length > 0) {
+        saveSettings(server);
+        setSettings(prev => ({ ...prev, ...server }));
+      }
+    }).catch(() => { /* fall back to localStorage defaults */ });
+  }, []);
 
   const load = useCallback(() => {
     return api.getLeads({ vertical: 'home_services', sort: 'created_at', order: 'desc' })
@@ -719,37 +802,33 @@ export default function HomeServicesDashboard() {
     } catch (e) { console.error(e); }
   }, [bookingLead]);
 
-  const { needsAttention, bookedJobs, schedule, metrics, insights } = useMemo(() => {
+  const { needsAttention, toExpire, bookedJobs, schedule, metrics, insights } = useMemo(() => {
     const now = new Date();
     const enriched = leads.map(l => ({ lead: l, state: getLeadActionState(l, now), vd: parseVerticalData(l) }));
 
-    // Needs Attention — a lead belongs here if ANY of these are true:
-    // 1. urgency is ASAP and still pre-booked (must surface immediately)
-    // 2. follow_up_date is in the past or today
-    // 3. high intent and created more than 2 hours ago with no follow-up taken
-    // 4. stale (48h+ with no contact)
-    // 5. captured from voicemail and not yet acted on (customer awaiting callback)
-    // 6. a booked/scheduled job delivering today/tomorrow still missing the
-    //    delivery address or payment (operational risk — see bookedAttentionReason)
-    //
-    // The queue is then ranked like an ops manager: priority tier first
-    // (getAttentionTier), then most-overdue follow-up, then highest revenue.
-    const endOfToday = new Date(now); endOfToday.setHours(23,59,59,999);
-    const needsAttention = enriched
-      .map(e => ({ ...e, bookedReason: e.state.isOperational ? bookedAttentionReason(e.lead, e.vd, now) : null }))
-      .filter(e => {
-        if (e.state.isOperational) return !!e.bookedReason;
-        if (!e.state.isOpportunity || !e.state.isActive) return false;
-        return (
-          e.state.isAsapActive ||
-          (e.state.followUpDate && e.state.followUpDate <= endOfToday) ||
-          e.state.voicemailCallback ||
-          e.state.highIntentUncontacted ||
-          e.state.noConfirmedDelivery ||
-          e.state.stale
-        );
-      })
-      .map(e => ({ ...e, tier: getAttentionTier(e) }))
+    // Action Queue — a lead belongs here only if action is required right now.
+    // classifyForQueue decides membership (overdue/due follow-up, active ASAP,
+    // uncontacted voicemail, critical flags, at-risk booked jobs) and flags
+    // leads whose grace window has lapsed. Critical flags never expire and must
+    // be resolved manually. The queue is then ranked like an ops manager:
+    // priority tier first (getAttentionTier), then most-overdue follow-up, then
+    // highest revenue.
+    const aqCfg = {
+      asapExpiryH: Number(settings.action_queue_asap_expiry_hours) || 24,
+      followupExpiryH: Number(settings.action_queue_followup_expiry_hours) || 48,
+      voicemailExpiryH: Number(settings.action_queue_voicemail_expiry_hours) || 24,
+    };
+    const classified = enriched.map(e => ({ ...e, q: classifyForQueue(e, now, aqCfg) }));
+
+    // Leads whose action window lapsed (and aren't already flagged) are moved to
+    // All Opportunities by the expiration effect below.
+    const toExpire = classified
+      .filter(e => e.q.expired && !isExpiredFlagged(e.lead))
+      .map(e => e.lead);
+
+    const needsAttention = classified
+      .filter(e => e.q.inQueue && !isExpiredFlagged(e.lead))
+      .map(e => ({ ...e, bookedReason: e.q.reason, tier: getAttentionTier({ ...e, bookedReason: e.q.reason }) }))
       .sort((a, b) => {
         if (a.tier !== b.tier) return a.tier - b.tier;
         // Within a tier: most-overdue follow-up first (nulls last)…
@@ -862,12 +941,36 @@ export default function HomeServicesDashboard() {
 
     return {
       needsAttention,
+      toExpire,
       bookedJobs,
       schedule: scheduleGroups,
       metrics: { needsAttentionCount, hotOpps, bookedThisWeek, onSchedule, completedMonth, monthLeads, monthBooked, bookingRate, revenue },
       insights,
     };
-  }, [leads]);
+  }, [leads, settings]);
+
+  // Expiration runs on every dashboard load (and whenever the lead set changes):
+  // any lead whose Action Queue grace window has lapsed is moved to All
+  // Opportunities with an "Expired — no action taken" stamp in internal_notes,
+  // which keeps it out of the queue on subsequent loads. The in-flight ref
+  // guards against firing the same update twice while a request is pending.
+  const expiringRef = useRef(new Set());
+  useEffect(() => {
+    if (!toExpire || toExpire.length === 0) return;
+    const stamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    toExpire.forEach((lead) => {
+      if (expiringRef.current.has(lead.id)) return;
+      expiringRef.current.add(lead.id);
+      const prefix = lead.internal_notes ? `${lead.internal_notes}\n` : '';
+      const internal_notes = `${prefix}Expired — no action taken [${stamp}]`;
+      api.updateLead(lead.id, { job_status: 'opportunity', internal_notes })
+        .then((updated) => {
+          setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+        })
+        .catch((err) => console.error('Failed to expire lead', lead.id, err))
+        .finally(() => { expiringRef.current.delete(lead.id); });
+    });
+  }, [toExpire]);
 
   // Booked Jobs panel filter — client-side window over the already-computed list.
   // Rolling windows measured back from now on booking date (updated_at), matching
@@ -905,7 +1008,7 @@ export default function HomeServicesDashboard() {
 
       {/* Top metric cards */}
       <div className="grid grid-cols-5 gap-3">
-        <MetricCard icon={AlertTriangle} label="Needs Attention" value={metrics.needsAttentionCount}
+        <MetricCard icon={AlertTriangle} label="Action Queue" value={metrics.needsAttentionCount}
           color="bg-red-50" textColor="text-red-700" />
         <MetricCard icon={TrendingUp} label="Hot Opportunities" value={metrics.hotOpps}
           color="bg-amber-50" textColor="text-amber-700" />
@@ -921,12 +1024,12 @@ export default function HomeServicesDashboard() {
       <div className="grid grid-cols-[1fr_360px] gap-5">
         {/* LEFT COLUMN */}
         <div className="space-y-5 min-w-0">
-          {/* Needs Attention Today */}
+          {/* Action Queue */}
           <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <AlertTriangle size={15} className="text-red-500" />
-                <h2 className="text-sm font-bold text-gray-900">Needs Attention Today</h2>
+                <h2 className="text-sm font-bold text-gray-900">Action Queue</h2>
               </div>
               {needsAttention.length > 0 && (
                 <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">

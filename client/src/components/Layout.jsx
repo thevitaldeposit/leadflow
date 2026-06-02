@@ -7,7 +7,6 @@ import {
   Image,
   Mic,
   Zap,
-  Inbox,
   List,
   CalendarCheck2,
   Calendar,
@@ -42,7 +41,6 @@ export default function Layout({ children }) {
   const location = useLocation();
   const [newOpen, setNewOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
-  const [attentionCount, setAttentionCount] = useState(0);
 
   const title = PAGE_TITLES[location.pathname] || 'Lead Detail';
 
@@ -82,10 +80,6 @@ export default function Layout({ children }) {
 
       const toast = { id: ++toastIdCounter, title: toastTitle, sub, leadId: lead.id, autoBooked: isAutoBooked };
       setToasts(prev => [...prev, toast]);
-
-      if (lead.vertical === 'home_services') {
-        setAttentionCount(n => n + 1);
-      }
     };
 
     const handleSmsSent = ({ leadId, customerName, phone }) => {
@@ -142,20 +136,6 @@ export default function Layout({ children }) {
           <div className="pt-2 pb-1">
             <p className="px-4 text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1">Home Services</p>
           </div>
-
-          <NavLink to="/action-queue" className={({ isActive }) =>
-            `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive ? 'bg-sidebar-active text-white' : 'text-gray-400 hover:bg-sidebar-hover hover:text-white'
-            }`
-          }>
-            <Inbox size={18} />
-            <span className="flex-1">Action Queue</span>
-            {attentionCount > 0 && (
-              <span className="text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
-                {attentionCount}
-              </span>
-            )}
-          </NavLink>
 
           <NavLink to="/opportunities" className={linkClass}>
             <List size={18} />

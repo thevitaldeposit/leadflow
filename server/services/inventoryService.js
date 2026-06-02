@@ -254,7 +254,7 @@ function resolvePickupPhrase(phrase, callTimestamp = new Date(), timeZone = 'Ame
 // If a unit is available → returns { blocked: false } and the booking proceeds.
 // If none is available → the provisional booking is downgraded IN PLACE: the
 // lead becomes a flagged high-intent opportunity that surfaces at the top of
-// Needs Attention Today, no payment link is sent, and the conflict is recorded
+// the Action Queue, no payment link is sent, and the conflict is recorded
 // in internal_notes. Both `verticalData` (in memory) and the leads row (in DB)
 // are mutated so the caller can re-check verticalData.autoBooked.
 //
@@ -297,8 +297,8 @@ function enforceAutoBookAvailability(lead, verticalData) {
 
   // Downgrade the in-memory verticalData. Clearing autoBooked makes the caller's
   // `verticalData.autoBooked === true` payment-link check fall through. urgency
-  // ASAP + an immediate followUpDate put the lead in the top Needs Attention
-  // bucket; the aiRecommendation overrides any default text shown there.
+  // ASAP + an immediate followUpDate put the lead in the top Action Queue
+  // tier; the aiRecommendation overrides any default text shown there.
   verticalData.autoBooked = false;
   verticalData.bookingConfidence = 'possible';
   verticalData.job_status = 'opportunity';
