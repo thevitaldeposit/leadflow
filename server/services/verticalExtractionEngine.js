@@ -77,6 +77,15 @@ Set bookingConfidence based on what was found:
 
 Set autoBooked to true ONLY when bookingConfidence is "confirmed".`;
 
+const VOICEMAIL_RULE = `VOICEMAIL CONTEXT: This transcript is a VOICEMAIL message, not a live conversation. There is only ONE speaker — the customer who called and left a message. There is NO business owner on the line and no back-and-forth.
+
+Because nothing could be agreed on a one-way voicemail:
+- This is NEVER a confirmed or likely booking. Do not treat anything the caller says as agreed or accepted.
+- intentLevel must NEVER be "high" — cap it at "warm" at most. A motivated caller who left real project details (size, date, address, debris) is "warm"; a vague message is "cold".
+- urgency must NEVER be "ASAP". If the caller implies they need it soon, use "This Week" at most.
+- Do NOT trigger any booking signals.
+- Still extract everything the caller volunteered: name, phone, dumpster size, debris type, delivery address, timeline/dates, and any pricing questions.`;
+
 const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
   dumpster_rental: {
     promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency, This Week if this week, Next Week if next week, otherwise Flexible.
@@ -162,9 +171,10 @@ function resolveConfig(vertical, subVertical) {
   return { config: VERTICAL_CONFIGS[vertical] || VERTICAL_CONFIGS.auto_dealer, resolvedSubVertical: null };
 }
 
-function buildSystemPrompt(vertical, subVertical) {
+function buildSystemPrompt(vertical, subVertical, options = {}) {
   const { config } = resolveConfig(vertical, subVertical);
-  return `You are a data extraction engine. You output ONLY valid JSON. Never output explanations, preamble, or markdown. Never start your response with words. Always start with { and end with }. If you cannot extract a value, use null.
+  const voicemailSection = options.voicemail ? `\n\n## VOICEMAIL\n${VOICEMAIL_RULE}` : '';
+  return `You are a data extraction engine. You output ONLY valid JSON. Never output explanations, preamble, or markdown. Never start your response with words. Always start with { and end with }. If you cannot extract a value, use null.${voicemailSection}
 
 ## SPEAKER IDENTIFICATION
 In the transcript, Speaker 0 is always the business owner/employee. Speaker 1 and higher are customers. Extract lead information ONLY from customer speakers. You may extract the salesperson/employee name from Speaker 0 if mentioned, but never their personal phone, email, or address.
@@ -349,9 +359,9 @@ function computeFollowUpDate(signal, anchorDate, providedReason, intentLevel, ur
   return { followUpDate: date.toISOString(), followUpReason: reason };
 }
 
-async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer', subVertical = null) {
+async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer', subVertical = null, options = {}) {
   const { resolvedSubVertical } = resolveConfig(vertical, subVertical);
-  const systemPrompt = buildSystemPrompt(vertical, subVertical);
+  const systemPrompt = buildSystemPrompt(vertical, subVertical, options);
 
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -417,6 +427,17 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
 
     // Normalize autoBooked to a strict boolean
     verticalSpecific.autoBooked = bc === 'confirmed' && verticalSpecific.autoBooked === true;
+
+    // Voicemails are a one-way message — nothing can be agreed, so override any
+    // booking/high-urgency signals the model may have inferred. Intent caps at warm.
+    if (options.voicemail) {
+      verticalSpecific.autoBooked = false;
+      verticalSpecific.bookingSignalsDetected = [];
+      verticalSpecific.bookingConfidence = 'none';
+      verticalSpecific.job_status = 'inquiry';
+      if (verticalSpecific.intentLevel === 'high') verticalSpecific.intentLevel = 'warm';
+      if (verticalSpecific.urgency === 'ASAP') verticalSpecific.urgency = 'This Week';
+    }
   }
 
   let phone = extracted.customerPhone;

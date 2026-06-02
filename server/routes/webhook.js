@@ -281,6 +281,157 @@ async function processRecording(payload) {
   }
 }
 
+// Process a voicemail recording asynchronously after responding 200 to Twilio.
+// A voicemail is a single-speaker message left after an unanswered call: it is
+// never auto-booked and intent is capped at Warm (enforced in the extraction
+// engine via the { voicemail: true } option). The recording is named
+// twilio-{SID}.mp3 like answered calls, so the 30-day auto-delete applies.
+async function processVoicemail(payload) {
+  const { RecordingUrl, RecordingSid, CallSid } = payload;
+  const From = payload.From || recallCaller(CallSid);
+
+  if (!fs.existsSync(RECORDINGS_DIR)) {
+    fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
+  }
+
+  const filename = `twilio-${RecordingSid || Date.now()}.mp3`;
+  const audioPath = path.join(RECORDINGS_DIR, filename);
+  const audioPublicPath = `/uploads/recordings/${filename}`;
+
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+  try {
+    const downloadUrl = RecordingUrl.endsWith('.mp3') ? RecordingUrl : `${RecordingUrl}.mp3`;
+    console.log(`[webhook] Downloading voicemail ${RecordingSid} from Twilio...`);
+    await downloadFile(downloadUrl, audioPath, accountSid, authToken);
+
+    console.log(`[webhook] Transcribing voicemail ${RecordingSid}...`);
+    const { transcript, provider, transcription_seconds } = await transcribe(audioPath);
+
+    const defaultVertical = process.env.LEADFLOW_DEFAULT_VERTICAL || 'auto_dealer';
+    const defaultSubVertical = process.env.LEADFLOW_DEFAULT_SUB_VERTICAL || null;
+    const isHomeServices = defaultVertical === 'home_services';
+    const useVerticalEngine = defaultVertical !== 'auto_dealer'
+      && (isHomeServices || VERTICAL_CONFIGS[defaultVertical]);
+
+    if (useVerticalEngine) {
+      console.log(`[webhook] Extracting voicemail ${RecordingSid} via vertical engine (${defaultVertical}${defaultSubVertical ? '/' + defaultSubVertical : ''})...`);
+      const { commonFields, verticalData, confidence, subVertical } = await extractFromTranscriptVertical(
+        transcript,
+        defaultVertical,
+        defaultSubVertical,
+        { voicemail: true }
+      );
+
+      if (!commonFields.phone && From) {
+        const digits = From.replace(/\D/g, '');
+        if (digits.length >= 10) {
+          const local = digits.slice(-10);
+          commonFields.phone = `${local.slice(0, 3)}-${local.slice(3, 6)}-${local.slice(6)}`;
+          commonFields.phone_confidence = 0.7;
+        }
+      }
+
+      // Resolve any timeline the caller mentioned to an ISO date — this only
+      // parses what the customer said; it never books anything.
+      if (isHomeServices) {
+        const rawDateStr = verticalData.rawDeliveryDate
+          || (verticalData.deliveryDate && !/^\d{4}-\d{2}-\d{2}$/.test(verticalData.deliveryDate)
+              ? verticalData.deliveryDate : null);
+        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date());
+        if (resolvedISO) {
+          verticalData.deliveryDateISO = resolvedISO;
+          verticalData.deliveryDate = resolvedISO;
+          commonFields.delivery_date = resolvedISO;
+          if (rawDateStr && !commonFields.raw_delivery_date) {
+            commonFields.raw_delivery_date = rawDateStr;
+            verticalData.rawDeliveryDate = rawDateStr;
+          }
+        } else if (rawDateStr) {
+          commonFields.raw_delivery_date = rawDateStr;
+          verticalData.rawDeliveryDate = rawDateStr;
+          verticalData.deliveryDate = null;
+          verticalData.deliveryDateISO = null;
+        }
+      }
+
+      // Recommendation always points the owner at the callback.
+      const vmName = verticalData.customerName
+        || [commonFields.customer_first_name, commonFields.customer_last_name].filter(Boolean).join(' ')
+        || 'the caller';
+      verticalData.aiRecommendation = `Call back ${vmName} — came in via voicemail`;
+
+      // Internal note flagging the source for the dashboard's Notes section.
+      const existingNote = verticalData.notes ? `${verticalData.notes} ` : '';
+      verticalData.notes = `${existingNote}Lead captured from voicemail`.trim();
+
+      const leadData = {
+        ...commonFields,
+        extraction_type: 'phone_auto',
+        call_type: 'voicemail',
+        job_status: 'inquiry',
+        audio_file_path: audioPublicPath,
+        transcription_provider: provider,
+        transcription_duration_seconds: transcription_seconds || null,
+        auto_captured: 1,
+        caller_phone_raw: From || null,
+        caller_number: From || null,
+        raw_transcript: transcript,
+        vertical: defaultVertical,
+        sub_vertical: subVertical || (isHomeServices ? 'dumpster_rental' : null),
+        source: 'twilio_voicemail',
+        vertical_data: JSON.stringify(verticalData),
+        confidence: confidence || 0,
+      };
+
+      const lead = insertLead(leadData);
+
+      // Zero confidence = personal/non-business message — auto-discard like answered calls.
+      if (!confidence) {
+        db.prepare('UPDATE leads SET discarded = 1 WHERE id = ?').run(lead.id);
+        console.log(`[webhook] Auto-discarded zero-confidence voicemail (lead ${lead.id})`);
+        return;
+      }
+
+      const io = getIO();
+      if (io) io.emit('new_lead', lead);
+      console.log(`[webhook] Voicemail lead ${lead.id} created from Twilio recording ${RecordingSid} (vertical: ${defaultVertical})`);
+      return;
+    }
+
+    console.log(`[webhook] Extracting voicemail ${RecordingSid}...`);
+    const extracted = await extractFromTranscript(transcript);
+
+    extracted.raw_transcript = transcript;
+    extracted.extraction_type = 'phone_auto';
+    extracted.call_type = 'voicemail';
+    extracted.job_status = 'inquiry';
+    extracted.audio_file_path = audioPublicPath;
+    extracted.transcription_provider = provider;
+    extracted.transcription_duration_seconds = transcription_seconds || null;
+    extracted.auto_captured = 1;
+    extracted.caller_phone_raw = From || null;
+    extracted.source = 'twilio_voicemail';
+
+    if (!extracted.phone && From) {
+      const digits = From.replace(/\D/g, '');
+      if (digits.length >= 10) {
+        const local = digits.slice(-10);
+        extracted.phone = `${local.slice(0, 3)}-${local.slice(3, 6)}-${local.slice(6)}`;
+      }
+    }
+
+    const lead = insertLead(extracted);
+
+    const io = getIO();
+    if (io) io.emit('new_lead', lead);
+    console.log(`[webhook] Voicemail lead ${lead.id} created from Twilio recording ${RecordingSid}`);
+  } catch (err) {
+    console.error(`[webhook] Failed to process voicemail ${RecordingSid}:`, err.message);
+  }
+}
+
 // POST /api/webhook/twilio/recording
 router.post('/twilio/recording', (req, res) => {
   // Respond immediately so Twilio doesn't retry
@@ -294,6 +445,23 @@ router.post('/twilio/recording', (req, res) => {
 
   processRecording(payload).catch(err => {
     console.error('[webhook] Unhandled error in processRecording:', err);
+  });
+});
+
+// POST /api/webhook/twilio/voicemail-recording — fired when an unanswered call's
+// voicemail message finishes recording.
+router.post('/twilio/voicemail-recording', (req, res) => {
+  // Respond immediately so Twilio doesn't retry
+  res.sendStatus(200);
+
+  const payload = req.body;
+  if (!payload.RecordingUrl) {
+    console.warn('[webhook] twilio/voicemail-recording: missing RecordingUrl');
+    return;
+  }
+
+  processVoicemail(payload).catch(err => {
+    console.error('[webhook] Unhandled error in processVoicemail:', err);
   });
 });
 
@@ -334,16 +502,30 @@ router.post('/twilio/voice', (req, res) => {
     const callbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/recording`;
     console.log(`[webhook/voice]   recording callback: ${callbackUrl}`);
 
+    // Voicemail fallback assets: the greeting is served statically from
+    // server/public, and the recorded message posts to a dedicated endpoint.
+    const greetingUrl = `${req.protocol}://${publicHost}/Valley_Binz_Voicemail.m4a`;
+    const voicemailCallbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/voicemail-recording`;
+    console.log(`[webhook/voice]   voicemail greeting: ${greetingUrl}`);
+    console.log(`[webhook/voice]   voicemail callback: ${voicemailCallbackUrl}`);
+
     // Omit callerId so Twilio passes the original caller's number through to
     // the forwarded leg with its original STIR/SHAKEN attestation intact.
     console.log(`[webhook/voice]   dial callerId: (passthrough — original caller ${from})`);
 
+    // If the owner doesn't pick up within 20s, the <Dial> ends and TwiML execution
+    // falls through to the voicemail greeting + recording. Answered-call recording
+    // (record-from-answer-dual → /twilio/recording) is unchanged.
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna" language="en-US">This call may be recorded.</Say>
-  <Dial record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
+  <Dial timeout="20" record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
     <Number>${userPhone}</Number>
   </Dial>
+  <Play>${greetingUrl}</Play>
+  <Record maxLength="120" playBeep="true" recordingStatusCallback="${voicemailCallbackUrl}" recordingStatusCallbackMethod="POST" recordingStatusCallbackEvent="completed"/>
+  <Say voice="Polly.Joanna" language="en-US">Thank you. Goodbye.</Say>
+  <Hangup/>
 </Response>`;
 
     console.log(`[webhook/voice]   ✓ returning TwiML — dialing ${userPhone}`);

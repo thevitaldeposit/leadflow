@@ -263,6 +263,10 @@ export function getLeadActionState(lead, now = new Date()) {
     isOpportunity && isActive && intent === 'high' && !lead?.delivery_date &&
     (jobStatus === 'inquiry' || jobStatus === 'opportunity' || jobStatus === null)
   );
+  // Voicemail leads: the customer is waiting for a callback, so surface them in
+  // Needs Attention until the owner takes a first action.
+  const isVoicemail = lead?.call_type === 'voicemail';
+  const voicemailCallback = !!(isOpportunity && isActive && isVoicemail && neverContacted);
 
   // Recommendation: AI-provided sentence wins; otherwise derive a sensible default.
   let recommendation = vd.aiRecommendation && String(vd.aiRecommendation).trim();
@@ -275,12 +279,20 @@ export function getLeadActionState(lead, now = new Date()) {
     else if (status === 'waiting_on_customer') recommendation = 'Check back with the customer.';
     else recommendation = 'Review and decide on next step.';
   }
+  // Voicemail leads always read as a callback prompt, naming the caller.
+  if (isVoicemail) {
+    const vmName = vd.customerName
+      || [lead?.customer_first_name, lead?.customer_last_name].filter(Boolean).join(' ')
+      || 'this caller';
+    recommendation = `Call back ${vmName} — came in via voicemail`;
+  }
 
   // Buckets used by Today's Priorities — ordered by priority floor below.
   // asap sits above follow_up_due so ASAP customers are never buried.
   let bucket = 'other';
   if (isAsapActive) bucket = 'asap';
   else if (followUpDueToday) bucket = 'follow_up_due';
+  else if (voicemailCallback) bucket = 'voicemail';
   else if (highIntentUncontacted) bucket = 'high_intent_new';
   else if (noConfirmedDelivery) bucket = 'no_delivery_date';
   else if (stale) bucket = 'stale';
@@ -291,6 +303,7 @@ export function getLeadActionState(lead, now = new Date()) {
   const BUCKET_FLOOR = {
     asap: 5000,
     follow_up_due: 4000,
+    voicemail: 3500,
     high_intent_new: 3000,
     no_delivery_date: 2500,
     stale: 2000,
@@ -336,6 +349,7 @@ export function getLeadActionState(lead, now = new Date()) {
     isAsapActive,
     highIntentUncontacted,
     noConfirmedDelivery,
+    voicemailCallback,
     priority,
     bucket,
     recommendation,

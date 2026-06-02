@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import UrgencyBadge from './UrgencyBadge';
 import IntentBadge from './IntentBadge';
+import VoicemailBadge from './VoicemailBadge';
 import { api } from '../../utils/api';
 import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES } from '../../utils/verticalConfig';
 
@@ -224,6 +225,7 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
               {summary && <p className="text-sm text-gray-600 mt-0.5">{summary}</p>}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {lead.call_type === 'voicemail' && <VoicemailBadge size="md" />}
               <IntentBadge value={state.intent} size="md" />
               <UrgencyBadge value={vd.urgency} size="md" />
               <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${jobStatusStyle}`}>

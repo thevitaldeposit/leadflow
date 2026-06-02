@@ -9,6 +9,7 @@ import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, JOB_ST
 import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
 import UrgencyBadge from './UrgencyBadge';
+import VoicemailBadge from './VoicemailBadge';
 import { getSettings } from '../../utils/settings';
 import { useNavigate } from 'react-router-dom';
 
@@ -101,6 +102,7 @@ function AttentionRow({ lead, state, onBooked, onLost }) {
       <IntentBadge value={state.intent} size="sm" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
+          {lead.call_type === 'voicemail' && <VoicemailBadge />}
           <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
           {lead.phone && <span className="text-xs text-gray-400 flex-shrink-0">{lead.phone}</span>}
         </div>
@@ -159,6 +161,7 @@ function OpportunityCard({ lead, state, onBooked, onLost }) {
     >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5 flex-wrap">
+          {lead.call_type === 'voicemail' && <VoicemailBadge size="sm" />}
           <IntentBadge value={state.intent} size="sm" />
           <UrgencyBadge value={vd.urgency} size="sm" />
         </div>
@@ -485,6 +488,7 @@ export default function HomeServicesDashboard() {
     // 2. follow_up_date is in the past or today
     // 3. high intent and created more than 2 hours ago with no follow-up taken
     // 4. stale (48h+ with no contact)
+    // 5. captured from voicemail and not yet acted on (customer awaiting callback)
     const endOfToday = new Date(now); endOfToday.setHours(23,59,59,999);
     const needsAttention = enriched
       .filter(e => {
@@ -492,6 +496,7 @@ export default function HomeServicesDashboard() {
         return (
           e.state.isAsapActive ||
           (e.state.followUpDate && e.state.followUpDate <= endOfToday) ||
+          e.state.voicemailCallback ||
           e.state.highIntentUncontacted ||
           e.state.noConfirmedDelivery ||
           e.state.stale

@@ -44,6 +44,10 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Serve static public assets (e.g. the Twilio voicemail greeting) from the web
+// root so TwiML <Play> can reach them at https://<host>/<filename>.
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Dashboard stats — must be registered before the /api/leads router
 app.get('/api/dashboard/stats', (req, res) => {
   try {
