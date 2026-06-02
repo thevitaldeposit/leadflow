@@ -86,6 +86,17 @@ function endOfLocalDay(d) {
   const c = new Date(d); c.setHours(23, 59, 59, 999); return c;
 }
 
+// True when a delivery date falls on today or tomorrow (local). Used to surface
+// imminent deliveries that need a call now, even when the model didn't tag the
+// lead as ASAP (e.g. it heard "tomorrow" and filed urgency under "This Week").
+function isNearTermDelivery(d, now) {
+  if (!d) return false;
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  return day.getTime() === today.getTime() || day.getTime() === tomorrow.getTime();
+}
+
 // A lead carries a critical operational flag that must be manually resolved —
 // inventory conflicts or an auto-book that was blocked. These never auto-expire.
 function isCriticalLead(lead, vd) {
@@ -139,10 +150,19 @@ function classifyForQueue(e, now, cfg) {
     reasons.push({ active: now.getTime() <= expireAt });
   }
 
+  const deliveryDate = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
+
   if (String(vd.urgency || '').toLowerCase() === 'asap') {
-    const d = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
     // No delivery date set → can't have expired by date; stays active.
-    const active = d ? now.getTime() <= endOfLocalDay(d).getTime() + cfg.asapExpiryH * MS_HOUR : true;
+    const active = deliveryDate ? now.getTime() <= endOfLocalDay(deliveryDate).getTime() + cfg.asapExpiryH * MS_HOUR : true;
+    reasons.push({ active });
+  }
+
+  // Near-term delivery: a customer who wants delivery today or tomorrow needs a
+  // call now even if the model didn't tag urgency as ASAP. Active through the
+  // delivery day's grace window.
+  if (isNearTermDelivery(deliveryDate, now)) {
+    const active = now.getTime() <= endOfLocalDay(deliveryDate).getTime() + cfg.asapExpiryH * MS_HOUR;
     reasons.push({ active });
   }
 
@@ -178,7 +198,7 @@ function bookedAttentionReason(lead, vd, now) {
 
 // Assigns a lead to a priority tier (1 = most urgent, 6 = least). `e` is the
 // enriched { lead, state, vd, bookedReason } record built in the dashboard memo.
-function getAttentionTier(e) {
+function getAttentionTier(e, now = new Date()) {
   const { lead, state, vd, bookedReason } = e;
 
   // TIER 1 — CRITICAL: inventory conflicts, auto-book blocked, and at-risk
@@ -192,8 +212,11 @@ function getAttentionTier(e) {
   // TIER 2 — VOICEMAIL UNCONTACTED: customer is waiting on a callback.
   if (isVoicemail && neverContacted) return 2;
 
-  // TIER 3 — ASAP LEADS (delivery date not yet expired — handled in membership).
-  if (String(vd.urgency || '').toLowerCase() === 'asap') return 3;
+  // TIER 3 — ASAP or near-term delivery (today/tomorrow) leads. Delivery-date
+  // expiry is handled in membership; here we just rank them as urgent even when
+  // the model didn't tag urgency as ASAP.
+  const deliveryDate = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
+  if (String(vd.urgency || '').toLowerCase() === 'asap' || isNearTermDelivery(deliveryDate, now)) return 3;
 
   // TIER 4 — OVERDUE FOLLOW-UPS WITH HIGH INTENT.
   if (state.followUpOverdue && (state.intent === 'high' || state.intent === 'warm')) return 4;
@@ -829,7 +852,7 @@ export default function HomeServicesDashboard() {
 
     const needsAttention = classified
       .filter(e => e.q.inQueue && !isExpiredFlagged(e.lead))
-      .map(e => ({ ...e, bookedReason: e.q.reason, tier: getAttentionTier({ ...e, bookedReason: e.q.reason }) }))
+      .map(e => ({ ...e, bookedReason: e.q.reason, tier: getAttentionTier({ ...e, bookedReason: e.q.reason }, now) }))
       .sort((a, b) => {
         if (a.tier !== b.tier) return a.tier - b.tier;
         // Within a tier: most-overdue follow-up first (nulls last)…

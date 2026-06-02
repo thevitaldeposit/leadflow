@@ -90,7 +90,7 @@ Because nothing could be agreed on a one-way voicemail:
 
 const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
   dumpster_rental: {
-    promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency, This Week if this week, Next Week if next week, otherwise Flexible.
+    promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency OR want delivery today or tomorrow, This Week if this week, Next Week if next week, otherwise Flexible. A same-day or next-day ("tomorrow") delivery request is always ASAP and high intent — the owner needs to call back within a few hours.
 
 Date range rules:
 - If the customer describes a range (e.g. "tomorrow until Thursday", "Monday to Friday", "June 3rd through the 5th"), treat the START of the range as the delivery date and the END as the pickup date. Set rawDeliveryDate and deliveryDateISO to the start only; set pickupDate to the resolved ISO date of the end.
