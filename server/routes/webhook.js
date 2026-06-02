@@ -504,7 +504,7 @@ router.post('/twilio/voice', (req, res) => {
 
     // Voicemail fallback assets: the greeting is served statically from
     // server/public, and the recorded message posts to a dedicated endpoint.
-    const greetingUrl = `${req.protocol}://${publicHost}/Valley_Binz_Voicemail.m4a`;
+    const greetingUrl = `${req.protocol}://${publicHost}/Valley_Binz_Voicemail.mp3`;
     const voicemailCallbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/voicemail-recording`;
     console.log(`[webhook/voice]   voicemail greeting: ${greetingUrl}`);
     console.log(`[webhook/voice]   voicemail callback: ${voicemailCallbackUrl}`);
