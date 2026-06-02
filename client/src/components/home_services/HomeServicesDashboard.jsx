@@ -8,7 +8,6 @@ import socket from '../../socket';
 import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, JOB_STATUS_STYLES } from '../../utils/verticalConfig';
 import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
-import UrgencyBadge from './UrgencyBadge';
 import VoicemailBadge from './VoicemailBadge';
 import { getSettings } from '../../utils/settings';
 import { useNavigate } from 'react-router-dom';
@@ -186,52 +185,6 @@ function AttentionRow({ lead, state, onBooked, onLost }) {
         >
           <MessageSquare size={14} />
         </span>
-      </div>
-    </div>
-  );
-}
-
-function OpportunityCard({ lead, state, onBooked, onLost }) {
-  const navigate = useNavigate();
-  const vd = parseVerticalData(lead);
-  const name = getLeadName(lead);
-  const service = getLeadService(lead);
-  const ageMs = Date.now() - new Date(lead.created_at).getTime();
-  const ageLabel = ageMs < 3600000 ? `${Math.floor(ageMs / 60000)}m ago`
-    : ageMs < 86400000 ? `${Math.floor(ageMs / 3600000)}h ago`
-    : `${Math.floor(ageMs / 86400000)}d ago`;
-
-  return (
-    <div
-      className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:shadow-md transition-shadow"
-      onClick={() => navigate(`/leads/${lead.id}`)}
-    >
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {lead.call_type === 'voicemail' && <VoicemailBadge size="sm" />}
-          <IntentBadge value={state.intent} size="sm" />
-          <UrgencyBadge value={vd.urgency} size="sm" />
-        </div>
-        <span className="text-xs text-gray-400 flex-shrink-0">{ageLabel}</span>
-      </div>
-      <p className="text-sm font-semibold text-gray-900">{name}</p>
-      <p className="text-xs text-gray-500 mt-0.5 mb-2">{service}</p>
-      {state.recommendation && (
-        <p className="text-xs text-accent bg-blue-50 rounded px-2 py-1 mb-3">{state.recommendation}</p>
-      )}
-      <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-        <button
-          onClick={() => onBooked(lead)}
-          className="flex-1 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-lg transition-colors"
-        >
-          Mark Booked
-        </button>
-        <button
-          onClick={() => onLost(lead.id)}
-          className="flex-1 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors"
-        >
-          Mark Lost
-        </button>
       </div>
     </div>
   );
@@ -695,7 +648,7 @@ export default function HomeServicesDashboard() {
     } catch (e) { console.error(e); }
   }, [bookingLead]);
 
-  const { needsAttention, allOpportunities, bookedJobs, schedule, metrics, insights } = useMemo(() => {
+  const { needsAttention, bookedJobs, schedule, metrics, insights } = useMemo(() => {
     const now = new Date();
     const enriched = leads.map(l => ({ lead: l, state: getLeadActionState(l, now), vd: parseVerticalData(l) }));
 
@@ -718,12 +671,6 @@ export default function HomeServicesDashboard() {
           e.state.stale
         );
       })
-      .sort((a, b) => b.state.priority - a.state.priority);
-
-    // All Opportunities = pre-booked, not requiring immediate action
-    const attentionIds = new Set(needsAttention.map(e => e.lead.id));
-    const allOpportunities = enriched
-      .filter(e => e.state.isOpportunity && e.state.isActive && !attentionIds.has(e.lead.id))
       .sort((a, b) => b.state.priority - a.state.priority);
 
     // Booked Jobs = operational (booked → completed)
@@ -814,7 +761,6 @@ export default function HomeServicesDashboard() {
 
     return {
       needsAttention,
-      allOpportunities,
       bookedJobs,
       schedule: scheduleGroups,
       metrics: { needsAttentionCount, hotOpps, bookedThisWeek, onSchedule, completedMonth, monthLeads, monthBooked, bookingRate, revenue },
@@ -895,31 +841,6 @@ export default function HomeServicesDashboard() {
               <div className="divide-y divide-gray-50">
                 {needsAttention.map(({ lead, state }) => (
                   <AttentionRow
-                    key={lead.id}
-                    lead={lead}
-                    state={state}
-                    onBooked={() => setBookingLead(lead)}
-                    onLost={handleLost}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* All Opportunities */}
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-bold text-gray-700">All Opportunities</h2>
-              <span className="text-xs text-gray-400">{allOpportunities.length} leads</span>
-            </div>
-            {allOpportunities.length === 0 ? (
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 text-center text-sm text-gray-400">
-                No other open opportunities.
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {allOpportunities.map(({ lead, state }) => (
-                  <OpportunityCard
                     key={lead.id}
                     lead={lead}
                     state={state}
