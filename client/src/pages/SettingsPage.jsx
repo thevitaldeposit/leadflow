@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Key, Database, Zap, Building2, User, DollarSign, MessageSquare } from 'lucide-react';
+import { Settings, Key, Database, Zap, Building2, User, DollarSign, MessageSquare, Clock } from 'lucide-react';
 import { getSettings, saveSettings } from '../utils/settings';
 import { api } from '../utils/api';
 
@@ -36,6 +36,17 @@ export default function SettingsPage() {
   };
 
   const inputClass = 'flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent';
+
+  // IANA timezone → label shown in the dropdown. Used to resolve relative dates
+  // like "tomorrow" against the business's local calendar.
+  const TIMEZONES = [
+    { value: 'America/New_York', label: 'Eastern (America/New_York)' },
+    { value: 'America/Chicago', label: 'Central (America/Chicago)' },
+    { value: 'America/Denver', label: 'Mountain (America/Denver)' },
+    { value: 'America/Los_Angeles', label: 'Pacific (America/Los_Angeles)' },
+    { value: 'America/Anchorage', label: 'Alaska (America/Anchorage)' },
+    { value: 'Pacific/Honolulu', label: 'Hawaii (Pacific/Honolulu)' },
+  ];
 
   return (
     <div className="max-w-2xl mx-auto space-y-4">
@@ -75,6 +86,22 @@ export default function SettingsPage() {
                 placeholder="Austin"
               />
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Timezone</label>
+            <div className="flex items-center gap-2">
+              <Clock size={16} className="text-gray-400 flex-shrink-0" />
+              <select
+                value={settings.timezone || 'America/Chicago'}
+                onChange={e => update('timezone', e.target.value)}
+                className={`${inputClass} bg-white`}
+              >
+                {TIMEZONES.map(tz => (
+                  <option key={tz.value} value={tz.value}>{tz.label}</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">Used to resolve relative dates like “tomorrow” to the correct local day.</p>
           </div>
         </div>
         <p className="text-xs text-gray-400 mt-4">Changes are saved automatically to this device and synced to the server.</p>

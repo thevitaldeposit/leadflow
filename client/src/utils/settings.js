@@ -7,6 +7,7 @@ const DEFAULTS = {
   venmoHandle: '',
   squareApiKey: '',
   smsEnabled: true,
+  timezone: 'America/Chicago',
 };
 
 export function getSettings() {

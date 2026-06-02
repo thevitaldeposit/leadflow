@@ -101,10 +101,26 @@ function addDaysToISO(isoDate, days) {
   return d.toISOString().slice(0, 10);
 }
 
+// Format a moment as its YYYY-MM-DD calendar date in a given IANA timezone.
+// en-CA yields YYYY-MM-DD; the timeZone option shifts to the local date, so a
+// late-evening call west of UTC reports the local day rather than UTC's day.
+function localDateInTimeZone(date, timeZone) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(date);
+  } catch {
+    // Unknown/invalid timezone — fall back to UTC date rather than throwing.
+    return date.toISOString().slice(0, 10);
+  }
+}
+
 // Resolve a human-readable delivery date string to YYYY-MM-DD using the
-// call timestamp as "today". Returns null if the string cannot be resolved
-// OR if the customer gave an ambiguous/non-specific date.
-function resolveDeliveryDate(rawDate, callTimestamp = new Date()) {
+// call timestamp as "today", anchored to the business's local timeZone.
+// Returns null if the string cannot be resolved OR if the customer gave an
+// ambiguous/non-specific date.
+function resolveDeliveryDate(rawDate, callTimestamp = new Date(), timeZone = 'America/Chicago') {
   if (!rawDate) return null;
 
   const raw = String(rawDate).trim();
@@ -133,8 +149,10 @@ function resolveDeliveryDate(rawDate, callTimestamp = new Date()) {
 
   const lower = raw.toLowerCase();
 
-  // Anchor "today" to the date portion of callTimestamp (UTC, avoids DST drift)
-  const todayStr = callTimestamp.toISOString().slice(0, 10);
+  // Anchor "today" to the call date in the business's local timezone, NOT UTC.
+  // The anchor itself is held as midnight-UTC so the day-offset math below stays
+  // DST-proof; only integer days are ever added and we slice off the date.
+  const todayStr = localDateInTimeZone(callTimestamp, timeZone);
   const today = new Date(todayStr + 'T00:00:00Z');
   const todayDay = today.getUTCDay(); // 0=Sun … 6=Sat
 

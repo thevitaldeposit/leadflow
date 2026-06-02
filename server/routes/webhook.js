@@ -11,6 +11,7 @@ const { getIO } = require('../socket');
 const { getAvailabilityForSize, parseRentalDays, addDaysToISO, resolveDeliveryDate, calculatePickupDate } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
 const { logActivity, formatDuration } = require('../services/activityLog');
+const { getTimezone } = require('../services/settingsService');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 
@@ -139,7 +140,7 @@ async function processRecording(payload) {
           || (verticalData.deliveryDate && !/^\d{4}-\d{2}-\d{2}$/.test(verticalData.deliveryDate)
               ? verticalData.deliveryDate : null);
 
-        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date());
+        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date(), getTimezone());
         if (resolvedISO) {
           verticalData.deliveryDateISO = resolvedISO;
           verticalData.deliveryDate = resolvedISO;
@@ -346,7 +347,7 @@ async function processVoicemail(payload) {
         const rawDateStr = verticalData.rawDeliveryDate
           || (verticalData.deliveryDate && !/^\d{4}-\d{2}-\d{2}$/.test(verticalData.deliveryDate)
               ? verticalData.deliveryDate : null);
-        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date());
+        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date(), getTimezone());
         if (resolvedISO) {
           verticalData.deliveryDateISO = resolvedISO;
           verticalData.deliveryDate = resolvedISO;
