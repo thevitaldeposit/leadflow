@@ -72,6 +72,75 @@ function parseLocalDate(iso) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// ─── Needs Attention priority ranking ─────────────────────────────────────────
+// The queue acts like an ops manager: "if the owner can make one call right now,
+// who first?" Leads are bucketed into priority tiers (1 = most urgent) and sorted
+// tier-first, then most-overdue follow-up, then highest revenue. See getAttentionTier.
+
+// A booked/scheduled job delivering today or tomorrow that is still missing the
+// delivery address or payment is operational risk — it jumps to the top tier.
+// Returns a short human reason when the job qualifies, otherwise null.
+function bookedAttentionReason(lead, vd, now) {
+  if (lead.job_status !== 'booked' && lead.job_status !== 'scheduled') return null;
+  const d = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
+  if (!d) return null;
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  if (d.getTime() !== today.getTime() && d.getTime() !== tomorrow.getTime()) return null;
+  const missing = [];
+  if (!vd.deliveryAddress) missing.push('delivery address');
+  if (!lead.paid_at) missing.push('payment');
+  if (missing.length === 0) return null;
+  const when = d.getTime() === today.getTime() ? 'today' : 'tomorrow';
+  return `Delivering ${when} — missing ${missing.join(' & ')}`;
+}
+
+// Assigns a lead to a priority tier (1 = most urgent, 8 = least). `e` is the
+// enriched { lead, state, vd, bookedReason } record built in the dashboard memo.
+function getAttentionTier(e) {
+  const { lead, state, vd, bookedReason } = e;
+
+  // TIER 1 — CRITICAL: inventory conflicts and at-risk booked jobs.
+  const aiRec = String(vd.aiRecommendation || state.recommendation || '');
+  const notes = String(lead.internal_notes || '');
+  if (vd.inventoryConflict === true || /INVENTORY CONFLICT/i.test(aiRec) || /AUTO-BOOK BLOCKED/i.test(notes)) return 1;
+  if (bookedReason) return 1;
+
+  const isVoicemail = lead.call_type === 'voicemail';
+  // "Not yet contacted": still a fresh inquiry the owner hasn't acted on.
+  const neverContacted = (state.jobStatus === 'inquiry' || state.jobStatus == null) && lead.status === 'new';
+
+  // TIER 2 — NEW VOICEMAIL: highest intent, fastest callback wins.
+  if (isVoicemail && neverContacted) return 2;
+
+  // TIER 3 — ASAP LEADS (non-voicemail).
+  if (vd.urgency === 'ASAP' && !isVoicemail) return 3;
+
+  // TIER 4 — OVERDUE FOLLOW-UPS WITH HIGH INTENT.
+  if (state.followUpOverdue && (state.intent === 'high' || state.intent === 'warm')) return 4;
+
+  // TIER 5 — DUE TODAY FOLLOW-UPS (any intent).
+  if (state.followUpDueToday && !state.followUpOverdue) return 5;
+
+  // TIER 6 — OVERDUE FOLLOW-UPS (standard, medium/low intent).
+  if (state.followUpOverdue) return 6;
+
+  // TIER 7 — WARM LEADS NEEDING CONTACT, no follow-up date set.
+  if (state.intent === 'warm' && !state.followUpDate && neverContacted) return 7;
+
+  // TIER 8 — LOW INTENT / COLD.
+  return 8;
+}
+
+// Left-border accent communicating tier urgency. Tiers 7-8 get a subtle gray
+// so card text stays aligned with the colored tiers above.
+function tierBorderClass(tier) {
+  if (tier === 1) return 'border-l-4 border-red-500';
+  if (tier <= 3) return 'border-l-4 border-orange-400';
+  if (tier <= 6) return 'border-l-4 border-yellow-400';
+  return 'border-l-4 border-gray-100';
+}
+
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 function MetricCard({ icon: Icon, label, value, color = 'bg-gray-50', textColor = 'text-gray-700' }) {
@@ -141,7 +210,7 @@ function CallButton({ lead, name }) {
   );
 }
 
-function AttentionRow({ lead, state, onBooked, onLost }) {
+function AttentionRow({ lead, state, tier, reason, onBooked, onLost }) {
   const navigate = useNavigate();
   const vd = parseVerticalData(lead);
   const name = getLeadName(lead);
@@ -150,7 +219,7 @@ function AttentionRow({ lead, state, onBooked, onLost }) {
 
   return (
     <div
-      className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer rounded-lg transition-colors"
+      className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer rounded-lg transition-colors ${tierBorderClass(tier)}`}
       onClick={() => navigate(`/leads/${lead.id}`)}
     >
       <IntentBadge value={state.intent} size="sm" />
@@ -161,8 +230,10 @@ function AttentionRow({ lead, state, onBooked, onLost }) {
           {lead.call_type === 'voicemail' && <VoicemailBadge />}
         </div>
         <p className="text-xs text-gray-500 truncate">{service}</p>
-        {state.recommendation && (
-          <p className="text-xs text-accent font-medium truncate mt-0.5">{state.recommendation}</p>
+        {(reason || state.recommendation) && (
+          <p className={`text-xs font-medium truncate mt-0.5 ${reason ? 'text-red-600' : 'text-accent'}`}>
+            {reason || state.recommendation}
+          </p>
         )}
       </div>
       {followUpLabel && (
@@ -658,9 +729,16 @@ export default function HomeServicesDashboard() {
     // 3. high intent and created more than 2 hours ago with no follow-up taken
     // 4. stale (48h+ with no contact)
     // 5. captured from voicemail and not yet acted on (customer awaiting callback)
+    // 6. a booked/scheduled job delivering today/tomorrow still missing the
+    //    delivery address or payment (operational risk — see bookedAttentionReason)
+    //
+    // The queue is then ranked like an ops manager: priority tier first
+    // (getAttentionTier), then most-overdue follow-up, then highest revenue.
     const endOfToday = new Date(now); endOfToday.setHours(23,59,59,999);
     const needsAttention = enriched
+      .map(e => ({ ...e, bookedReason: e.state.isOperational ? bookedAttentionReason(e.lead, e.vd, now) : null }))
       .filter(e => {
+        if (e.state.isOperational) return !!e.bookedReason;
         if (!e.state.isOpportunity || !e.state.isActive) return false;
         return (
           e.state.isAsapActive ||
@@ -671,7 +749,18 @@ export default function HomeServicesDashboard() {
           e.state.stale
         );
       })
-      .sort((a, b) => b.state.priority - a.state.priority);
+      .map(e => ({ ...e, tier: getAttentionTier(e) }))
+      .sort((a, b) => {
+        if (a.tier !== b.tier) return a.tier - b.tier;
+        // Within a tier: most-overdue follow-up first (nulls last)…
+        const fa = a.state.followUpDate ? a.state.followUpDate.getTime() : Infinity;
+        const fb = b.state.followUpDate ? b.state.followUpDate.getTime() : Infinity;
+        if (fa !== fb) return fa - fb;
+        // …then highest estimated revenue first.
+        const ra = a.lead.estimated_revenue || a.state.estimatedRevenue || 0;
+        const rb = b.lead.estimated_revenue || b.state.estimatedRevenue || 0;
+        return rb - ra;
+      });
 
     // Booked Jobs = operational (booked → completed)
     const bookedJobs = enriched
@@ -851,11 +940,13 @@ export default function HomeServicesDashboard() {
               </div>
             ) : (
               <div className="divide-y divide-gray-50">
-                {needsAttention.map(({ lead, state }) => (
+                {needsAttention.map(({ lead, state, tier, bookedReason }) => (
                   <AttentionRow
                     key={lead.id}
                     lead={lead}
                     state={state}
+                    tier={tier}
+                    reason={bookedReason}
                     onBooked={() => setBookingLead(lead)}
                     onLost={handleLost}
                   />
