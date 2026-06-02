@@ -8,7 +8,7 @@ const { extractFromTranscript } = require('../services/extractionEngine');
 const { extractFromTranscriptVertical, VERTICAL_CONFIGS } = require('../services/verticalExtractionEngine');
 const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
-const { resolveDeliveryDate, calculatePickupDate, enforceAutoBookAvailability } = require('../services/inventoryService');
+const { resolveDeliveryDate, parseRentalDays, addDaysToISO, resolvePickupPhrase, enforceAutoBookAvailability } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
 const { logActivity, formatDuration } = require('../services/activityLog');
 const { getTimezone } = require('../services/settingsService');
@@ -164,14 +164,35 @@ async function processRecording(payload) {
           console.log(`[webhook] Ambiguous delivery date "${rawDateStr}" — stored as raw_delivery_date, delivery_date left null`);
         }
 
-        // Auto-calculate pickup date when it's missing but delivery + duration are known
+        // Resolve the pickup date and normalize rental duration to a day count.
+        // Node date math is authoritative here: the AI routinely miscalculates
+        // the ISO date for a named weekday (e.g. resolving "Friday" to the
+        // following Saturday), so we recompute the rental end from the
+        // customer's own phrasing rather than trusting the AI's pickupDate.
         const deliveryISO = commonFields.delivery_date || null;
-        if (deliveryISO && verticalData.rentalDuration && !commonFields.pickup_date) {
-          const pickupISO = calculatePickupDate(deliveryISO, verticalData.rentalDuration);
-          if (pickupISO) {
+        if (deliveryISO) {
+          const durationDays = parseRentalDays(verticalData.rentalDuration);
+          let pickupISO = null;
+
+          if (durationDays) {
+            // Numeric duration ("7 days", "1 week") → derive pickup from it.
+            pickupISO = addDaysToISO(deliveryISO, durationDays);
+          } else if (verticalData.rentalDuration) {
+            // Prose like "tomorrow until friday" → resolve the end weekday/date
+            // with the (correct) Node weekday logic instead of the AI's value.
+            pickupISO = resolvePickupPhrase(verticalData.rentalDuration, new Date(), getTimezone());
+          }
+
+          if (pickupISO && pickupISO > deliveryISO) {
             commonFields.pickup_date = pickupISO;
             verticalData.pickupDate = pickupISO;
-            console.log(`[webhook] Calculated pickup date from "${verticalData.rentalDuration}" → ${pickupISO}`);
+            // Replace vague prose with a concrete day count so the UI and
+            // availability math have a real number to work with.
+            const spanDays = Math.round(
+              (Date.parse(`${pickupISO}T00:00:00Z`) - Date.parse(`${deliveryISO}T00:00:00Z`)) / 86400000
+            );
+            if (spanDays > 0) verticalData.rentalDuration = `${spanDays} days`;
+            console.log(`[webhook] Resolved pickup date → ${pickupISO} (rental ${verticalData.rentalDuration})`);
           }
         }
       }
@@ -363,6 +384,31 @@ async function processVoicemail(payload) {
           verticalData.rawDeliveryDate = rawDateStr;
           verticalData.deliveryDate = null;
           verticalData.deliveryDateISO = null;
+        }
+
+        // Resolve the pickup date and normalize rental duration to a day count,
+        // matching the recording path. Node date math is authoritative: the AI
+        // routinely lands a named weekday one day late, so we recompute the
+        // rental end from the customer's own phrasing.
+        const deliveryISO = commonFields.delivery_date || null;
+        if (deliveryISO) {
+          const durationDays = parseRentalDays(verticalData.rentalDuration);
+          let pickupISO = null;
+
+          if (durationDays) {
+            pickupISO = addDaysToISO(deliveryISO, durationDays);
+          } else if (verticalData.rentalDuration) {
+            pickupISO = resolvePickupPhrase(verticalData.rentalDuration, new Date(), getTimezone());
+          }
+
+          if (pickupISO && pickupISO > deliveryISO) {
+            commonFields.pickup_date = pickupISO;
+            verticalData.pickupDate = pickupISO;
+            const spanDays = Math.round(
+              (Date.parse(`${pickupISO}T00:00:00Z`) - Date.parse(`${deliveryISO}T00:00:00Z`)) / 86400000
+            );
+            if (spanDays > 0) verticalData.rentalDuration = `${spanDays} days`;
+          }
         }
       }
 

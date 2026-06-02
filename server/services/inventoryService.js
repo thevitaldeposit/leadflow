@@ -224,6 +224,26 @@ function calculatePickupDate(deliveryDateISO, rentalDuration) {
   return addDaysToISO(deliveryDateISO, days);
 }
 
+// Resolve a rental-end / pickup phrase to an ISO date (YYYY-MM-DD).
+//
+// Customers describe the end of a rental relative to the start, e.g.
+// "until Friday", "til next Monday", "through June 5", or the combined
+// "tomorrow until friday". We strip the leading connective and hand the
+// remaining date phrase to resolveDeliveryDate, which already anchors weekday
+// math to the business timezone. This keeps the (correct) Node weekday logic
+// authoritative instead of trusting the AI, which routinely lands a named
+// weekday one day late (e.g. resolving Friday to the following Saturday).
+//
+// Returns null when no resolvable date is present.
+const PICKUP_CONNECTIVE_RE = /\b(?:until|untill|til|till|through|thru|to|by)\s+(.+)$/i;
+function resolvePickupPhrase(phrase, callTimestamp = new Date(), timeZone = 'America/Chicago') {
+  if (!phrase) return null;
+  const str = String(phrase).trim();
+  const m = str.match(PICKUP_CONNECTIVE_RE);
+  const datePart = (m ? m[1] : str).trim();
+  return resolveDeliveryDate(datePart, callTimestamp, timeZone);
+}
+
 // Gate an AI-detected auto-booking on real pool availability.
 //
 // Inventory is pool-based: availability for the requested size is computed by
@@ -326,5 +346,6 @@ module.exports = {
   normalizeSize,
   resolveDeliveryDate,
   calculatePickupDate,
+  resolvePickupPhrase,
   enforceAutoBookAvailability,
 };
