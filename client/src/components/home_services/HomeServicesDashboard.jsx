@@ -237,14 +237,38 @@ function OpportunityCard({ lead, state, onBooked, onLost }) {
   );
 }
 
+// Pull just the city out of a delivery address or city field. Addresses look
+// like "123 Main St, Springfield, IL 62704" — the city is the segment before
+// the state/zip. Falls back to a dedicated city field when present.
+function getDeliveryCity(vd) {
+  if (vd.city) return String(vd.city).trim();
+  const addr = vd.deliveryAddress;
+  if (!addr) return null;
+  const parts = String(addr).split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  // 3+ parts: street, city, state zip → city is second-to-last.
+  // 2 parts: city, state zip → city is first.
+  const city = parts.length >= 3 ? parts[parts.length - 2] : parts[0];
+  return city || null;
+}
+
+function formatBookedDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 function BookedJobRow({ lead }) {
   const navigate = useNavigate();
   const vd = parseVerticalData(lead);
   const name = getLeadName(lead);
   const jobStatus = lead.job_status || 'booked';
   const statusStyle = JOB_STATUS_STYLES[jobStatus] || 'bg-gray-100 text-gray-500';
+  const size = vd.dumpsterSize || null;
   const price = vd.quotedPrice || (lead.estimated_revenue ? formatCurrency(lead.estimated_revenue) : null);
-  const date = lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate || null;
+  const city = getDeliveryCity(vd);
+  const dateBooked = formatBookedDate(lead.updated_at);
 
   return (
     <div
@@ -252,11 +276,17 @@ function BookedJobRow({ lead }) {
       onClick={() => navigate(`/leads/${lead.id}`)}
     >
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium text-gray-900 truncate">{name}</span>
-          {price && <span className="text-xs text-gray-500 flex-shrink-0">{price}</span>}
+          {(size || price) && (
+            <span className="text-xs text-gray-500 flex-shrink-0">
+              · {[size, price].filter(Boolean).join(' · ')}
+            </span>
+          )}
         </div>
-        <p className="text-xs text-gray-400">{date || 'Date TBD'}</p>
+        <p className="text-xs text-gray-400 truncate">
+          {[city, dateBooked].filter(Boolean).join(' · ') || 'Details TBD'}
+        </p>
       </div>
       <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${statusStyle}`}>
         {jobStatus.replace('_', ' ')}
