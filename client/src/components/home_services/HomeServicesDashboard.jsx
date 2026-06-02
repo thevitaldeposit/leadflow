@@ -47,11 +47,13 @@ function getFollowUpLabel(followUpDate) {
   const now = new Date();
   const diff = followUpDate - now;
   if (diff < 0) return 'Overdue';
-  const hrs = Math.floor(diff / 3600000);
-  if (hrs < 1) return 'Due now';
+  // Round to the nearest unit so a follow-up set 2h out doesn't display as "1h"
+  // just because a few seconds elapsed before the badge rendered (1h59m -> 2h).
+  const totalMinutes = Math.round(diff / 60000);
+  if (totalMinutes < 60) return 'Due now';
+  const hrs = Math.round(totalMinutes / 60);
   if (hrs < 24) return `Due in ${hrs}h`;
-  const days = Math.floor(diff / 86400000);
-  if (days === 0) return 'Due today';
+  const days = Math.round(totalMinutes / 1440);
   return `Due in ${days}d`;
 }
 
