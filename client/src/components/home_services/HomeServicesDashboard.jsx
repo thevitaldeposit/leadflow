@@ -739,23 +739,22 @@ export default function HomeServicesDashboard() {
     // 30 Day Snapshot — rolling 30-day window (today minus 30 days), not the
     // current calendar month. `today` is normalized to local midnight above.
     const thirtyDaysAgo = new Date(today); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    // parseLocalDate avoids the UTC shift that new Date("YYYY-MM-DD") would cause.
-    const deliveryDateOf = (lead, vd) => parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
-    const inSnapshot = (d) => d && d >= thirtyDaysAgo && d <= today;
 
     const monthLeads = leads.filter(l => new Date(l.created_at) >= thirtyDaysAgo).length;
-    // Booked Jobs = how many jobs were booked in the last 30 days → operational
-    // jobs whose updated_at (when the booking happened) is within the window.
-    const monthBooked = enriched.filter(({ lead, state }) =>
+    // Both Booked Jobs and Revenue use updated_at (when the job was booked) as
+    // the 30-day window filter, over operational jobs only.
+    const bookedInWindow = enriched.filter(({ lead, state }) =>
       state.isOperational && lead.updated_at && new Date(lead.updated_at) >= thirtyDaysAgo
-    ).length;
+    );
+    const monthBooked = bookedInWindow.length;
     const bookingRate = monthLeads > 0 ? Math.round((monthBooked / monthLeads) * 100) : 0;
-    // Revenue = how much was earned in the last 30 days → estimated_revenue of
-    // operational jobs whose delivery_date (when the work happens) is within the
-    // window. Intentionally a different date field than Booked Jobs above.
-    const revenue = enriched
-      .filter(({ lead, vd, state }) => state.isOperational && inSnapshot(deliveryDateOf(lead, vd)))
-      .reduce((sum, { lead }) => sum + (lead.estimated_revenue || 0), 0);
+    // Sum estimated_revenue across ALL booked jobs in the window. The lead-level
+    // estimated_revenue column is null on some jobs, so fall back to the value
+    // derived from vertical_data (quotedPrice) via state.estimatedRevenue.
+    const revenue = bookedInWindow.reduce(
+      (sum, { lead, state }) => sum + (lead.estimated_revenue || state.estimatedRevenue || 0),
+      0
+    );
 
     // AI insights
     const insights = [];
