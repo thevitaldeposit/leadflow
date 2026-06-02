@@ -567,6 +567,7 @@ router.post('/twilio/voice', (req, res) => {
     // Voicemail fallback assets: the greeting is served statically from
     // server/public, and the recorded message posts to a dedicated endpoint.
     const greetingUrl = `${req.protocol}://${publicHost}/Valley_Binz_Voicemail.mp3`;
+    const recordingNoticeUrl = `${req.protocol}://${publicHost}/call_recording_notice_bella.mp3`;
     const voicemailCallbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/voicemail-recording`;
     console.log(`[webhook/voice]   voicemail greeting: ${greetingUrl}`);
     console.log(`[webhook/voice]   voicemail callback: ${voicemailCallbackUrl}`);
@@ -580,7 +581,7 @@ router.post('/twilio/voice', (req, res) => {
     // (record-from-answer-dual → /twilio/recording) is unchanged.
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna" language="en-US">This call may be recorded.</Say>
+  <Play>${recordingNoticeUrl}</Play>
   <Dial timeout="20" record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
     <Number>${userPhone}</Number>
   </Dial>
