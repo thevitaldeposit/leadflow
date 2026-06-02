@@ -1,4 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const { getTimezone } = require('./settingsService');
+const { localDateInTimeZone, resolveDeliveryDate } = require('./inventoryService');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-sonnet-4-6';
@@ -89,6 +91,11 @@ Because nothing could be agreed on a one-way voicemail:
 const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
   dumpster_rental: {
     promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency, This Week if this week, Next Week if next week, otherwise Flexible.
+
+Date range rules:
+- If the customer describes a range (e.g. "tomorrow until Thursday", "Monday to Friday", "June 3rd through the 5th"), treat the START of the range as the delivery date and the END as the pickup date. Set rawDeliveryDate and deliveryDateISO to the start only; set pickupDate to the resolved ISO date of the end.
+- rentalDuration must be the number of calendar days between delivery and pickup, calculated as pickupDate minus deliveryDate. Do NOT count endpoints inclusively. "Wednesday to Thursday" = 1 day. "Monday to Friday" = 4 days.
+- Always resolve relative words ("tomorrow", "Monday", "next Friday") to absolute YYYY-MM-DD ISO dates using today's date provided above.
 
 ${HOME_SERVICES_NAME_RULE}
 
@@ -363,7 +370,9 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
   const { resolvedSubVertical } = resolveConfig(vertical, subVertical);
   const systemPrompt = buildSystemPrompt(vertical, subVertical, options);
 
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const tz = getTimezone();
+  const todayISO = localDateInTimeZone(new Date(), tz);
+  const todayLabel = new Date(todayISO + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   const response = await client.messages.create({
     model: MODEL,
@@ -372,7 +381,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     messages: [
       {
         role: 'user',
-        content: `Today's date is ${todayISO}. Output a single JSON object — no other text — extracting all lead information from this call transcript:\n\n${transcript}`,
+        content: `Today is ${todayLabel} (${todayISO}). Output a single JSON object — no other text — extracting all lead information from this call transcript:\n\n${transcript}`,
       },
     ],
   });
@@ -437,6 +446,13 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
       verticalSpecific.job_status = 'inquiry';
       if (verticalSpecific.intentLevel === 'high') verticalSpecific.intentLevel = 'warm';
       if (verticalSpecific.urgency === 'ASAP') verticalSpecific.urgency = 'This Week';
+    }
+
+    // Fallback: if the model captured the raw delivery phrase but failed to
+    // resolve it to an ISO date, attempt server-side resolution.
+    if (!verticalSpecific.deliveryDateISO && verticalSpecific.rawDeliveryDate) {
+      const resolved = resolveDeliveryDate(verticalSpecific.rawDeliveryDate, new Date(), getTimezone());
+      if (resolved) verticalSpecific.deliveryDateISO = resolved;
     }
   }
 

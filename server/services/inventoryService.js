@@ -344,6 +344,7 @@ module.exports = {
   parseRentalDays,
   addDaysToISO,
   normalizeSize,
+  localDateInTimeZone,
   resolveDeliveryDate,
   calculatePickupDate,
   resolvePickupPhrase,
