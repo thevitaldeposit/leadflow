@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   User,
   Wrench,
@@ -10,6 +10,7 @@ import {
   Zap,
   Link,
   Send,
+  Clock,
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import {
@@ -394,6 +395,74 @@ function PaymentLinkSection({ lead, onUpdate }) {
   );
 }
 
+// Emoji per activity type for the timeline. inbound/outbound calls share the
+// phone glyph; status changes and notes share the clipboard.
+const ACTIVITY_ICONS = {
+  inbound_call: '📞',
+  outbound_call: '📞',
+  sms_sent: '💬',
+  status_change: '📋',
+  note_added: '📋',
+  voicemail: '🎙️',
+};
+
+// SQLite's CURRENT_TIMESTAMP emits "YYYY-MM-DD HH:MM:SS" in UTC with no zone;
+// normalize to ISO UTC so the browser doesn't misread it as local time. ISO
+// strings (payment SMS timestamps) pass through untouched.
+function formatActivityTime(ts) {
+  if (!ts) return '';
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(ts)
+    ? `${ts.replace(' ', 'T')}Z`
+    : ts;
+  const d = new Date(normalized);
+  if (Number.isNaN(d.getTime())) return '';
+  const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const timePart = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `${datePart} at ${timePart}`;
+}
+
+// Chronological log of every touchpoint for a lead, newest first. Fetched from
+// GET /api/leads/:id/activity on mount.
+function ActivityTimeline({ leadId }) {
+  const [activity, setActivity] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    api.getLeadActivity(leadId)
+      .then(rows => { if (active) setActivity(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setActivity([]); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [leadId]);
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <SectionHeader title="Activity Timeline" icon={Clock} />
+      <div className="p-4">
+        {loading ? (
+          <p className="text-sm text-gray-400">Loading activity…</p>
+        ) : activity.length === 0 ? (
+          <p className="text-sm text-gray-400 italic">No activity recorded yet</p>
+        ) : (
+          <ol className="relative border-l border-gray-200 ml-3">
+            {activity.map(entry => (
+              <li key={entry.id} className="mb-5 last:mb-0 ml-6">
+                <span className="absolute -left-3 flex items-center justify-center w-6 h-6 bg-white rounded-full ring-4 ring-white text-base leading-none">
+                  {ACTIVITY_ICONS[entry.activity_type] || '•'}
+                </span>
+                <p className="text-sm text-gray-800">{entry.description}</p>
+                <time className="text-xs text-gray-400">{formatActivityTime(entry.created_at)}</time>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Body of the Home Services lead detail page — everything *below* the sticky
 // customer header (rendered separately by LeadDetailPage). Keeps responsibility
 // narrow: editable form fields and source data.
@@ -625,6 +694,9 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
           <EditableText label="Internal Notes" value={vd.notes} onSave={saveVertical('notes')} multiline />
         </div>
       </div>
+
+      {/* Activity Timeline — chronological touchpoint log, newest first */}
+      <ActivityTimeline leadId={lead.id} />
 
       {/* AI Summary — confidence score replaced by inline follow-up flags on the
           server side, so this section just shows the augmented summary. */}

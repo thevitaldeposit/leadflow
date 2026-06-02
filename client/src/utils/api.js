@@ -14,6 +14,7 @@ export const api = {
     return request(`/leads${qs ? `?${qs}` : ''}`);
   },
   getLead: (id) => request(`/leads/${id}`),
+  getLeadActivity: (id) => request(`/leads/${id}/activity`),
   updateLead: (id, body) =>
     request(`/leads/${id}`, {
       method: 'PUT',

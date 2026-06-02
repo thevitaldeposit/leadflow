@@ -10,6 +10,7 @@ const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
 const { getAvailabilityForSize, parseRentalDays, addDaysToISO, resolveDeliveryDate, calculatePickupDate } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
+const { logActivity, formatDuration } = require('../services/activityLog');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 
@@ -200,6 +201,9 @@ async function processRecording(payload) {
         return;
       }
 
+      const inboundDur = formatDuration(CallDuration || transcription_seconds);
+      logActivity(lead.id, 'inbound_call', `Inbound call received${inboundDur ? ` (${inboundDur})` : ''}`);
+
       // Auto-booking: when the AI detected a confirmed booking, persist the
       // computed pickup date. Inventory is pool-based — no specific unit is
       // assigned; availability is computed on demand from owned quantity vs.
@@ -272,6 +276,9 @@ async function processRecording(payload) {
       console.log(`[webhook] Auto-discarded personal call (lead ${lead.id})`);
       return;
     }
+
+    const legacyInboundDur = formatDuration(CallDuration || transcription_seconds);
+    logActivity(lead.id, 'inbound_call', `Inbound call received${legacyInboundDur ? ` (${legacyInboundDur})` : ''}`);
 
     const io = getIO();
     if (io) io.emit('new_lead', lead);
@@ -394,6 +401,9 @@ async function processVoicemail(payload) {
         return;
       }
 
+      const vmDur = formatDuration(transcription_seconds);
+      logActivity(lead.id, 'voicemail', `Voicemail received${vmDur ? ` (${vmDur})` : ''}`);
+
       const io = getIO();
       if (io) io.emit('new_lead', lead);
       console.log(`[webhook] Voicemail lead ${lead.id} created from Twilio recording ${RecordingSid} (vertical: ${defaultVertical})`);
@@ -423,6 +433,9 @@ async function processVoicemail(payload) {
     }
 
     const lead = insertLead(extracted);
+
+    const legacyVmDur = formatDuration(transcription_seconds);
+    logActivity(lead.id, 'voicemail', `Voicemail received${legacyVmDur ? ` (${legacyVmDur})` : ''}`);
 
     const io = getIO();
     if (io) io.emit('new_lead', lead);

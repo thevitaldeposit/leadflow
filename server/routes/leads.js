@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db/database');
 const { sendPaymentSms } = require('../services/smsService');
 const { initiateClickToCall } = require('../services/callService');
+const { logActivity, getActivityForLead } = require('../services/activityLog');
 const { getIO } = require('../socket');
 
 function getLeadDisplayName(lead) {
@@ -105,6 +106,18 @@ router.get('/:id', (req, res) => {
   }
 });
 
+// GET /api/leads/:id/activity — full activity timeline for a lead, newest first
+router.get('/:id/activity', (req, res) => {
+  try {
+    const lead = db.prepare('SELECT id FROM leads WHERE id = ?').get(req.params.id);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    res.json(getActivityForLead(req.params.id));
+  } catch (err) {
+    console.error('GET /leads/:id/activity error:', err);
+    res.status(500).json({ error: 'Failed to retrieve activity' });
+  }
+});
+
 // PUT /api/leads/:id
 router.put('/:id', (req, res) => {
   try {
@@ -174,6 +187,11 @@ router.put('/:id', (req, res) => {
     db.prepare(`UPDATE leads SET ${setClauses} WHERE id = ?`).run(...values);
 
     const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+
+    // Log a status_change touchpoint whenever job_status actually changes.
+    if (updates.job_status !== undefined && updated.job_status !== existing.job_status) {
+      logActivity(updated.id, 'status_change', `Status changed to ${updated.job_status}`);
+    }
 
     // Trigger payment SMS when a job transitions to booked for the first time
     const wasBooked = existing.job_status === 'booked';
@@ -258,6 +276,7 @@ router.post('/:id/call', async (req, res) => {
       lead.internal_notes,
       `Outbound click-to-call initiated to ${result.customerPhone} (call SID ${result.callSid}). Your phone will ring first.`
     );
+    logActivity(lead.id, 'outbound_call', 'Outbound call initiated');
 
     res.json({ success: true, callSid: result.callSid });
   } catch (err) {

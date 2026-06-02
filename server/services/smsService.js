@@ -1,6 +1,7 @@
 const https = require('https');
 const { URLSearchParams } = require('url');
 const db = require('../db/database');
+const { logActivity } = require('./activityLog');
 
 const PAYMENT_BASE_URL = 'https://leadflow-production-9c02.up.railway.app';
 
@@ -110,6 +111,7 @@ async function sendPaymentSms(lead, force = false) {
 
     const sentAt = new Date().toISOString();
     db.prepare('UPDATE leads SET payment_sms_sent_at = ? WHERE id = ?').run(sentAt, lead.id);
+    logActivity(lead.id, 'sms_sent', 'Payment link sent via SMS');
     console.log(`[sms] Payment SMS sent to ${toNumber} for lead ${lead.id}`);
     return { sent: true, sentAt, phone: toNumber, customerName };
   } catch (err) {

@@ -148,6 +148,54 @@ function runMigrations() {
     )
   `);
 
+  // Activity timeline — one row per lead touchpoint (calls, SMS, status changes,
+  // voicemails, notes). Rows are removed with their lead via ON DELETE CASCADE.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id INTEGER NOT NULL,
+      activity_type TEXT NOT NULL,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_activity_log_lead ON activity_log(lead_id)');
+
+  // One-time backfill from existing leads: each lead gets an inbound_call (or
+  // voicemail) entry at its created_at, plus an sms_sent entry for any lead that
+  // already had a payment link sent. Guarded on an empty table so re-running
+  // migrations never duplicates rows.
+  const activityCount = db.prepare('SELECT COUNT(*) AS n FROM activity_log').get().n;
+  if (activityCount === 0) {
+    const fmtDur = (sec) => {
+      const s = Math.round(Number(sec));
+      if (!s || s <= 0) return '';
+      if (s < 60) return ` (${s}s)`;
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return r ? ` (${m}m ${r}s)` : ` (${m}m)`;
+    };
+    const existingLeads = db.prepare(
+      'SELECT id, created_at, call_type, call_duration, transcription_duration_seconds, payment_sms_sent_at FROM leads'
+    ).all();
+    const insertActivity = db.prepare(
+      'INSERT INTO activity_log (lead_id, activity_type, description, created_at) VALUES (?, ?, ?, ?)'
+    );
+    for (const lead of existingLeads) {
+      const dur = fmtDur(lead.call_duration || lead.transcription_duration_seconds);
+      if (lead.call_type === 'voicemail') {
+        insertActivity.run(lead.id, 'voicemail', `Voicemail received${dur}`, lead.created_at);
+      } else {
+        insertActivity.run(lead.id, 'inbound_call', `Inbound call received${dur}`, lead.created_at);
+      }
+      if (lead.payment_sms_sent_at) {
+        insertActivity.run(lead.id, 'sms_sent', 'Payment link sent via SMS', lead.payment_sms_sent_at);
+      }
+    }
+    console.log(`[migrations] Backfilled activity_log for ${existingLeads.length} lead(s)`);
+  }
+
   console.log('Database migrations completed successfully.');
 }
 
