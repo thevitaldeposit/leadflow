@@ -1,12 +1,9 @@
-import { Voicemail } from 'lucide-react';
-
 // Badge marking a lead that was captured from a voicemail message (vs. an
 // answered or live-captured call). Rendered alongside the intent/urgency badges.
 export default function VoicemailBadge({ size = 'sm' }) {
   const padding = size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm';
   return (
-    <span className={`inline-flex items-center gap-1 font-medium rounded-full border bg-purple-100 text-purple-700 border-purple-200 ${padding}`}>
-      <Voicemail size={size === 'sm' ? 11 : 13} />
+    <span className={`inline-flex items-center font-medium rounded-full border bg-purple-100 text-purple-700 border-purple-200 ${padding}`}>
       Voicemail
     </span>
   );

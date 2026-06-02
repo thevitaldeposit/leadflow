@@ -102,9 +102,9 @@ function AttentionRow({ lead, state, onBooked, onLost }) {
       <IntentBadge value={state.intent} size="sm" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          {lead.call_type === 'voicemail' && <VoicemailBadge />}
           <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
           {lead.phone && <span className="text-xs text-gray-400 flex-shrink-0">{lead.phone}</span>}
+          {lead.call_type === 'voicemail' && <VoicemailBadge />}
         </div>
         <p className="text-xs text-gray-500 truncate">{service}</p>
         {state.recommendation && (
