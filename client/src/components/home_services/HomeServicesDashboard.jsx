@@ -744,10 +744,14 @@ export default function HomeServicesDashboard() {
     const inSnapshot = (d) => d && d >= thirtyDaysAgo && d <= today;
 
     const monthLeads = leads.filter(l => new Date(l.created_at) >= thirtyDaysAgo).length;
-    const monthBooked = enriched.filter(({ lead, vd }) => inSnapshot(deliveryDateOf(lead, vd))).length;
+    // Booked Jobs = operational jobs (matches the Booked Jobs panel) whose
+    // delivery_date falls within the rolling 30-day window. The isOperational
+    // guard keeps non-booked leads that merely carry a delivery date out of the
+    // count, so this agrees with the panel below.
+    const monthBooked = enriched.filter(({ lead, vd, state }) => state.isOperational && inSnapshot(deliveryDateOf(lead, vd))).length;
     const bookingRate = monthLeads > 0 ? Math.round((monthBooked / monthLeads) * 100) : 0;
     const revenue = enriched
-      .filter(({ lead, vd }) => inSnapshot(deliveryDateOf(lead, vd)))
+      .filter(({ lead, vd, state }) => state.isOperational && inSnapshot(deliveryDateOf(lead, vd)))
       .reduce((sum, { lead }) => sum + (lead.estimated_revenue || 0), 0);
 
     // AI insights
