@@ -80,4 +80,8 @@ export const api = {
   // Payment SMS
   resendPaymentSms: (id) =>
     request(`/leads/${id}/resend-payment-sms`, { method: 'POST' }),
+
+  // Outbound click-to-call (Twilio rings the user first, then the customer)
+  callLead: (id) =>
+    request(`/leads/${id}/call`, { method: 'POST' }),
 };

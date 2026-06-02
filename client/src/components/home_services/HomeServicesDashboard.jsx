@@ -87,6 +87,61 @@ function MetricCard({ icon: Icon, label, value, color = 'bg-gray-50', textColor 
   );
 }
 
+// Outbound click-to-call button. POSTs to the server, which rings Austin's
+// phone first and then bridges him to the customer. Disabled for 5s after a
+// successful trigger to guard against accidental double-calls.
+function CallButton({ lead, name }) {
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState(null); // { type: 'info' | 'error', text }
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const handleCall = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.callLead(lead.id);
+      setToast({ type: 'info', text: `Calling ${name}… your phone will ring shortly` });
+      setTimeout(() => setBusy(false), 5000);
+    } catch (err) {
+      setToast({ type: 'error', text: 'Call failed, please try again' });
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={handleCall}
+        disabled={busy}
+        className={`p-1.5 rounded-lg transition-colors ${
+          busy
+            ? 'text-gray-300 cursor-not-allowed'
+            : 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50'
+        }`}
+        title={busy ? 'Calling…' : 'Call'}
+      >
+        <Phone size={14} />
+      </button>
+      {toast && (
+        <div
+          className={`fixed bottom-4 right-4 z-50 max-w-xs px-4 py-3 rounded-xl shadow-lg text-sm font-medium animate-slide-in ${
+            toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'
+          }`}
+        >
+          {toast.text}
+        </div>
+      )}
+    </>
+  );
+}
+
 function AttentionRow({ lead, state, onBooked, onLost }) {
   const navigate = useNavigate();
   const vd = parseVerticalData(lead);
@@ -121,24 +176,16 @@ function AttentionRow({ lead, state, onBooked, onLost }) {
         </span>
       )}
       <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
-        {lead.phone && (
-          <a
-            href={`tel:${lead.phone}`}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
-            title="Call"
-          >
-            <Phone size={14} />
-          </a>
-        )}
-        {lead.phone && (
-          <a
-            href={`sms:${lead.phone}`}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-            title="Text"
-          >
-            <MessageSquare size={14} />
-          </a>
-        )}
+        {lead.phone && <CallButton lead={lead} name={name} />}
+        {/* SMS disabled until A2P registration completes. Kept visible but
+            muted/non-functional so the affordance returns easily later. */}
+        <span
+          className="p-1.5 rounded-lg text-gray-200 cursor-not-allowed"
+          title="SMS coming soon"
+          aria-disabled="true"
+        >
+          <MessageSquare size={14} />
+        </span>
       </div>
     </div>
   );

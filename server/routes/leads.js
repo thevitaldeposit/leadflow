@@ -2,7 +2,24 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 const { sendPaymentSms } = require('../services/smsService');
+const { initiateClickToCall } = require('../services/callService');
 const { getIO } = require('../socket');
+
+function getLeadDisplayName(lead) {
+  let vd = {};
+  try { vd = JSON.parse(lead.vertical_data || '{}'); } catch {}
+  return vd.customerName
+    || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ')
+    || null;
+}
+
+// Append a timestamped line to the lead's free-text internal log.
+function appendInternalNote(leadId, existingNotes, line) {
+  const stamp = new Date().toISOString();
+  const entry = `[${stamp}] ${line}`;
+  const combined = existingNotes ? `${existingNotes}\n${entry}` : entry;
+  db.prepare('UPDATE leads SET internal_notes = ? WHERE id = ?').run(combined, leadId);
+}
 
 // GET /api/leads
 router.get('/', (req, res) => {
@@ -109,7 +126,7 @@ router.put('/:id', (req, res) => {
       'salesperson_name', 'lead_source',
       'call_summary', 'additional_notes', 'objections',
       'flag_urgent', 'flag_needs_manager', 'flag_duplicate_suspect', 'flag_reason',
-      'paid_at',
+      'paid_at', 'internal_notes',
     ];
 
     const updates = {};
@@ -209,6 +226,43 @@ router.post('/:id/resend-payment-sms', async (req, res) => {
   } catch (err) {
     console.error('POST /leads/:id/resend-payment-sms error:', err);
     res.status(500).json({ error: 'Failed to resend payment SMS' });
+  }
+});
+
+// POST /api/leads/:id/call — outbound click-to-call. Twilio rings Austin's
+// cell first, then bridges him to the customer with the Valley Binz number as
+// the caller ID the customer sees.
+router.post('/:id/call', async (req, res) => {
+  try {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const customerName = getLeadDisplayName(lead);
+    const result = await initiateClickToCall(lead, customerName);
+
+    if (!result.success) {
+      const msgByReason = {
+        no_credentials: 'Calling is not configured',
+        no_user_number: 'Your phone number is not configured',
+        no_phone: 'This lead has no valid phone number',
+      };
+      const message = msgByReason[result.reason] || result.error || 'Call failed';
+      // Log the failed attempt too, so the timeline is complete.
+      appendInternalNote(lead.id, lead.internal_notes, `Outbound call attempt failed: ${message}`);
+      const status = result.reason === 'no_phone' ? 400 : 502;
+      return res.status(status).json({ error: message, reason: result.reason });
+    }
+
+    appendInternalNote(
+      lead.id,
+      lead.internal_notes,
+      `Outbound click-to-call initiated to ${result.customerPhone} (call SID ${result.callSid}). Your phone will ring first.`
+    );
+
+    res.json({ success: true, callSid: result.callSid });
+  } catch (err) {
+    console.error('POST /leads/:id/call error:', err);
+    res.status(500).json({ error: 'Failed to start call' });
   }
 });
 

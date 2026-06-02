@@ -41,6 +41,8 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN recording_deleted_at TEXT',
   // Voicemail capture: distinguishes voicemail leads from answered calls
   'ALTER TABLE leads ADD COLUMN call_type TEXT',
+  // Free-text internal log (outbound click-to-call attempts, etc.)
+  'ALTER TABLE leads ADD COLUMN internal_notes TEXT',
 ];
 
 function runMigrations() {
