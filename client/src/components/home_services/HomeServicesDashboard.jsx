@@ -252,11 +252,17 @@ function getDeliveryCity(vd) {
   return city || null;
 }
 
-function formatBookedDate(value) {
+// Format a YYYY-MM-DD date string without UTC shifting. `new Date('2026-06-01')`
+// parses as UTC midnight, which renders as the prior day in negative-offset
+// zones — so build the date from local Y/M/D parts instead.
+function formatDeliveryDate(value) {
   if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const [datePart] = String(value).split('T');
+  const [year, month, day] = datePart.split('-');
+  if (!year || !month || !day) return null;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function BookedJobRow({ lead }) {
@@ -268,7 +274,7 @@ function BookedJobRow({ lead }) {
   const size = vd.dumpsterSize || null;
   const price = vd.quotedPrice || (lead.estimated_revenue ? formatCurrency(lead.estimated_revenue) : null);
   const city = getDeliveryCity(vd);
-  const dateBooked = formatBookedDate(lead.updated_at);
+  const deliveryDate = formatDeliveryDate(vd.deliveryDate);
 
   return (
     <div
@@ -285,7 +291,7 @@ function BookedJobRow({ lead }) {
           )}
         </div>
         <p className="text-xs text-gray-400 truncate">
-          {[city, dateBooked].filter(Boolean).join(' · ') || 'Details TBD'}
+          {[city, deliveryDate].filter(Boolean).join(' · ') || 'Details TBD'}
         </p>
       </div>
       <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${statusStyle}`}>
