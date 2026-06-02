@@ -224,6 +224,99 @@ function calculatePickupDate(deliveryDateISO, rentalDuration) {
   return addDaysToISO(deliveryDateISO, days);
 }
 
+// Gate an AI-detected auto-booking on real pool availability.
+//
+// Inventory is pool-based: availability for the requested size is computed by
+// the same date-overlap logic the booking modal and schedule page use
+// (getAvailabilityForSize). Before a payment link goes out we must confirm a
+// unit of the requested size is actually free for [delivery, pickup).
+//
+// If a unit is available → returns { blocked: false } and the booking proceeds.
+// If none is available → the provisional booking is downgraded IN PLACE: the
+// lead becomes a flagged high-intent opportunity that surfaces at the top of
+// Needs Attention Today, no payment link is sent, and the conflict is recorded
+// in internal_notes. Both `verticalData` (in memory) and the leads row (in DB)
+// are mutated so the caller can re-check verticalData.autoBooked.
+//
+// Returns { blocked, pickupDate }.
+function enforceAutoBookAvailability(lead, verticalData) {
+  // Only confirmed auto-bookings with a known delivery date can conflict.
+  if (!(verticalData.autoBooked === true && lead.delivery_date)) {
+    return { blocked: false, pickupDate: lead.pickup_date || null };
+  }
+
+  // Determine the end of the rental window so we can test date overlap.
+  let pickupDate = lead.pickup_date;
+  if (!pickupDate && verticalData.rentalDuration) {
+    const days = parseRentalDays(verticalData.rentalDuration);
+    if (days) pickupDate = addDaysToISO(lead.delivery_date, days);
+  }
+
+  // Without a window we cannot evaluate overlap — leave the booking untouched.
+  if (!pickupDate) {
+    return { blocked: false, pickupDate: null };
+  }
+
+  // Persist a derived pickup date so schedule/availability views agree.
+  if (!lead.pickup_date) {
+    db.prepare('UPDATE leads SET pickup_date = ?, updated_at = ? WHERE id = ?')
+      .run(pickupDate, new Date().toISOString(), lead.id);
+    lead.pickup_date = pickupDate;
+  }
+
+  // Exclude this lead's own provisional booking from the overlap count.
+  const avail = getAvailabilityForSize(verticalData.dumpsterSize, lead.delivery_date, pickupDate, lead.id);
+  if (avail && avail.available > 0) {
+    return { blocked: false, pickupDate };
+  }
+
+  // ── INVENTORY CONFLICT — block the auto-booking ──────────────────────────
+  const sizeLabel = verticalData.dumpsterSize || 'requested size';
+  const recommendation = `INVENTORY CONFLICT — Customer agreed to book a ${sizeLabel} dumpster for ${lead.delivery_date} but no units are available. Call customer immediately to reschedule.`;
+  const blockNote = `AUTO-BOOK BLOCKED: No ${sizeLabel} available for ${lead.delivery_date} to ${pickupDate}. Customer needs to be contacted to reschedule.`;
+
+  // Downgrade the in-memory verticalData. Clearing autoBooked makes the caller's
+  // `verticalData.autoBooked === true` payment-link check fall through. urgency
+  // ASAP + an immediate followUpDate put the lead in the top Needs Attention
+  // bucket; the aiRecommendation overrides any default text shown there.
+  verticalData.autoBooked = false;
+  verticalData.bookingConfidence = 'possible';
+  verticalData.job_status = 'opportunity';
+  verticalData.intentLevel = 'high';
+  verticalData.urgency = 'ASAP';
+  verticalData.outcome = 'quote_sent';
+  verticalData.aiRecommendation = recommendation;
+  verticalData.inventoryConflict = true;
+  verticalData.followUpDate = new Date().toISOString();
+  verticalData.followUpReason = 'Inventory conflict — call customer immediately to reschedule';
+
+  const existingNotes = (lead.internal_notes || '').trim();
+  const internalNotes = existingNotes ? `${blockNote}\n\n${existingNotes}` : blockNote;
+  const serializedVd = JSON.stringify(verticalData);
+  const nowISO = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE leads
+       SET job_status = 'opportunity',
+           auto_booked = 0,
+           outcome = 'quote_sent',
+           internal_notes = ?,
+           vertical_data = ?,
+           updated_at = ?
+     WHERE id = ?
+  `).run(internalNotes, serializedVd, nowISO, lead.id);
+
+  // Keep the in-memory row in sync with what we just persisted.
+  lead.job_status = 'opportunity';
+  lead.auto_booked = 0;
+  lead.outcome = 'quote_sent';
+  lead.internal_notes = internalNotes;
+  lead.vertical_data = serializedVd;
+  lead.updated_at = nowISO;
+
+  return { blocked: true, pickupDate, recommendation, blockNote };
+}
+
 module.exports = {
   getActiveJobCountsBySize,
   getAvailabilityBySize,
@@ -233,4 +326,5 @@ module.exports = {
   normalizeSize,
   resolveDeliveryDate,
   calculatePickupDate,
+  enforceAutoBookAvailability,
 };

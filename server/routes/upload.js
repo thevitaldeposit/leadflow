@@ -8,7 +8,7 @@ const { transcribe } = require('../services/transcriptionService');
 const { extractFromTranscriptVertical } = require('../services/verticalExtractionEngine');
 const { sendToAll } = require('../services/apns');
 const { getIO } = require('../socket');
-const { getAvailabilityForSize, parseRentalDays, addDaysToISO } = require('../services/inventoryService');
+const { enforceAutoBookAvailability } = require('../services/inventoryService');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -117,28 +117,19 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
 
     let lead = insertLead(leadData);
 
-    // Auto-booking: persist the computed pickup date. Inventory is pool-based —
-    // no specific unit is assigned; availability is computed on demand. We only
-    // check availability here for logging.
-    if (verticalData.autoBooked === true && lead.delivery_date) {
-      let pickupDate = lead.pickup_date;
-      if (!pickupDate && verticalData.rentalDuration) {
-        const days = parseRentalDays(verticalData.rentalDuration);
-        if (days) pickupDate = addDaysToISO(lead.delivery_date, days);
-      }
-      if (pickupDate) {
-        // Store computed pickup_date if we derived it
-        if (!lead.pickup_date) {
-          db.prepare('UPDATE leads SET pickup_date = ?, updated_at = ? WHERE id = ?')
-            .run(pickupDate, new Date().toISOString(), lead.id);
-        }
-        const avail = getAvailabilityForSize(verticalData.dumpsterSize, lead.delivery_date, pickupDate, lead.id);
-        if (!avail || avail.available <= 0) {
-          console.log(`[upload] Auto-booked lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching size'} available for ${lead.delivery_date}→${pickupDate}`);
-        }
-      }
-      // Re-fetch lead to include the persisted pickup date
+    // Auto-booking: verify pool inventory is actually available for the requested
+    // size over the rental window before finalizing. Inventory is pool-based — no
+    // specific unit is assigned; availability is computed on demand from owned
+    // quantity vs. overlapping active jobs of the same size. If no unit is free,
+    // enforceAutoBookAvailability downgrades the booking to a flagged high-intent
+    // opportunity (see helper) so it is never confirmed against missing inventory.
+    const { blocked: bookingBlocked } = enforceAutoBookAvailability(lead, verticalData);
+    if (verticalData.autoBooked === true || bookingBlocked) {
+      // Re-fetch to include the persisted pickup date / conflict downgrade.
       lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+    }
+    if (bookingBlocked) {
+      console.warn(`[upload] Auto-book BLOCKED for lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching size'} available for ${lead.delivery_date}→${lead.pickup_date}; flagged as inventory conflict`);
     }
 
     const io = getIO();

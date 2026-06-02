@@ -8,7 +8,7 @@ const { extractFromTranscript } = require('../services/extractionEngine');
 const { extractFromTranscriptVertical, VERTICAL_CONFIGS } = require('../services/verticalExtractionEngine');
 const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
-const { getAvailabilityForSize, parseRentalDays, addDaysToISO, resolveDeliveryDate, calculatePickupDate } = require('../services/inventoryService');
+const { resolveDeliveryDate, calculatePickupDate, enforceAutoBookAvailability } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
 const { logActivity, formatDuration } = require('../services/activityLog');
 const { getTimezone } = require('../services/settingsService');
@@ -205,31 +205,33 @@ async function processRecording(payload) {
       const inboundDur = formatDuration(CallDuration || transcription_seconds);
       logActivity(lead.id, 'inbound_call', `Inbound call received${inboundDur ? ` (${inboundDur})` : ''}`);
 
-      // Auto-booking: when the AI detected a confirmed booking, persist the
-      // computed pickup date. Inventory is pool-based — no specific unit is
-      // assigned; availability is computed on demand from owned quantity vs.
-      // active jobs of the same size. We only check availability here for logging.
-      if (verticalData.autoBooked === true && lead.delivery_date) {
-        let pickupDate = lead.pickup_date;
-        if (!pickupDate && verticalData.rentalDuration) {
-          const days = parseRentalDays(verticalData.rentalDuration);
-          if (days) pickupDate = addDaysToISO(lead.delivery_date, days);
-        }
-        if (pickupDate) {
-          if (!lead.pickup_date) {
-            db.prepare('UPDATE leads SET pickup_date = ?, updated_at = ? WHERE id = ?')
-              .run(pickupDate, new Date().toISOString(), lead.id);
-          }
-          const avail = getAvailabilityForSize(verticalData.dumpsterSize, lead.delivery_date, pickupDate, lead.id);
-          if (!avail || avail.available <= 0) {
-            console.log(`[webhook] Auto-booked lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching size'} available for ${lead.delivery_date}→${pickupDate}`);
-          }
-        }
+      // Auto-booking: when the AI detected a confirmed booking, verify pool
+      // inventory is actually available for the requested size over the rental
+      // window BEFORE confirming and sending a payment link. Inventory is
+      // pool-based — no specific unit is assigned; availability is computed on
+      // demand from owned quantity vs. overlapping active jobs of the same size,
+      // using the same logic as the booking modal and schedule page.
+      //
+      // If a unit is free, the booking proceeds (payment link below). If none is
+      // available, enforceAutoBookAvailability blocks it: the lead is downgraded
+      // to a flagged high-intent opportunity, clears verticalData.autoBooked, and
+      // the payment link is suppressed.
+      const { blocked: bookingBlocked } = enforceAutoBookAvailability(lead, verticalData);
+      if (verticalData.autoBooked === true || bookingBlocked) {
         lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
       }
+      if (bookingBlocked) {
+        logActivity(
+          lead.id,
+          'note',
+          `AUTO-BOOK BLOCKED — no ${verticalData.dumpsterSize || 'matching'} dumpster available for ${lead.delivery_date}→${lead.pickup_date}. Customer must be contacted to reschedule.`
+        );
+        console.warn(`[webhook] Auto-book BLOCKED for lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching size'} available for ${lead.delivery_date}→${lead.pickup_date}; flagged as inventory conflict, no payment link sent`);
+      }
 
-      // Send payment SMS for auto-booked home services jobs
-      if (verticalData.autoBooked === true) {
+      // Send payment SMS only for auto-booked jobs that passed the availability
+      // check. A blocked booking has had verticalData.autoBooked cleared above.
+      if (verticalData.autoBooked === true && !bookingBlocked) {
         sendPaymentSms(lead).then((smsResult) => {
           if (smsResult.sent) {
             lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
