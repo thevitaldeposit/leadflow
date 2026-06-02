@@ -304,7 +304,7 @@ function AttentionRow({ lead, state, tier, reason, onBooked, onLost }) {
         </div>
         <p className="text-xs text-gray-500 truncate">{service}</p>
         {(reason || state.recommendation) && (
-          <p className={`text-xs font-medium truncate mt-0.5 ${reason ? 'text-red-600' : 'text-accent'}`}>
+          <p className={`text-xs font-medium truncate mt-0.5 ${(reason || tier === 1) ? 'text-red-600' : 'text-accent'}`}>
             {reason || state.recommendation}
           </p>
         )}
