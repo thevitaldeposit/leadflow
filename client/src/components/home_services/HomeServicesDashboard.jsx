@@ -781,15 +781,15 @@ export default function HomeServicesDashboard() {
   }, [leads]);
 
   // Booked Jobs panel filter — client-side window over the already-computed list.
-  // Windows are backward-looking on booking date (updated_at):
-  // 1D = booked today, 7D = booked in last 7 days, 30D = booked in last 30 days.
+  // Rolling windows measured back from now on booking date (updated_at), matching
+  // the 30 Day Snapshot's Booked Jobs logic:
+  // 1D = booked in last 24h, 7D = last 7 days, 30D = last 30 days.
   const filteredBookedJobs = useMemo(() => {
-    const cutoff = new Date(); cutoff.setHours(0, 0, 0, 0);
-    const daysBack = bookedRange === '1d' ? 0 : bookedRange === '30d' ? 30 : 7;
-    cutoff.setDate(cutoff.getDate() - daysBack);
+    const days = bookedRange === '1d' ? 1 : bookedRange === '30d' ? 30 : 7;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
     return bookedJobs.filter(({ lead }) => {
       if (!lead.updated_at) return false;
-      return new Date(lead.updated_at) >= cutoff;
+      return new Date(lead.updated_at).getTime() >= cutoff;
     });
   }, [bookedJobs, bookedRange]);
 
