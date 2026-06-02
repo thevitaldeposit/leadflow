@@ -954,7 +954,7 @@ export default function HomeServicesDashboard() {
             <p className="text-xs text-gray-500 mt-0.5">Booking Rate</p>
           </div>
           <div className="text-center">
-            <p className="text-2xl font-bold text-violet-600">{formatCurrency(metrics.revenue)}</p>
+            <p className="text-2xl font-bold text-violet-600">${Math.round(metrics.revenue).toLocaleString()}</p>
             <p className="text-xs text-gray-500 mt-0.5">Revenue</p>
           </div>
         </div>
