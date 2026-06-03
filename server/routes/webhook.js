@@ -582,6 +582,7 @@ router.post('/twilio/voice', (req, res) => {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${recordingNoticeUrl}</Play>
+  <Pause length="2"/>
   <Dial timeout="20" record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
     <Number>${userPhone}</Number>
   </Dial>
