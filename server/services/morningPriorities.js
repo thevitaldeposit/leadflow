@@ -23,6 +23,26 @@ function startOfDay(d) {
   const c = new Date(d); c.setHours(0, 0, 0, 0); return c;
 }
 
+// Parse a stored follow-up date into an absolute Date. Mirrors the client's
+// parseFollowUpDate (verticalConfig.js): naive SQLite "YYYY-MM-DD HH:MM:SS" is
+// UTC (append "Z"), and date-only "YYYY-MM-DD" anchors to local end-of-day so a
+// future follow-up never reads as past from a timezone misparse.
+function parseFollowUpDate(value) {
+  if (!value) return null;
+  const str = String(value).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(str)) {
+    const d = new Date(`${str.replace(' ', 'T')}Z`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(str);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function getActionState(lead, now) {
   const vd = safeParse(lead.vertical_data);
   const status = lead.status || 'new';
@@ -34,11 +54,7 @@ function getActionState(lead, now) {
     else intent = 'warm';
   }
 
-  let followUpDate = null;
-  if (vd.followUpDate) {
-    const d = new Date(vd.followUpDate);
-    if (!Number.isNaN(d.getTime())) followUpDate = d;
-  }
+  const followUpDate = parseFollowUpDate(vd.followUpDate);
 
   const createdAt = lead.created_at ? new Date(lead.created_at) : null;
   const ageMs = createdAt ? (now - createdAt) : 0;

@@ -202,6 +202,32 @@ function isSameLocalDay(a, b) {
     && a.getDate() === b.getDate();
 }
 
+// Parse a stored follow-up date into an absolute Date. It can arrive in three
+// formats, two of which `new Date()` misreads — which is what made a future
+// follow-up show as "Overdue":
+//   • Full ISO ("…Z" / with offset)         → already absolute; use as-is.
+//   • Naive SQLite "YYYY-MM-DD HH:MM:SS"     → no zone, so new Date() reads it as
+//     local time. It's UTC — append "Z" (same as formatActivityTime does).
+//   • Date-only "YYYY-MM-DD"                 → new Date() reads it as UTC midnight,
+//     which lands on the previous evening in negative-offset zones (US), making a
+//     follow-up due today look overdue. Anchor to local end-of-day so it only goes
+//     overdue once that calendar day has actually passed.
+export function parseFollowUpDate(value) {
+  if (!value) return null;
+  const str = String(value).trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(str)) {
+    const d = new Date(`${str.replace(' ', 'T')}Z`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(str);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 // Returns an enrichment object for a lead that powers card + dashboard.
 // {
 //   intent: 'high' | 'warm' | 'cold',
@@ -237,13 +263,9 @@ export function getLeadActionState(lead, now = new Date()) {
     else intent = 'warm';
   }
 
-  // Follow-up date parsing — supports ISO timestamp or YYYY-MM-DD.
-  let followUpDate = null;
-  const fud = vd.followUpDate;
-  if (fud) {
-    const d = new Date(fud);
-    if (!Number.isNaN(d.getTime())) followUpDate = d;
-  }
+  // Follow-up date parsing — handles full ISO, naive SQLite UTC, and date-only
+  // strings without the timezone shift that made future follow-ups read as past.
+  const followUpDate = parseFollowUpDate(vd.followUpDate);
 
   const createdAt = lead?.created_at ? new Date(lead.created_at) : null;
   const ageMs = createdAt ? (now - createdAt) : 0;
