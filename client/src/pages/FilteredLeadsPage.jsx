@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
+import socket from '../socket';
 import { getLeadActionState, parseVerticalData, JOB_STATUS_STYLES, getJobStatusLabel, OPERATIONAL_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '../utils/verticalConfig';
 import IntentBadge from '../components/home_services/IntentBadge';
 import UrgencyBadge from '../components/home_services/UrgencyBadge';
@@ -96,6 +97,33 @@ export default function FilteredLeadsPage({ mode }) {
   useEffect(() => {
     load().catch(console.error).finally(() => setLoading(false));
   }, [load]);
+
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; }, [load]);
+
+  // Keep this page live the same way the dashboard's Action Queue stays live:
+  // a new lead (or an updated one) is merged into local state immediately so it
+  // flows through this mode's filter without a manual page refresh. The actual
+  // toast notification fires from Layout; this just mirrors its real-time data.
+  useEffect(() => {
+    const handleNewLead = (lead) => {
+      if (lead.vertical !== 'home_services') return;
+      setLeads(prev => prev.some(l => l.id === lead.id) ? prev : [lead, ...prev]);
+    };
+    const handleLeadUpdated = (lead) => {
+      if (lead.vertical !== 'home_services') return;
+      setLeads(prev => prev.map(l => l.id === lead.id ? lead : l));
+    };
+    const handleReconnect = () => { loadRef.current().catch(console.error); };
+    socket.on('new_lead', handleNewLead);
+    socket.on('lead_updated', handleLeadUpdated);
+    socket.io.on('reconnect', handleReconnect);
+    return () => {
+      socket.off('new_lead', handleNewLead);
+      socket.off('lead_updated', handleLeadUpdated);
+      socket.io.off('reconnect', handleReconnect);
+    };
+  }, []);
 
   if (loading) {
     return (
