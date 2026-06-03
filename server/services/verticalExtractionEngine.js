@@ -487,6 +487,12 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
       verticalSpecific.job_status = 'inquiry';
       if (verticalSpecific.intentLevel === 'high') verticalSpecific.intentLevel = 'warm';
       if (verticalSpecific.urgency === 'ASAP') verticalSpecific.urgency = 'This Week';
+
+      // Someone called and left a message — they need a callback ASAP. Regardless
+      // of any other signal, a voicemail always gets a follow-up 1 hour after it
+      // was received (extraction runs as the voicemail comes in).
+      verticalSpecific.followUpDate = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      verticalSpecific.followUpReason = 'Voicemail received — call back within the hour';
     }
   }
 
