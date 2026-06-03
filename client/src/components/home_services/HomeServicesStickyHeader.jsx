@@ -69,24 +69,52 @@ function AvailabilityNote({ loading, availability, size }) {
 
 function BookedModal({ lead, onConfirm, onClose }) {
   const vd = parseVerticalData(lead);
-  const size = vd.dumpsterSize || null;
+  const extractedSize = vd.dumpsterSize || null;
   // Pre-populate from flat column first, then vertical_data fallback (both should match post-extraction)
   const [date, setDate] = useState(lead.delivery_date || vd.deliveryDate || '');
   const [rentalDays, setRentalDays] = useState(() => {
     const n = parseRentalDays(vd.rentalDuration);
     return n ? String(n) : '';
   });
+  // Default to the size extracted from the call; the user can switch to any pool
+  // size below, which drives the availability check and is saved on confirm.
+  const [size, setSize] = useState(extractedSize || '');
+  const [poolSizes, setPoolSizes] = useState([]);
   const [availability, setAvailability] = useState(null);
   const [loadingAvail, setLoadingAvail] = useState(false);
 
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
-  const isValid = !!date && daysNum >= 1;
+  const isValid = !!date && daysNum >= 1 && !!size;
 
-  // Re-check availability whenever the date window changes. Pool-based: the
-  // server returns per-size counts (owned − in service − overlapping active jobs).
+  // Load the inventory pool sizes (one row per size) for the selector. Normalize
+  // the extracted free-text size ("10 yard dumpster") to the matching pool label
+  // so it shows as the selected option.
   useEffect(() => {
-    if (!date || !pickupISO) { setAvailability(null); return; }
+    let cancelled = false;
+    api.getInventory()
+      .then(rows => {
+        if (cancelled) return;
+        const sizes = (rows || []).map(r => r.size).filter(Boolean);
+        setPoolSizes(sizes);
+        if (extractedSize) {
+          const match = sizes.find(s => sizeMatches(s, extractedSize));
+          if (match) setSize(match);
+        }
+      })
+      .catch(() => { if (!cancelled) setPoolSizes([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // The dropdown offers every pool size; if the extracted size isn't in the pool,
+  // surface it too so the default selection is always visible.
+  const sizeOptions = poolSizes.some(s => s === size) || !size ? poolSizes : [size, ...poolSizes];
+
+  // Re-check availability whenever the date window or selected size changes.
+  // Pool-based: the server returns per-size counts (owned − in service −
+  // overlapping active jobs).
+  useEffect(() => {
+    if (!date || !pickupISO || !size) { setAvailability(null); return; }
     let cancelled = false;
     setLoadingAvail(true);
     api.getInventory({ delivery_date: date, pickup_date: pickupISO, exclude_lead_id: lead.id })
@@ -98,7 +126,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
       })
       .catch(() => { if (!cancelled) { setAvailability(null); setLoadingAvail(false); } });
     return () => { cancelled = true; };
-  }, [date, rentalDays, lead.id]);
+  }, [date, rentalDays, size, lead.id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -106,6 +134,21 @@ function BookedModal({ lead, onConfirm, onClose }) {
         <h3 className="text-lg font-bold text-gray-900 mb-1">Confirm Booking</h3>
         <p className="text-sm text-gray-500 mb-5">{getLeadName(lead)}{size ? ` · ${size}` : ''}</p>
         <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Dumpster Size <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={size}
+              onChange={e => setSize(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+            >
+              {!size && <option value="">Select a size…</option>}
+              {sizeOptions.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
               Delivery Date <span className="text-red-500">*</span>
@@ -148,7 +191,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
         </div>
         <div className="flex gap-3 mt-6">
           <button
-            onClick={() => onConfirm({ date, rentalDays: daysNum })}
+            onClick={() => onConfirm({ date, rentalDays: daysNum, size })}
             disabled={!isValid}
             className="flex-1 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
           >
@@ -182,16 +225,17 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
     }
   };
 
-  const handleBookedConfirm = async ({ date, rentalDays }) => {
+  const handleBookedConfirm = async ({ date, rentalDays, size }) => {
     const updates = { job_status: 'booked', status: 'booked' };
+    const vd = {};
+    // Persist the (possibly changed) dumpster size selected in the modal.
+    if (size) vd.dumpsterSize = size;
     if (date) {
       updates.delivery_date = date;
       // Write the keys the Industry Details field pack reads from (camelCase)
       // alongside the legacy deliveryDateISO for back-compat with older readers.
-      const vd = {
-        deliveryDate: date,
-        deliveryDateISO: date,
-      };
+      vd.deliveryDate = date;
+      vd.deliveryDateISO = date;
       if (rentalDays >= 1) {
         const pickup = calcPickupFromDuration(date, String(rentalDays));
         if (pickup) {
@@ -200,8 +244,8 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
         }
         vd.rentalDuration = `${rentalDays} days`;
       }
-      updates.vertical_data = vd;
     }
+    if (Object.keys(vd).length) updates.vertical_data = vd;
     await applyUpdate(updates);
     setShowBooked(false);
   };
