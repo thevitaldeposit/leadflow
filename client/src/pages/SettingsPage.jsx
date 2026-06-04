@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Key, Database, Zap, Building2, User, DollarSign, MessageSquare, Clock, Inbox } from 'lucide-react';
+import { Settings, Key, Database, Zap, Building2, User, DollarSign, MessageSquare, Clock, Inbox, Lock } from 'lucide-react';
 import { getSettings, saveSettings } from '../utils/settings';
 import { api } from '../utils/api';
 
@@ -32,6 +32,39 @@ export default function SettingsPage() {
       console.error('Failed to sync setting to server:', err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Change Password form state — kept separate from the auto-saved business settings.
+  const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState(false);
+
+  const changePassword = async (e) => {
+    e.preventDefault();
+    setPwError('');
+    setPwSuccess(false);
+
+    if (pw.next.length < 8) {
+      setPwError('New password must be at least 8 characters.');
+      return;
+    }
+    if (pw.next !== pw.confirm) {
+      setPwError('New passwords do not match.');
+      return;
+    }
+
+    setPwSaving(true);
+    try {
+      await api.changePassword(pw.current, pw.next);
+      setPwSuccess(true);
+      setPw({ current: '', next: '', confirm: '' });
+      setTimeout(() => setPwSuccess(false), 4000);
+    } catch (err) {
+      setPwError(err.message || 'Failed to change password.');
+    } finally {
+      setPwSaving(false);
     }
   };
 
@@ -169,6 +202,58 @@ export default function SettingsPage() {
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${settings.smsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
         </div>
+      </div>
+
+      {/* Change Password */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Lock size={18} className="text-gray-700" />
+          <h2 className="text-base font-semibold text-gray-800">Change Password</h2>
+        </div>
+        <p className="text-xs text-gray-500 mb-6">
+          Replace your temporary password with one of your own. Must be at least 8 characters.
+        </p>
+        <form onSubmit={changePassword} className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Current Password</label>
+            <input
+              type="password"
+              value={pw.current}
+              onChange={e => setPw(prev => ({ ...prev, current: e.target.value }))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              autoComplete="current-password"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">New Password</label>
+            <input
+              type="password"
+              value={pw.next}
+              onChange={e => setPw(prev => ({ ...prev, next: e.target.value }))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              autoComplete="new-password"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Confirm New Password</label>
+            <input
+              type="password"
+              value={pw.confirm}
+              onChange={e => setPw(prev => ({ ...prev, confirm: e.target.value }))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              autoComplete="new-password"
+            />
+          </div>
+          {pwError && <p className="text-sm text-red-600">{pwError}</p>}
+          {pwSuccess && <p className="text-sm text-green-600">Password changed successfully.</p>}
+          <button
+            type="submit"
+            disabled={pwSaving || !pw.current || !pw.next || !pw.confirm}
+            className="text-sm font-medium bg-accent text-white rounded-lg px-4 py-2 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {pwSaving ? 'Changing…' : 'Change Password'}
+          </button>
+        </form>
       </div>
 
       {/* Action Queue Settings */}

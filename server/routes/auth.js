@@ -154,6 +154,39 @@ router.get('/me', requireAuth, (req, res) => {
   res.json({ user: publicUser(req.user), business: req.business });
 });
 
+// POST /api/auth/change-password — replace the current user's password.
+router.post('/change-password', requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+
+    // req.user from requireAuth excludes password_hash, so load the full row.
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    if (!user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const ok = await comparePassword(String(currentPassword), user.password_hash);
+    if (!ok) {
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    }
+
+    const passwordHash = await hashPassword(String(newPassword));
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /auth/change-password error:', err);
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
 // POST /api/auth/logout — clear the auth cookie.
 router.post('/logout', (req, res) => {
   res.clearCookie(COOKIE_NAME, { httpOnly: true, secure: isProd, sameSite: 'lax' });
