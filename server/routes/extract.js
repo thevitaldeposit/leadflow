@@ -7,7 +7,7 @@ const db = require('../db/database');
 const { extractFromTranscript, extractFromImage } = require('../services/extractionEngine');
 const { UPLOADS_DIR } = require('../services/imageProcessor');
 const { transcribe } = require('../services/transcriptionService');
-const { getIO } = require('../socket');
+const { emitToBusiness } = require('../socket');
 const { requireAuth } = require('../middleware/auth');
 
 // Manual lead capture is a web-dashboard feature — every route requires auth.
@@ -72,8 +72,7 @@ function insertLead(data) {
 }
 
 function emitNewLead(lead) {
-  const io = getIO();
-  if (io) io.emit('new_lead', lead);
+  emitToBusiness(lead.business_id, 'new_lead', lead);
 }
 
 // POST /api/extract/transcript

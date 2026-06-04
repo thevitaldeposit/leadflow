@@ -4,7 +4,7 @@ const db = require('../db/database');
 const { sendPaymentSms } = require('../services/smsService');
 const { initiateClickToCall } = require('../services/callService');
 const { logActivity, getActivityForLead } = require('../services/activityLog');
-const { getIO } = require('../socket');
+const { emitToBusiness } = require('../socket');
 const { attachBusiness } = require('../middleware/auth');
 
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
@@ -210,14 +210,11 @@ router.put('/:id', (req, res) => {
     if (!wasBooked && isNowBooked && isHomeServices && !updated.payment_sms_sent_at) {
       sendPaymentSms(updated).then((result) => {
         if (result.sent) {
-          const io = getIO();
-          if (io) {
-            io.emit('payment_sms_sent', {
-              leadId: updated.id,
-              customerName: result.customerName,
-              phone: result.phone,
-            });
-          }
+          emitToBusiness(updated.business_id, 'payment_sms_sent', {
+            leadId: updated.id,
+            customerName: result.customerName,
+            phone: result.phone,
+          });
         }
       }).catch((err) => console.error('[leads] SMS send error:', err));
     }
@@ -240,14 +237,11 @@ router.post('/:id/resend-payment-sms', async (req, res) => {
     const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
 
     if (result.sent) {
-      const io = getIO();
-      if (io) {
-        io.emit('payment_sms_sent', {
-          leadId: updated.id,
-          customerName: result.customerName,
-          phone: result.phone,
-        });
-      }
+      emitToBusiness(updated.business_id, 'payment_sms_sent', {
+        leadId: updated.id,
+        customerName: result.customerName,
+        phone: result.phone,
+      });
     }
 
     res.json({ ...result, lead: updated });

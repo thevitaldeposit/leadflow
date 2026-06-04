@@ -7,7 +7,7 @@ const db = require('../db/database');
 const { transcribe } = require('../services/transcriptionService');
 const { extractFromTranscriptVertical } = require('../services/verticalExtractionEngine');
 const { sendToAll } = require('../services/apns');
-const { getIO } = require('../socket');
+const { emitToBusiness } = require('../socket');
 const { enforceAutoBookAvailability } = require('../services/inventoryService');
 const { attachBusiness } = require('../middleware/auth');
 
@@ -138,8 +138,7 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
       console.warn(`[upload] Auto-book BLOCKED for lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching size'} available for ${lead.delivery_date}→${lead.pickup_date}; flagged as inventory conflict`);
     }
 
-    const io = getIO();
-    if (io) io.emit('new_lead', lead);
+    emitToBusiness(lead.business_id, 'new_lead', lead);
 
     // Send push notification
     const tokens = getDeviceTokens(deviceToken, req.business.id);
