@@ -9,6 +9,11 @@ const { extractFromTranscriptVertical } = require('../services/verticalExtractio
 const { sendToAll } = require('../services/apns');
 const { getIO } = require('../socket');
 const { enforceAutoBookAvailability } = require('../services/inventoryService');
+const { attachBusiness } = require('../middleware/auth');
+
+// iOS CallKit uploads don't send a token yet — soft auth scopes the lead to the
+// caller's business when a token is present, else to Valley Binz.
+router.use(attachBusiness);
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -37,10 +42,10 @@ const uploadAudio = multer({
   },
 });
 
-function getDeviceTokens(deviceToken) {
+function getDeviceTokens(deviceToken, businessId) {
   if (deviceToken) return [deviceToken];
   try {
-    const devices = db.prepare('SELECT device_token FROM devices').all();
+    const devices = db.prepare('SELECT device_token FROM devices WHERE business_id = ?').all(businessId);
     return devices.map(d => d.device_token);
   } catch {
     return [];
@@ -84,7 +89,7 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
     const { transcript, provider, transcription_seconds } = await transcribe(audioPath);
     console.log(`[upload] Transcript length: ${transcript.length} chars via ${provider}`);
 
-    const { commonFields, verticalData, confidence } = await extractFromTranscriptVertical(transcript, normalizedVertical);
+    const { commonFields, verticalData, confidence } = await extractFromTranscriptVertical(transcript, normalizedVertical, null, { businessId: req.business.id });
     console.log(`[upload] Extraction complete, confidence: ${confidence}`);
 
     // Pre-populate phone from caller ID if not extracted
@@ -113,6 +118,7 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
       captured_by: capturedBy || null,
       vertical_data: JSON.stringify(verticalData),
       confidence: confidence || 0,
+      business_id: req.business.id,
     };
 
     let lead = insertLead(leadData);
@@ -136,7 +142,7 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
     if (io) io.emit('new_lead', lead);
 
     // Send push notification
-    const tokens = getDeviceTokens(deviceToken);
+    const tokens = getDeviceTokens(deviceToken, req.business.id);
     const customerName = [commonFields.customer_first_name, commonFields.customer_last_name]
       .filter(Boolean).join(' ') || 'Unknown Caller';
     const primaryField = verticalData.vehicleInterest || verticalData.coverageType || verticalData.serviceType;

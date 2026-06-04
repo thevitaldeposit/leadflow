@@ -17,18 +17,20 @@ const ACTIVE_JOB_STATUSES = ['booked', 'scheduled', 'delivered', 'active_rental'
 //
 // deliveryDate / pickupDate: YYYY-MM-DD strings
 // excludeLeadId: omit this lead's own booking from the count (optional)
-function getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId = null) {
+// businessId: scope the count to one tenant's jobs
+function getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId = null, businessId) {
   const rows = db.prepare(`
     SELECT id, vertical_data
     FROM leads
     WHERE vertical = 'home_services'
+      AND business_id = ?
       AND delivery_date IS NOT NULL
       AND pickup_date IS NOT NULL
       AND (discarded = 0 OR discarded IS NULL)
       AND job_status IN (${ACTIVE_JOB_STATUSES.map(() => '?').join(', ')})
       AND delivery_date < ?
       AND pickup_date > ?
-  `).all(...ACTIVE_JOB_STATUSES, pickupDate, deliveryDate);
+  `).all(businessId, ...ACTIVE_JOB_STATUSES, pickupDate, deliveryDate);
 
   const exclude = excludeLeadId != null ? Number(excludeLeadId) : null;
   const counts = new Map();
@@ -48,10 +50,10 @@ function getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId = null
 
 // Compute availability for every pool size for a given date window.
 // available = owned quantity − units_in_service − overlapping active jobs of that size.
-// Returns an array sorted numerically by size.
-function getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId = null) {
-  const pools = db.prepare('SELECT * FROM inventory_pool').all();
-  const counts = getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId);
+// Returns an array sorted numerically by size. Scoped to one tenant's inventory.
+function getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId = null, businessId) {
+  const pools = db.prepare('SELECT * FROM inventory_pool WHERE business_id = ?').all(businessId);
+  const counts = getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId, businessId);
 
   const result = pools.map(p => {
     const n = normalizeSize(p.size);
@@ -75,10 +77,10 @@ function getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId = null) {
 
 // Availability for a single requested size (matched by leading number).
 // Returns the size's availability row, or null if no matching pool exists.
-function getAvailabilityForSize(requestedSize, deliveryDate, pickupDate, excludeLeadId = null) {
+function getAvailabilityForSize(requestedSize, deliveryDate, pickupDate, excludeLeadId = null, businessId) {
   const requestedNum = normalizeSize(requestedSize);
   if (requestedNum === null) return null;
-  const all = getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId);
+  const all = getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId, businessId);
   return all.find(a => normalizeSize(a.size) === requestedNum) || null;
 }
 
@@ -284,8 +286,9 @@ function enforceAutoBookAvailability(lead, verticalData) {
     lead.pickup_date = pickupDate;
   }
 
-  // Exclude this lead's own provisional booking from the overlap count.
-  const avail = getAvailabilityForSize(verticalData.dumpsterSize, lead.delivery_date, pickupDate, lead.id);
+  // Exclude this lead's own provisional booking from the overlap count, scoped
+  // to the lead's own business.
+  const avail = getAvailabilityForSize(verticalData.dumpsterSize, lead.delivery_date, pickupDate, lead.id, lead.business_id);
   if (avail && avail.available > 0) {
     return { blocked: false, pickupDate };
   }

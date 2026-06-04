@@ -5,6 +5,7 @@
 
 const db = require('../db/database');
 const { sendToAll } = require('./apns');
+const { getDefaultBusinessId } = require('./businesses');
 
 const MS_HOUR = 60 * 60 * 1000;
 const MS_DAY = 24 * MS_HOUR;
@@ -94,11 +95,12 @@ function leadFullName(lead, vd) {
     || 'Unknown Customer';
 }
 
-// Returns { totals, top } where top is { name, summary } | null.
-function computeMorningSummary(now = new Date()) {
+// Returns { totals, top } where top is { name, summary } | null. Scoped to one
+// business so each tenant's morning push reflects only its own leads.
+function computeMorningSummary(now = new Date(), businessId = getDefaultBusinessId()) {
   const leads = db.prepare(
-    "SELECT * FROM leads WHERE vertical = 'home_services' AND (discarded = 0 OR discarded IS NULL)"
-  ).all();
+    "SELECT * FROM leads WHERE vertical = 'home_services' AND business_id = ? AND (discarded = 0 OR discarded IS NULL)"
+  ).all(businessId);
 
   const enriched = leads
     .map(l => ({ lead: l, state: getActionState(l, now) }))
@@ -130,15 +132,16 @@ function computeMorningSummary(now = new Date()) {
   };
 }
 
-async function sendMorningPriorities() {
-  const summary = computeMorningSummary();
+// Build and push the morning summary for a single business to its own devices.
+async function sendMorningPrioritiesForBusiness(businessId) {
+  const summary = computeMorningSummary(new Date(), businessId);
 
   const devices = db.prepare(
-    "SELECT device_token FROM devices WHERE vertical = 'home_services' OR vertical IS NULL"
-  ).all().map(r => r.device_token).filter(Boolean);
+    "SELECT device_token FROM devices WHERE (vertical = 'home_services' OR vertical IS NULL) AND business_id = ?"
+  ).all(businessId).map(r => r.device_token).filter(Boolean);
 
   if (devices.length === 0) {
-    console.log('[morning] No registered devices — skipping push');
+    console.log(`[morning] No registered devices for business ${businessId} — skipping push`);
     return;
   }
 
@@ -153,11 +156,23 @@ async function sendMorningPriorities() {
     body = `${summary.totals.total} lead${summary.totals.total === 1 ? '' : 's'} need attention today.`;
   }
 
-  console.log(`[morning] Pushing to ${devices.length} device(s): ${body}`);
+  console.log(`[morning] Pushing to ${devices.length} device(s) for business ${businessId}: ${body}`);
   await sendToAll(devices, title, body, {
     type: 'morning_priorities',
     leadId: summary.top?.leadId,
   });
+}
+
+// Fan out the 8am push across every business so each tenant gets its own data.
+async function sendMorningPriorities() {
+  const businesses = db.prepare('SELECT id FROM businesses').all();
+  for (const { id } of businesses) {
+    try {
+      await sendMorningPrioritiesForBusiness(id);
+    } catch (err) {
+      console.error(`[morning] Failed to send morning priorities for business ${id}:`, err.message);
+    }
+  }
 }
 
 // Schedule the next 8am wall-clock fire and re-schedule itself each day so

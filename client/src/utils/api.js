@@ -1,13 +1,30 @@
 const BASE = '/api';
 
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, options);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  // credentials:'include' sends the httpOnly auth cookie on same-origin requests
+  // (direct in prod, via the Vite proxy in dev).
+  const res = await fetch(`${BASE}${path}`, { credentials: 'include', ...options });
+  let data = null;
+  try { data = await res.json(); } catch { /* empty/non-JSON body */ }
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
 export const api = {
+  // Auth
+  login: (email, password) =>
+    request('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  getMe: () => request('/auth/me'),
+
   // Leads
   getLeads: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

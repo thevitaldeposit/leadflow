@@ -1,7 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { requireAuth } = require('../middleware/auth');
 const { addDaysToISO, getAvailabilityBySize } = require('../services/inventoryService');
+
+// Every schedule route is scoped to the authenticated business.
+router.use(requireAuth);
 
 // ── GET /api/schedule/availability ────────────────────────────────────────────
 // Query params: delivery_date (YYYY-MM-DD), rental_duration (days, integer)
@@ -22,7 +26,7 @@ router.get('/availability', (req, res) => {
 
     // Pool-based availability: owned quantity − units in service − overlapping
     // active jobs of that size.
-    const bySizes = getAvailabilityBySize(delivery_date, pickupDate).map(p => ({
+    const bySizes = getAvailabilityBySize(delivery_date, pickupDate, null, req.business.id).map(p => ({
       size: p.size,
       ownedCount: p.quantity,
       unitsInService: p.units_in_service,
@@ -59,6 +63,7 @@ router.get('/calendar', (req, res) => {
              job_status, delivery_date, pickup_date, estimated_revenue
       FROM leads
       WHERE vertical = 'home_services'
+        AND business_id = ?
         AND (discarded = 0 OR discarded IS NULL)
         AND job_status IN ('booked', 'scheduled', 'delivered', 'active_rental', 'picked_up')
         AND (
@@ -66,7 +71,7 @@ router.get('/calendar', (req, res) => {
           OR (pickup_date >= ? AND pickup_date <= ?)
           OR (delivery_date IS NOT NULL AND delivery_date <= ? AND (pickup_date IS NULL OR pickup_date >= ?))
         )
-    `).all(firstDay, lastDay, firstDay, lastDay, lastDay, firstDay);
+    `).all(req.business.id, firstDay, lastDay, firstDay, lastDay, lastDay, firstDay);
 
     // Build day-by-day map for the entire month
     const dayMap = {};

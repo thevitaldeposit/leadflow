@@ -5,8 +5,10 @@ const { logActivity } = require('./activityLog');
 
 const PAYMENT_BASE_URL = 'https://leadflow-production-9c02.up.railway.app';
 
-function getDbSetting(key) {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+function getDbSetting(key, businessId) {
+  const row = db
+    .prepare('SELECT value FROM settings WHERE key = ? AND business_id = ?')
+    .get(key, businessId);
   if (!row) return null;
   try { return JSON.parse(row.value); } catch { return row.value; }
 }
@@ -66,7 +68,7 @@ async function sendPaymentSms(lead, force = false) {
     return { sent: false, reason: 'no_credentials' };
   }
 
-  const smsEnabled = getDbSetting('smsEnabled');
+  const smsEnabled = getDbSetting('smsEnabled', lead.business_id);
   if (smsEnabled === false) {
     console.log(`[sms] SMS disabled in settings — skipping lead ${lead.id}`);
     return { sent: false, reason: 'disabled' };
@@ -86,7 +88,7 @@ async function sendPaymentSms(lead, force = false) {
   let vd = {};
   try { vd = JSON.parse(lead.vertical_data || '{}'); } catch {}
 
-  const businessName = getDbSetting('businessName') || 'our business';
+  const businessName = getDbSetting('businessName', lead.business_id) || 'our business';
   const customerName = vd.customerName
     || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ')
     || null;

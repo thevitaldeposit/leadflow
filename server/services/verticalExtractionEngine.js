@@ -402,7 +402,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
   const { resolvedSubVertical } = resolveConfig(vertical, subVertical);
   const systemPrompt = buildSystemPrompt(vertical, subVertical, options);
 
-  const tz = getTimezone();
+  const tz = getTimezone(options.businessId);
   const todayISO = localDateInTimeZone(new Date(), tz);
   const todayLabel = new Date(todayISO + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -437,7 +437,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     // scheduling, so it must be known before computeFollowUpDate runs. If the model
     // captured the raw phrase but failed to resolve it to an ISO date, do it here.
     if (!verticalSpecific.deliveryDateISO && verticalSpecific.rawDeliveryDate) {
-      const resolved = resolveDeliveryDate(verticalSpecific.rawDeliveryDate, new Date(), getTimezone());
+      const resolved = resolveDeliveryDate(verticalSpecific.rawDeliveryDate, new Date(), getTimezone(options.businessId));
       if (resolved) verticalSpecific.deliveryDateISO = resolved;
     }
 

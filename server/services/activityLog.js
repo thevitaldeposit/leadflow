@@ -16,9 +16,12 @@ function formatDuration(seconds) {
 function logActivity(leadId, activityType, description) {
   if (!leadId) return;
   try {
+    // business_id is derived from the lead so the timeline entry is scoped to the
+    // same tenant without every caller having to pass it.
     db.prepare(
-      'INSERT INTO activity_log (lead_id, activity_type, description) VALUES (?, ?, ?)'
-    ).run(leadId, activityType, description || null);
+      `INSERT INTO activity_log (lead_id, activity_type, description, business_id)
+       VALUES (?, ?, ?, (SELECT business_id FROM leads WHERE id = ?))`
+    ).run(leadId, activityType, description || null, leadId);
   } catch (err) {
     console.error('[activityLog] Failed to log activity:', err.message);
   }

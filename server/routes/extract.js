@@ -8,6 +8,10 @@ const { extractFromTranscript, extractFromImage } = require('../services/extract
 const { UPLOADS_DIR } = require('../services/imageProcessor');
 const { transcribe } = require('../services/transcriptionService');
 const { getIO } = require('../socket');
+const { requireAuth } = require('../middleware/auth');
+
+// Manual lead capture is a web-dashboard feature — every route requires auth.
+router.use(requireAuth);
 
 // Upsheet image uploads
 const imageStorage = multer.diskStorage({
@@ -82,6 +86,7 @@ router.post('/transcript', async (req, res) => {
 
     const extracted = await extractFromTranscript(transcript);
     extracted.raw_transcript = transcript;
+    extracted.business_id = req.business.id;
 
     const lead = insertLead(extracted);
     emitNewLead(lead);
@@ -103,6 +108,7 @@ router.post('/upsheet', uploadImage.single('image'), async (req, res) => {
     const extracted = await extractFromImage(imagePath);
     extracted.raw_image_path = `/uploads/${req.file.filename}`;
     extracted.extraction_type = 'upsheet_image';
+    extracted.business_id = req.business.id;
 
     const lead = insertLead(extracted);
     emitNewLead(lead);
@@ -133,6 +139,7 @@ router.post('/audio', uploadAudio.single('audio'), async (req, res) => {
     extracted.audio_file_path = audioPublicPath;
     extracted.transcription_provider = provider;
     extracted.transcription_duration_seconds = transcription_seconds || null;
+    extracted.business_id = req.business.id;
 
     const lead = insertLead(extracted);
     emitNewLead(lead);

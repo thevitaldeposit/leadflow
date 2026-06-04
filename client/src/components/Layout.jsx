@@ -13,11 +13,13 @@ import {
   Package,
   CheckSquare,
   Database,
+  LogOut,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Navbar from './Navbar';
 import { ToastContainer } from './Toast';
 import socket from '../socket';
+import { useAuth } from '../context/AuthContext';
 
 const PAGE_TITLES = {
   '/': 'Dashboard',
@@ -39,6 +41,7 @@ let toastIdCounter = 0;
 
 export default function Layout({ children }) {
   const location = useLocation();
+  const { business, logout } = useAuth();
   const [newOpen, setNewOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
 
@@ -206,8 +209,18 @@ export default function Layout({ children }) {
         </nav>
 
         {/* Footer */}
-        <div className="px-4 py-3 border-t border-white/10">
-          <p className="text-xs text-gray-500">LeadFlow v2.0</p>
+        <div className="px-4 py-3 border-t border-white/10 space-y-2">
+          {business?.name && (
+            <p className="text-xs text-gray-400 truncate" title={business.name}>{business.name}</p>
+          )}
+          <button
+            onClick={logout}
+            className="flex items-center gap-2 text-xs text-gray-500 hover:text-white transition-colors"
+          >
+            <LogOut size={14} />
+            Sign out
+          </button>
+          <p className="text-[10px] text-gray-600">LeadFlow v2.0</p>
         </div>
       </aside>
 

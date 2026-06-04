@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 const { hashPassword, comparePassword, generateToken } = require('../services/authService');
-const requireAuth = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
 
 // Mark the auth cookie Secure (HTTPS-only) in production; allow plain HTTP in dev.
 const isProd = process.env.NODE_ENV === 'production';

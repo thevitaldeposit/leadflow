@@ -12,24 +12,27 @@ const { resolveDeliveryDate, parseRentalDays, addDaysToISO, resolvePickupPhrase,
 const { sendPaymentSms } = require('../services/smsService');
 const { logActivity, formatDuration } = require('../services/activityLog');
 const { getTimezone } = require('../services/settingsService');
+const { getBusinessIdByTwilioNumber, getDefaultBusinessId } = require('../services/businesses');
 
 const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
 
-// Twilio's recordingStatusCallback often omits `From`, so /twilio/voice stashes
-// the caller ID in call_sessions for /twilio/recording to recover.
-function rememberCaller(callSid, from) {
-  if (!callSid || !from) return;
+// Twilio's recordingStatusCallback often omits `From` (and the called number),
+// so /twilio/voice stashes both the caller ID and the resolved business_id in
+// call_sessions for the recording/voicemail callbacks to recover.
+function rememberCaller(callSid, from, businessId) {
+  if (!callSid) return;
   db.prepare(
-    'INSERT OR REPLACE INTO call_sessions (call_sid, from_number) VALUES (?, ?)'
-  ).run(callSid, from);
+    'INSERT OR REPLACE INTO call_sessions (call_sid, from_number, business_id) VALUES (?, ?, ?)'
+  ).run(callSid, from || null, businessId || null);
 }
 
-function recallCaller(callSid) {
-  if (!callSid) return null;
-  const row = db.prepare('SELECT from_number FROM call_sessions WHERE call_sid = ?').get(callSid);
-  if (!row) return null;
+// Recover { from, businessId } stashed at /twilio/voice time, then clear the row.
+function recallSession(callSid) {
+  if (!callSid) return { from: null, businessId: null };
+  const row = db.prepare('SELECT from_number, business_id FROM call_sessions WHERE call_sid = ?').get(callSid);
+  if (!row) return { from: null, businessId: null };
   db.prepare('DELETE FROM call_sessions WHERE call_sid = ?').run(callSid);
-  return row.from_number || null;
+  return { from: row.from_number || null, businessId: row.business_id || null };
 }
 
 setInterval(() => {
@@ -88,7 +91,9 @@ function isPersonalCall(lead) {
 // Process recording asynchronously after responding 200 to Twilio
 async function processRecording(payload) {
   const { RecordingUrl, RecordingSid, CallSid, CallDuration } = payload;
-  const From = payload.From || recallCaller(CallSid);
+  const session = recallSession(CallSid);
+  const From = payload.From || session.from;
+  const businessId = session.businessId || getBusinessIdByTwilioNumber(payload.To) || getDefaultBusinessId();
 
   if (!fs.existsSync(RECORDINGS_DIR)) {
     fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
@@ -120,7 +125,8 @@ async function processRecording(payload) {
       const { commonFields, verticalData, confidence, subVertical } = await extractFromTranscriptVertical(
         transcript,
         defaultVertical,
-        defaultSubVertical
+        defaultSubVertical,
+        { businessId }
       );
 
       if (!commonFields.phone && From) {
@@ -140,7 +146,7 @@ async function processRecording(payload) {
           || (verticalData.deliveryDate && !/^\d{4}-\d{2}-\d{2}$/.test(verticalData.deliveryDate)
               ? verticalData.deliveryDate : null);
 
-        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date(), getTimezone());
+        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date(), getTimezone(businessId));
         if (resolvedISO) {
           verticalData.deliveryDateISO = resolvedISO;
           verticalData.deliveryDate = resolvedISO;
@@ -180,7 +186,7 @@ async function processRecording(payload) {
           } else if (verticalData.rentalDuration) {
             // Prose like "tomorrow until friday" → resolve the end weekday/date
             // with the (correct) Node weekday logic instead of the AI's value.
-            pickupISO = resolvePickupPhrase(verticalData.rentalDuration, new Date(), getTimezone());
+            pickupISO = resolvePickupPhrase(verticalData.rentalDuration, new Date(), getTimezone(businessId));
           }
 
           if (pickupISO && pickupISO > deliveryISO) {
@@ -212,6 +218,7 @@ async function processRecording(payload) {
         source: 'twilio_recording',
         vertical_data: JSON.stringify(verticalData),
         confidence: confidence || 0,
+        business_id: businessId,
       };
 
       let lead = insertLead(leadData);
@@ -282,6 +289,7 @@ async function processRecording(payload) {
     extracted.transcription_duration_seconds = transcription_seconds || null;
     extracted.auto_captured = 1;
     extracted.caller_phone_raw = From || null;
+    extracted.business_id = businessId;
 
     // Pre-populate phone if not extracted and caller ID is available
     if (!extracted.phone && From) {
@@ -319,7 +327,9 @@ async function processRecording(payload) {
 // twilio-{SID}.mp3 like answered calls, so the 30-day auto-delete applies.
 async function processVoicemail(payload) {
   const { RecordingUrl, RecordingSid, CallSid } = payload;
-  const From = payload.From || recallCaller(CallSid);
+  const session = recallSession(CallSid);
+  const From = payload.From || session.from;
+  const businessId = session.businessId || getBusinessIdByTwilioNumber(payload.To) || getDefaultBusinessId();
 
   if (!fs.existsSync(RECORDINGS_DIR)) {
     fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
@@ -352,7 +362,7 @@ async function processVoicemail(payload) {
         transcript,
         defaultVertical,
         defaultSubVertical,
-        { voicemail: true }
+        { voicemail: true, businessId }
       );
 
       if (!commonFields.phone && From) {
@@ -370,7 +380,7 @@ async function processVoicemail(payload) {
         const rawDateStr = verticalData.rawDeliveryDate
           || (verticalData.deliveryDate && !/^\d{4}-\d{2}-\d{2}$/.test(verticalData.deliveryDate)
               ? verticalData.deliveryDate : null);
-        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date(), getTimezone());
+        const resolvedISO = resolveDeliveryDate(rawDateStr, new Date(), getTimezone(businessId));
         if (resolvedISO) {
           verticalData.deliveryDateISO = resolvedISO;
           verticalData.deliveryDate = resolvedISO;
@@ -398,7 +408,7 @@ async function processVoicemail(payload) {
           if (durationDays) {
             pickupISO = addDaysToISO(deliveryISO, durationDays);
           } else if (verticalData.rentalDuration) {
-            pickupISO = resolvePickupPhrase(verticalData.rentalDuration, new Date(), getTimezone());
+            pickupISO = resolvePickupPhrase(verticalData.rentalDuration, new Date(), getTimezone(businessId));
           }
 
           if (pickupISO && pickupISO > deliveryISO) {
@@ -439,6 +449,7 @@ async function processVoicemail(payload) {
         source: 'twilio_voicemail',
         vertical_data: JSON.stringify(verticalData),
         confidence: confidence || 0,
+        business_id: businessId,
       };
 
       const lead = insertLead(leadData);
@@ -472,6 +483,7 @@ async function processVoicemail(payload) {
     extracted.auto_captured = 1;
     extracted.caller_phone_raw = From || null;
     extracted.source = 'twilio_voicemail';
+    extracted.business_id = businessId;
 
     if (!extracted.phone && From) {
       const digits = From.replace(/\D/g, '');
@@ -535,12 +547,17 @@ router.post('/twilio/voice', (req, res) => {
     const to = (req.body.To || '').trim();
     const callSid = req.body.CallSid || 'unknown';
 
-    rememberCaller(req.body.CallSid, req.body.From);
+    // Resolve which business owns the dialed Twilio number so the eventual
+    // recording/voicemail lead is attributed to the right tenant. Falls back to
+    // the default business when the number isn't registered yet.
+    const businessId = getBusinessIdByTwilioNumber(to) || getDefaultBusinessId();
+    rememberCaller(req.body.CallSid, req.body.From, businessId);
 
     console.log('[webhook/voice] ── inbound call ──────────────────────────');
     console.log(`[webhook/voice]   CallSid:   ${callSid}`);
     console.log(`[webhook/voice]   From:      ${from}`);
     console.log(`[webhook/voice]   To:        ${to || 'MISSING'}`);
+    console.log(`[webhook/voice]   Business:  ${businessId}`);
     console.log(`[webhook/voice]   ForwardTo: ${userPhone || 'MISSING'}`);
 
     if (!userPhone) {

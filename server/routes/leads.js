@@ -5,6 +5,11 @@ const { sendPaymentSms } = require('../services/smsService');
 const { initiateClickToCall } = require('../services/callService');
 const { logActivity, getActivityForLead } = require('../services/activityLog');
 const { getIO } = require('../socket');
+const { attachBusiness } = require('../middleware/auth');
+
+// Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
+// request to the caller's business when a token is present, else to Valley Binz.
+router.use(attachBusiness);
 
 function getLeadDisplayName(lead) {
   let vd = {};
@@ -29,6 +34,10 @@ router.get('/', (req, res) => {
 
     let query = 'SELECT * FROM leads WHERE 1=1';
     const params = [];
+
+    // Scope to the caller's business.
+    query += ' AND business_id = ?';
+    params.push(req.business.id);
 
     // Exclude discarded leads by default
     if (discarded !== 'include') {
@@ -83,10 +92,10 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET /api/leads/all — raw debug view: every lead, no filtering whatsoever
+// GET /api/leads/all — raw debug view: every lead for this business, no filtering
 router.get('/all', (req, res) => {
   try {
-    const leads = db.prepare('SELECT * FROM leads ORDER BY created_at DESC').all();
+    const leads = db.prepare('SELECT * FROM leads WHERE business_id = ? ORDER BY created_at DESC').all(req.business.id);
     res.json(leads);
   } catch (err) {
     console.error('GET /leads/all error:', err);
@@ -97,7 +106,7 @@ router.get('/all', (req, res) => {
 // GET /api/leads/:id
 router.get('/:id', (req, res) => {
   try {
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
     res.json(lead);
   } catch (err) {
@@ -109,7 +118,7 @@ router.get('/:id', (req, res) => {
 // GET /api/leads/:id/activity — full activity timeline for a lead, newest first
 router.get('/:id/activity', (req, res) => {
   try {
-    const lead = db.prepare('SELECT id FROM leads WHERE id = ?').get(req.params.id);
+    const lead = db.prepare('SELECT id FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
     res.json(getActivityForLead(req.params.id));
   } catch (err) {
@@ -121,7 +130,8 @@ router.get('/:id/activity', (req, res) => {
 // PUT /api/leads/:id
 router.put('/:id', (req, res) => {
   try {
-    const existing = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    const businessId = req.business.id;
+    const existing = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
 
     const allowedFields = [
@@ -182,11 +192,11 @@ router.put('/:id', (req, res) => {
     updates.updated_at = new Date().toISOString();
 
     const setClauses = Object.keys(updates).map(k => `${k} = ?`).join(', ');
-    const values = [...Object.values(updates), req.params.id];
+    const values = [...Object.values(updates), req.params.id, businessId];
 
-    db.prepare(`UPDATE leads SET ${setClauses} WHERE id = ?`).run(...values);
+    db.prepare(`UPDATE leads SET ${setClauses} WHERE id = ? AND business_id = ?`).run(...values);
 
-    const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
 
     // Log a status_change touchpoint whenever job_status actually changes.
     if (updates.job_status !== undefined && updated.job_status !== existing.job_status) {
@@ -222,12 +232,12 @@ router.put('/:id', (req, res) => {
 // POST /api/leads/:id/resend-payment-sms
 router.post('/:id/resend-payment-sms', async (req, res) => {
   try {
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
     const result = await sendPaymentSms(lead, true);
 
-    const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
 
     if (result.sent) {
       const io = getIO();
@@ -252,7 +262,7 @@ router.post('/:id/resend-payment-sms', async (req, res) => {
 // the caller ID the customer sees.
 router.post('/:id/call', async (req, res) => {
   try {
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
     const customerName = getLeadDisplayName(lead);
@@ -288,10 +298,10 @@ router.post('/:id/call', async (req, res) => {
 // DELETE /api/leads/:id
 router.delete('/:id', (req, res) => {
   try {
-    const existing = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    const existing = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
 
-    db.prepare('DELETE FROM leads WHERE id = ?').run(req.params.id);
+    db.prepare('DELETE FROM leads WHERE id = ? AND business_id = ?').run(req.params.id, req.business.id);
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /leads/:id error:', err);

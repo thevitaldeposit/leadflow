@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { getDefaultBusinessId } = require('../services/businesses');
 
-function readSettings() {
-  const rows = db.prepare('SELECT key, value FROM settings').all();
+// This is a PUBLIC customer-facing page (opened from an SMS link), so it stays
+// unauthenticated — but it must show the lead's OWN business's branding and
+// payment handles, so settings are scoped to that business.
+function readSettings(businessId) {
+  const rows = db.prepare('SELECT key, value FROM settings WHERE business_id = ?').all(businessId);
   const obj = {};
   for (const row of rows) {
     try { obj[row.key] = JSON.parse(row.value); } catch { obj[row.key] = row.value; }
@@ -104,7 +108,9 @@ function shell(businessName, title, body) {
 router.get('/:jobId', (req, res) => {
   try {
     const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.jobId);
-    const settings = readSettings();
+    // Use the lead's business for branding; fall back to the default tenant when
+    // the link points at a non-existent lead so the "not found" page still renders.
+    const settings = readSettings(lead ? lead.business_id : getDefaultBusinessId());
 
     const businessName = settings.businessName || 'LeadFlow Business';
     const cashAppHandle = settings.cashAppHandle || null;

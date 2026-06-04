@@ -9,8 +9,22 @@ import InventoryPage from './pages/InventoryPage';
 import FilteredLeadsPage from './pages/FilteredLeadsPage';
 import SchedulePage from './pages/SchedulePage';
 import AllLeadsPage from './pages/AllLeadsPage';
+import LoginPage from './pages/LoginPage';
+import { AuthProvider, useAuth } from './context/AuthContext';
 
-export default function App() {
+function AppRoutes() {
+  const { loading, user } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-app-bg text-gray-500 text-sm">
+        Loading…
+      </div>
+    );
+  }
+
+  if (!user) return <LoginPage />;
+
   return (
     <BrowserRouter>
       <Layout>
@@ -31,5 +45,13 @@ export default function App() {
         </Routes>
       </Layout>
     </BrowserRouter>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   );
 }

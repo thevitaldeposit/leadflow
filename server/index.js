@@ -11,6 +11,7 @@ const cors = require('cors');
 const db = require('./db/database');
 const { initDatabase } = require('./db/database');
 const { init: initSocket } = require('./socket');
+const { requireAuth } = require('./middleware/auth');
 
 // Route modules register handlers; they do not call the DB at require time.
 const leadsRouter = require('./routes/leads');
@@ -50,49 +51,50 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Dashboard stats — must be registered before the /api/leads router
-app.get('/api/dashboard/stats', (req, res) => {
+app.get('/api/dashboard/stats', requireAuth, (req, res) => {
   try {
+    const businessId = req.business.id;
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
     const totalToday = db.prepare(
-      'SELECT COUNT(*) as count FROM leads WHERE created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
-    ).get(todayStart);
+      'SELECT COUNT(*) as count FROM leads WHERE business_id = ? AND created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
+    ).get(businessId, todayStart);
     const totalWeek = db.prepare(
-      'SELECT COUNT(*) as count FROM leads WHERE created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
-    ).get(weekStart);
+      'SELECT COUNT(*) as count FROM leads WHERE business_id = ? AND created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
+    ).get(businessId, weekStart);
     const totalMonth = db.prepare(
-      'SELECT COUNT(*) as count FROM leads WHERE created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
-    ).get(monthStart);
+      'SELECT COUNT(*) as count FROM leads WHERE business_id = ? AND created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
+    ).get(businessId, monthStart);
     const totalAll = db.prepare(
-      'SELECT COUNT(*) as count FROM leads WHERE (discarded = 0 OR discarded IS NULL)'
-    ).get();
+      'SELECT COUNT(*) as count FROM leads WHERE business_id = ? AND (discarded = 0 OR discarded IS NULL)'
+    ).get(businessId);
 
     const byStatus = db.prepare(
-      'SELECT status, COUNT(*) as count FROM leads WHERE (discarded = 0 OR discarded IS NULL) GROUP BY status'
-    ).all();
+      'SELECT status, COUNT(*) as count FROM leads WHERE business_id = ? AND (discarded = 0 OR discarded IS NULL) GROUP BY status'
+    ).all(businessId);
     const byIntent = db.prepare(
-      'SELECT customer_intent, COUNT(*) as count FROM leads WHERE (discarded = 0 OR discarded IS NULL) GROUP BY customer_intent'
-    ).all();
+      'SELECT customer_intent, COUNT(*) as count FROM leads WHERE business_id = ? AND (discarded = 0 OR discarded IS NULL) GROUP BY customer_intent'
+    ).all(businessId);
     const bySource = db.prepare(
-      'SELECT lead_source, COUNT(*) as count FROM leads WHERE lead_source IS NOT NULL AND (discarded = 0 OR discarded IS NULL) GROUP BY lead_source ORDER BY count DESC LIMIT 10'
-    ).all();
+      'SELECT lead_source, COUNT(*) as count FROM leads WHERE business_id = ? AND lead_source IS NOT NULL AND (discarded = 0 OR discarded IS NULL) GROUP BY lead_source ORDER BY count DESC LIMIT 10'
+    ).all(businessId);
 
     const appointmentsToday = db.prepare(
-      'SELECT COUNT(*) as count FROM leads WHERE appointment_set = 1 AND created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
-    ).get(todayStart);
+      'SELECT COUNT(*) as count FROM leads WHERE business_id = ? AND appointment_set = 1 AND created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
+    ).get(businessId, todayStart);
     const appointmentsWeek = db.prepare(
-      'SELECT COUNT(*) as count FROM leads WHERE appointment_set = 1 AND created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
-    ).get(weekStart);
+      'SELECT COUNT(*) as count FROM leads WHERE business_id = ? AND appointment_set = 1 AND created_at >= ? AND (discarded = 0 OR discarded IS NULL)'
+    ).get(businessId, weekStart);
 
     const avgConfidence = db.prepare(`
       SELECT AVG(
         (COALESCE(customer_first_name_confidence,0) + COALESCE(customer_last_name_confidence,0) +
          COALESCE(phone_confidence,0) + COALESCE(voi_make_confidence,0) + COALESCE(voi_model_confidence,0)) / 5.0
-      ) as avg_confidence FROM leads WHERE (discarded = 0 OR discarded IS NULL)
-    `).get();
+      ) as avg_confidence FROM leads WHERE business_id = ? AND (discarded = 0 OR discarded IS NULL)
+    `).get(businessId);
 
     res.json({
       totals: { today: totalToday.count, week: totalWeek.count, month: totalMonth.count, all: totalAll.count },

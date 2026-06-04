@@ -1,10 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { requireAuth } = require('../middleware/auth');
 const { getAvailabilityBySize, normalizeSize } = require('../services/inventoryService');
+
+// Every inventory route is scoped to the authenticated business.
+router.use(requireAuth);
 
 // Pool-based inventory API. Mounted at /api/dumpsters for URL back-compat, but
 // every row represents a SIZE (a pool), not an individual asset.
+// NOTE: inventory_pool.size is still globally UNIQUE — fine for a single business,
+// but needs a composite (business_id, size) constraint before a second tenant.
 //
 // GET /api/dumpsters
 // Optional params:
@@ -14,20 +20,21 @@ const { getAvailabilityBySize, normalizeSize } = require('../services/inventoryS
 //   exclude_lead_id — omit this lead's own booking from the availability count.
 router.get('/', (req, res) => {
   try {
+    const businessId = req.business.id;
     const { delivery_date, pickup_date, exclude_lead_id } = req.query;
 
     if (delivery_date && pickup_date) {
       // Date-availability mode: return pools with computed availability.
-      const rows = getAvailabilityBySize(delivery_date, pickup_date, exclude_lead_id || null);
+      const rows = getAvailabilityBySize(delivery_date, pickup_date, exclude_lead_id || null, businessId);
       // Merge in notes for display (getAvailabilityBySize omits them).
       const notesById = new Map(
-        db.prepare('SELECT id, notes FROM inventory_pool').all().map(r => [r.id, r.notes])
+        db.prepare('SELECT id, notes FROM inventory_pool WHERE business_id = ?').all(businessId).map(r => [r.id, r.notes])
       );
       return res.json(rows.map(r => ({ ...r, notes: notesById.get(r.id) || null })));
     }
 
     // Plain management list, sorted numerically by size.
-    const pools = db.prepare('SELECT * FROM inventory_pool').all();
+    const pools = db.prepare('SELECT * FROM inventory_pool WHERE business_id = ?').all(businessId);
     pools.sort((a, b) => (normalizeSize(a.size) || 999) - (normalizeSize(b.size) || 999));
     res.json(pools);
   } catch (err) {
@@ -48,9 +55,9 @@ router.post('/', (req, res) => {
     const inService = Math.max(0, parseInt(units_in_service, 10) || 0);
 
     const stmt = db.prepare(
-      'INSERT INTO inventory_pool (size, quantity, units_in_service, notes) VALUES (?, ?, ?, ?)'
+      'INSERT INTO inventory_pool (size, quantity, units_in_service, notes, business_id) VALUES (?, ?, ?, ?, ?)'
     );
-    const result = stmt.run(String(size).trim(), qty, inService, notes || null);
+    const result = stmt.run(String(size).trim(), qty, inService, notes || null, req.business.id);
     const created = db.prepare('SELECT * FROM inventory_pool WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(created);
   } catch (err) {
@@ -65,7 +72,8 @@ router.post('/', (req, res) => {
 // PUT /api/dumpsters/:id — edit a size, quantity, units in service, or notes
 router.put('/:id', (req, res) => {
   try {
-    const existing = db.prepare('SELECT * FROM inventory_pool WHERE id = ?').get(req.params.id);
+    const businessId = req.business.id;
+    const existing = db.prepare('SELECT * FROM inventory_pool WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
     if (!existing) return res.status(404).json({ error: 'Inventory pool not found' });
 
     const updates = {};
@@ -85,10 +93,10 @@ router.put('/:id', (req, res) => {
 
     updates.updated_at = new Date().toISOString();
     const setClauses = Object.keys(updates).map(k => `${k} = ?`).join(', ');
-    db.prepare(`UPDATE inventory_pool SET ${setClauses} WHERE id = ?`)
-      .run(...Object.values(updates), req.params.id);
+    db.prepare(`UPDATE inventory_pool SET ${setClauses} WHERE id = ? AND business_id = ?`)
+      .run(...Object.values(updates), req.params.id, businessId);
 
-    const updated = db.prepare('SELECT * FROM inventory_pool WHERE id = ?').get(req.params.id);
+    const updated = db.prepare('SELECT * FROM inventory_pool WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
     res.json(updated);
   } catch (err) {
     if (err.message && err.message.includes('UNIQUE')) {
@@ -102,9 +110,10 @@ router.put('/:id', (req, res) => {
 // DELETE /api/dumpsters/:id — remove a size pool
 router.delete('/:id', (req, res) => {
   try {
-    const existing = db.prepare('SELECT * FROM inventory_pool WHERE id = ?').get(req.params.id);
+    const businessId = req.business.id;
+    const existing = db.prepare('SELECT * FROM inventory_pool WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
     if (!existing) return res.status(404).json({ error: 'Inventory pool not found' });
-    db.prepare('DELETE FROM inventory_pool WHERE id = ?').run(req.params.id);
+    db.prepare('DELETE FROM inventory_pool WHERE id = ? AND business_id = ?').run(req.params.id, businessId);
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /dumpsters/:id error:', err);
