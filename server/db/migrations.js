@@ -45,6 +45,59 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN internal_notes TEXT',
 ];
 
+// ── Multi-tenancy: per-business unique constraints ──────────────────────────
+// Phase 1 attached business_id to settings and inventory_pool but left their
+// UNIQUE constraints global (settings UNIQUE(key) via its PK, inventory_pool
+// UNIQUE(size)). Those collide the moment a second tenant exists — two
+// businesses can't both have a `businessName` setting or a 20-yard pool. Each
+// table must instead be UNIQUE(business_id, <col>). SQLite can't alter a
+// constraint in place, so the table is rebuilt with the documented
+// create-new / copy / drop-old / rename recipe.
+
+// True once `table` has a UNIQUE constraint that includes business_id — i.e. the
+// composite-key migration has already run. Inspecting the actual unique indexes
+// (rather than matching CREATE-TABLE text) keeps the check robust to formatting.
+function hasBusinessScopedUnique(table) {
+  for (const idx of db.prepare(`PRAGMA index_list(${table})`).all()) {
+    if (!idx.unique) continue;
+    const cols = db.prepare(`PRAGMA index_info("${idx.name}")`).all().map((c) => c.name);
+    if (cols.includes('business_id')) return true;
+  }
+  return false;
+}
+
+// Rebuild `table` in place using `createNewSql` (which must create
+// `${table}_new`) and copy `columns` across. Follows SQLite's documented safe
+// schema-change procedure: foreign keys are disabled around the swap, the work
+// runs inside a single transaction, and FK integrity is verified before commit.
+function rebuildTableInPlace(table, createNewSql, columns) {
+  const cols = columns.join(', ');
+  // PRAGMA foreign_keys is a no-op inside a transaction, so toggle it outside.
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    try {
+      db.exec(createNewSql);
+      db.exec(`INSERT INTO ${table}_new (${cols}) SELECT ${cols} FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${table}_new RENAME TO ${table}`);
+      const violations = db.prepare(`PRAGMA foreign_key_check(${table})`).all();
+      if (violations.length > 0) {
+        throw new Error(
+          `foreign_key_check failed after rebuilding ${table}: ${JSON.stringify(violations)}`
+        );
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    // Restore the connection-level setting database.js opened with, even on error.
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
 function runMigrations() {
   console.log('[migrations] Starting schema migrations…');
   const schemaPath = path.join(__dirname, 'schema.sql');
@@ -282,6 +335,54 @@ function runMigrations() {
       `UPDATE ${table} SET business_id = ? WHERE business_id IS NULL`
     ).run(valleyBinzId);
     console.log(`[migrations] Migration complete — ${Number(result.changes)} rows in "${table}" updated to business_id = ${valleyBinzId}`);
+  }
+
+  // ── Multi-tenancy (Phase 2.1): per-business unique constraints ─────────────
+  // Swap the global UNIQUE constraints on settings(key) and inventory_pool(size)
+  // for composite UNIQUE(business_id, …) so a second tenant's settings keys and
+  // inventory sizes no longer collide with Valley Binz's. Each rebuild runs once
+  // per database (guarded by hasBusinessScopedUnique) and preserves every
+  // existing row — including the business_id values backfilled just above. See
+  // the rebuildTableInPlace / hasBusinessScopedUnique helpers above for the
+  // safe-rebuild mechanics.
+  if (!hasBusinessScopedUnique('settings')) {
+    const before = db.prepare('SELECT COUNT(*) AS n FROM settings').get().n;
+    rebuildTableInPlace(
+      'settings',
+      `CREATE TABLE settings_new (
+        key TEXT NOT NULL,
+        value TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        business_id INTEGER REFERENCES businesses(id),
+        UNIQUE(business_id, key)
+      )`,
+      ['key', 'value', 'updated_at', 'business_id']
+    );
+    const after = db.prepare('SELECT COUNT(*) AS n FROM settings').get().n;
+    console.log(`[migrations] Rebuilt settings with UNIQUE(business_id, key) — ${after}/${before} rows preserved`);
+  }
+
+  if (!hasBusinessScopedUnique('inventory_pool')) {
+    const before = db.prepare('SELECT COUNT(*) AS n FROM inventory_pool').get().n;
+    // `id` is copied verbatim so leads.assigned_dumpster_id keeps pointing at the
+    // same pool rows after the rebuild.
+    rebuildTableInPlace(
+      'inventory_pool',
+      `CREATE TABLE inventory_pool_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        size TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        units_in_service INTEGER NOT NULL DEFAULT 0,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        business_id INTEGER REFERENCES businesses(id),
+        UNIQUE(business_id, size)
+      )`,
+      ['id', 'size', 'quantity', 'units_in_service', 'notes', 'created_at', 'updated_at', 'business_id']
+    );
+    const after = db.prepare('SELECT COUNT(*) AS n FROM inventory_pool').get().n;
+    console.log(`[migrations] Rebuilt inventory_pool with UNIQUE(business_id, size) — ${after}/${before} rows preserved`);
   }
 
   console.log('Database migrations completed successfully.');

@@ -3,9 +3,9 @@ const router = express.Router();
 const db = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 
-// Settings are per-business. NOTE: the settings table's PRIMARY KEY is still
-// `key` alone (globally unique), which is fine while only Valley Binz exists but
-// must become a composite (business_id, key) before a second business is onboarded.
+// Settings are per-business. The settings table is keyed by a composite
+// UNIQUE(business_id, key) (see migrations.js), so the INSERT OR REPLACE in PUT
+// upserts within a single business without colliding across tenants.
 function readAll(businessId) {
   const rows = db.prepare('SELECT key, value FROM settings WHERE business_id = ?').all(businessId);
   const obj = {};

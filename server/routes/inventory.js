@@ -9,8 +9,8 @@ router.use(requireAuth);
 
 // Pool-based inventory API. Mounted at /api/dumpsters for URL back-compat, but
 // every row represents a SIZE (a pool), not an individual asset.
-// NOTE: inventory_pool.size is still globally UNIQUE — fine for a single business,
-// but needs a composite (business_id, size) constraint before a second tenant.
+// inventory_pool is keyed by a composite UNIQUE(business_id, size) (see
+// migrations.js), so each tenant has its own per-size pools.
 //
 // GET /api/dumpsters
 // Optional params:
