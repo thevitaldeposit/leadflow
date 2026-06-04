@@ -108,4 +108,13 @@ export const api = {
   // Outbound click-to-call (Twilio rings the user first, then the customer)
   callLead: (id) =>
     request(`/leads/${id}/call`, { method: 'POST' }),
+
+  // Stream signups — public create (marketing site), authed list (admin view)
+  createSignup: (body) =>
+    request('/signups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  getSignups: () => request('/signups'),
 };

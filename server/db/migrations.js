@@ -249,6 +249,23 @@ function runMigrations() {
     console.log(`[migrations] Backfilled activity_log for ${existingLeads.length} lead(s)`);
   }
 
+  // Stream signups — public lead capture from the joinstream.app marketing site.
+  // Rows are inserted unauthenticated by POST /api/signups and read back by the
+  // Stream admin dashboard. Intentionally NOT scoped to a business_id: these are
+  // top-of-funnel prospects who don't have a tenant yet.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS signups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      first_name TEXT,
+      business_name TEXT,
+      business_type TEXT,
+      phone TEXT,
+      email TEXT,
+      call_booked INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // ── Multi-tenancy foundation (Phase 1) ────────────────────────────────────
   // Purely additive: add a businesses table and a users table, then attach a
   // business_id to every pre-existing table so each row is scoped to a tenant.

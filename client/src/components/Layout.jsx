@@ -13,6 +13,7 @@ import {
   Package,
   CheckSquare,
   Database,
+  Radio,
   LogOut,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
@@ -201,6 +202,14 @@ export default function Layout({ children }) {
             <Database size={18} />
             All Leads
           </NavLink>
+
+          {/* Stream admin — only the Stream/Valley Binz account (business 1). */}
+          {business?.id === 1 && (
+            <NavLink to="/stream-signups" className={linkClass}>
+              <Radio size={18} />
+              Stream Signups
+            </NavLink>
+          )}
 
           <NavLink to="/settings" className={linkClass}>
             <Settings size={18} />
