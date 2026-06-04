@@ -196,6 +196,94 @@ function runMigrations() {
     console.log(`[migrations] Backfilled activity_log for ${existingLeads.length} lead(s)`);
   }
 
+  // ── Multi-tenancy foundation (Phase 1) ────────────────────────────────────
+  // Purely additive: add a businesses table and a users table, then attach a
+  // business_id to every pre-existing table so each row is scoped to a tenant.
+  // No existing column is dropped or renamed and no existing route changes.
+  // Auth middleware is NOT applied to any route in this phase.
+
+  // One row per tenant. Valley Binz is seeded as row 1 below so all of the
+  // existing single-tenant data has a home.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS businesses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      owner_first_name TEXT,
+      slug TEXT UNIQUE,
+      twilio_phone_number TEXT,
+      user_phone_number TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Login accounts, each belonging to one business. password_hash stores a
+  // bcrypt hash — never a plaintext password.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      email TEXT UNIQUE,
+      password_hash TEXT,
+      role TEXT DEFAULT 'owner',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Attach business_id to every pre-existing table. SQLite has no
+  // "ADD COLUMN IF NOT EXISTS", so we reuse the NEW_COLUMNS pattern above:
+  // attempt the ALTER and swallow only the "duplicate column name" error, which
+  // makes this idempotent across restarts. A column-level REFERENCES is allowed
+  // by ALTER TABLE ADD COLUMN because the implicit default is NULL.
+  const TENANT_TABLES = ['leads', 'inventory_pool', 'activity_log', 'call_sessions', 'devices', 'settings'];
+  for (const table of TENANT_TABLES) {
+    try {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN business_id INTEGER REFERENCES businesses(id)`);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  }
+
+  // Seed Valley Binz as the first business (business_id = 1) if no matching
+  // business exists yet, so all pre-existing data can be attributed to it.
+  // Name/owner come from the settings store (values are JSON-encoded) with
+  // sensible fallbacks; phone numbers come from the Twilio env vars.
+  const readSetting = (key) => {
+    try {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+      if (!row) return null;
+      try { return JSON.parse(row.value); } catch { return row.value; }
+    } catch {
+      return null;
+    }
+  };
+
+  let valleyBinz = db.prepare("SELECT id FROM businesses WHERE slug = 'valley-binz'").get();
+  if (!valleyBinz) {
+    const businessName = readSetting('businessName') || 'Valley Binz';
+    const ownerFirstName = readSetting('ownerFirstName') || 'Austin';
+    const info = db.prepare(`
+      INSERT INTO businesses (name, owner_first_name, slug, twilio_phone_number, user_phone_number)
+      VALUES (?, ?, 'valley-binz', ?, ?)
+    `).run(
+      String(businessName),
+      String(ownerFirstName),
+      process.env.TWILIO_PHONE_NUMBER || null,
+      process.env.USER_PHONE_NUMBER || null
+    );
+    valleyBinz = { id: Number(info.lastInsertRowid) };
+    console.log(`[migrations] Seeded business "${businessName}" (slug "valley-binz") as business_id = ${valleyBinz.id}`);
+  }
+  const valleyBinzId = valleyBinz.id;
+
+  // Backfill: attribute every pre-existing row to Valley Binz. Idempotent —
+  // only rows not yet assigned a business_id are touched.
+  for (const table of TENANT_TABLES) {
+    const result = db.prepare(
+      `UPDATE ${table} SET business_id = ? WHERE business_id IS NULL`
+    ).run(valleyBinzId);
+    console.log(`[migrations] Migration complete — ${Number(result.changes)} rows in "${table}" updated to business_id = ${valleyBinzId}`);
+  }
+
   console.log('Database migrations completed successfully.');
 }
 
