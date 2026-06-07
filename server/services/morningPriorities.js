@@ -210,4 +210,9 @@ module.exports = {
   start,
   sendMorningPriorities,
   computeMorningSummary,
+  // Exposed so the Morning Brief endpoint can reuse the exact same lead
+  // enrichment + naming logic that powers the 8am push.
+  getActionState,
+  leadFullName,
+  safeParse,
 };

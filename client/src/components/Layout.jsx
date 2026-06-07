@@ -28,6 +28,7 @@ const PAGE_TITLES = {
   '/opportunities': 'All Opportunities',
   '/booked': 'Booked Jobs',
   '/schedule': 'Schedule',
+  '/insights': 'Insights',
   '/inventory': 'Inventory',
   '/completed': 'Completed',
   '/leads': 'All Leads',

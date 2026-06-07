@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
-  AlertTriangle, TrendingUp, CalendarCheck2, Truck, CheckCircle2,
-  DollarSign, Phone, MessageSquare, Package, CalendarSearch,
+  AlertTriangle, UserPlus, CalendarCheck2, Truck, CheckCircle2, DollarSign,
+  Phone, CalendarSearch, Calendar, Sparkles, X, ArrowRight, ArrowUpRight,
+  ArrowDownRight, FileText, Briefcase, AlertCircle,
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import socket from '../../socket';
-import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, JOB_STATUS_STYLES } from '../../utils/verticalConfig';
+import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES } from '../../utils/verticalConfig';
 import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
 import CriticalBadge from './CriticalBadge';
@@ -15,10 +16,14 @@ import { useNavigate } from 'react-router-dom';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function formatCurrency(amount) {
-  if (amount == null || Number.isNaN(amount)) return '$0';
-  if (amount >= 1000) return `$${(amount / 1000).toFixed(1)}k`;
-  return `$${Math.round(amount).toLocaleString()}`;
+function formatMoney(amount) {
+  return `$${Math.round(amount || 0).toLocaleString()}`;
+}
+
+// Percent change vs a baseline; null when there's no baseline to compare to.
+function pctChange(cur, base) {
+  if (!base || base <= 0) return null;
+  return Math.round(((cur - base) / base) * 100);
 }
 
 function getLeadName(lead) {
@@ -30,16 +35,43 @@ function getLeadName(lead) {
   }
 }
 
-function getLeadService(lead) {
-  try {
-    const vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {};
-    if (lead.sub_vertical === 'dumpster_rental') {
-      return [vd.dumpsterSize, vd.debrisType].filter(Boolean).join(' · ') || 'Dumpster Rental';
-    }
-    return vd.serviceType || vd.equipmentType || 'Home Services';
-  } catch {
-    return 'Home Services';
+// Condense a free-text dumpster size ("20 yard dumpster") to a compact "20yd".
+function formatSize(raw) {
+  if (!raw) return null;
+  const m = String(raw).match(/\d+/);
+  return m ? `${m[0]}yd` : String(raw);
+}
+
+// Normalize any stored date/datetime value to its YYYY-MM-DD calendar day.
+function dayKey(value) {
+  if (!value) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(value));
+  return m ? m[1] : null;
+}
+
+// Best-effort parse of a schedule time ("8:00 AM", "14:30", "9am") to minutes
+// past midnight, for sorting. Returns null when unparseable (sorts last).
+function parseTimeToMinutes(t) {
+  if (!t) return null;
+  const s = String(t).trim();
+  let m = /^(\d{1,2}):(\d{2})\s*(am|pm)?$/i.exec(s);
+  if (m) {
+    let h = Number(m[1]);
+    const min = Number(m[2]);
+    const ap = m[3] && m[3].toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    return h * 60 + min;
   }
+  m = /^(\d{1,2})\s*(am|pm)$/i.exec(s);
+  if (m) {
+    let h = Number(m[1]);
+    const ap = m[2].toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    return h * 60;
+  }
+  return null;
 }
 
 function getFollowUpLabel(followUpDate) {
@@ -73,6 +105,17 @@ function parseLocalDate(iso) {
   if (!m) return null;
   const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// Format a YYYY-MM-DD date string without UTC shifting.
+function formatDeliveryDate(value) {
+  if (!value) return null;
+  const [datePart] = String(value).split('T');
+  const [year, month, day] = datePart.split('-');
+  if (!year || !month || !day) return null;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 // ─── Action Queue priority ranking ────────────────────────────────────────────
@@ -115,16 +158,15 @@ function isExpiredFlagged(lead) {
   return /Expired — no action taken/i.test(String(lead.internal_notes || ''));
 }
 
+// Has the owner manually dismissed this lead from the Action Queue? Dismissal
+// stamps internal_notes (without changing job_status) so the lead drops out of
+// the queue and stays out across reloads, while remaining in All Opportunities.
+function isDismissedFlagged(lead) {
+  return /Dismissed from Action Queue/i.test(String(lead.internal_notes || ''));
+}
+
 // Decides whether an enriched lead belongs in the Action Queue right now.
-// A lead qualifies if ANY action is required immediately:
-//   • follow_up_date <= now (overdue or due today)
-//   • urgency ASAP and the delivery date hasn't passed its grace window
-//   • voicemail, not yet contacted, and within its grace window
-//   • a critical flag (inventory conflict / auto-book blocked) — never expires
-//   • a booked job delivering today/tomorrow missing address or payment — critical
-// Returns { inQueue, expired, reason }. `expired` is true when the lead had a
-// qualifying reason that has now lapsed (and isn't critical) — the caller moves
-// these to All Opportunities. `reason` is a short operational-risk string or null.
+// Returns { inQueue, expired, reason }.
 function classifyForQueue(e, now, cfg) {
   const { lead, state, vd } = e;
 
@@ -161,8 +203,7 @@ function classifyForQueue(e, now, cfg) {
   }
 
   // Near-term delivery: a customer who wants delivery today or tomorrow needs a
-  // call now even if the model didn't tag urgency as ASAP. Active through the
-  // delivery day's grace window.
+  // call now even if the model didn't tag urgency as ASAP.
   if (isNearTermDelivery(deliveryDate, now)) {
     const active = now.getTime() <= endOfLocalDay(deliveryDate).getTime() + cfg.asapExpiryH * MS_HOUR;
     reasons.push({ active });
@@ -182,7 +223,6 @@ function classifyForQueue(e, now, cfg) {
 
 // A booked/scheduled job delivering today or tomorrow that is still missing the
 // delivery address or payment is operational risk — it jumps to the top tier.
-// Returns a short human reason when the job qualifies, otherwise null.
 function bookedAttentionReason(lead, vd, now) {
   if (lead.job_status !== 'booked' && lead.job_status !== 'scheduled') return null;
   const d = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
@@ -198,8 +238,7 @@ function bookedAttentionReason(lead, vd, now) {
   return `Delivering ${when} — missing ${missing.join(' & ')}`;
 }
 
-// Assigns a lead to a priority tier (1 = most urgent, 6 = least). `e` is the
-// enriched { lead, state, vd, bookedReason } record built in the dashboard memo.
+// Assigns a lead to a priority tier (1 = most urgent, 6 = least).
 function getAttentionTier(e, now = new Date()) {
   const { lead, state, vd, bookedReason } = e;
 
@@ -208,15 +247,12 @@ function getAttentionTier(e, now = new Date()) {
   if (isCriticalLead(lead, vd) || bookedReason) return 1;
 
   const isVoicemail = lead.call_type === 'voicemail';
-  // "Not yet contacted": still a fresh inquiry the owner hasn't acted on.
   const neverContacted = (state.jobStatus === 'inquiry' || state.jobStatus == null) && lead.status === 'new';
 
   // TIER 2 — VOICEMAIL UNCONTACTED: customer is waiting on a callback.
   if (isVoicemail && neverContacted) return 2;
 
-  // TIER 3 — ASAP or near-term delivery (today/tomorrow) leads. Delivery-date
-  // expiry is handled in membership; here we just rank them as urgent even when
-  // the model didn't tag urgency as ASAP.
+  // TIER 3 — ASAP or near-term delivery (today/tomorrow) leads.
   const deliveryDate = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
   if (String(vd.urgency || '').toLowerCase() === 'asap' || isNearTermDelivery(deliveryDate, now)) return 3;
 
@@ -230,8 +266,7 @@ function getAttentionTier(e, now = new Date()) {
   return 6;
 }
 
-// Left-border accent communicating tier urgency. Tier 6 gets a subtle gray so
-// card text stays aligned with the colored tiers above.
+// Left-border accent communicating tier urgency.
 function tierBorderClass(tier) {
   if (tier === 1) return ''; // Critical badge already signals urgency; no redundant red bar
   if (tier <= 3) return 'border-l-4 border-orange-400';
@@ -241,21 +276,150 @@ function tierBorderClass(tier) {
 
 // ─── sub-components ───────────────────────────────────────────────────────────
 
-function MetricCard({ icon: Icon, label, value, color = 'bg-gray-50', textColor = 'text-gray-700' }) {
+// Morning Brief — a dismissible, premium daily briefing rendered at the top of
+// the dashboard. Bullets come from GET /api/dashboard/morning-brief (AI-generated,
+// cached server-side for the day). The server decides availability (after 6am in
+// the business timezone); the client only handles per-day dismissal.
+const MORNING_BRIEF_DISMISS_KEY = 'leadflow:morningBriefDismissed';
+
+function MorningBrief() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [show, setShow] = useState(false);
+  const [bullets, setBullets] = useState([]);
+  const dateRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getMorningBrief()
+      .then((data) => {
+        if (cancelled) return;
+        dateRef.current = data?.date || null;
+        const dismissed = (() => { try { return localStorage.getItem(MORNING_BRIEF_DISMISS_KEY); } catch { return null; } })();
+        const visible = !!data?.available
+          && Array.isArray(data.bullets) && data.bullets.length > 0
+          && dismissed !== data.date;
+        setBullets(data?.bullets || []);
+        setShow(visible);
+      })
+      .catch(() => { if (!cancelled) setShow(false); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const dismiss = () => {
+    try { if (dateRef.current) localStorage.setItem(MORNING_BRIEF_DISMISS_KEY, dateRef.current); } catch { /* ignore */ }
+    setShow(false);
+  };
+
+  if (loading || !show) return null;
+
   return (
-    <div className={`${color} rounded-xl border border-gray-100 px-5 py-4 flex items-center gap-3`}>
-      <Icon size={20} className={`${textColor} opacity-70 flex-shrink-0`} />
-      <div>
-        <p className={`text-2xl font-bold ${textColor} leading-tight`}>{value}</p>
-        <p className="text-xs text-gray-500 leading-tight mt-0.5">{label}</p>
+    <section className="rounded-xl bg-sidebar text-white shadow-sm overflow-hidden">
+      <div className="px-5 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-accent/20 flex items-center justify-center flex-shrink-0">
+              <Sparkles size={15} className="text-accent" />
+            </div>
+            <div className="leading-tight">
+              <p className="text-sm font-bold tracking-tight">Morning Brief</p>
+              <p className="text-[10px] uppercase tracking-widest text-gray-400">Stream</p>
+            </div>
+          </div>
+          <button
+            onClick={dismiss}
+            aria-label="Dismiss morning brief"
+            className="text-gray-400 hover:text-white transition-colors p-1 -m-1 flex-shrink-0"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <ul className="mt-3.5 space-y-2">
+          {bullets.map((b, i) => (
+            <li key={i} className="flex gap-2.5 text-sm text-gray-200 leading-snug">
+              <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-3.5 flex justify-end">
+          <button
+            onClick={() => navigate('/insights')}
+            className="text-xs font-medium text-accent hover:text-white transition-colors inline-flex items-center gap-1"
+          >
+            View all insights <ArrowRight size={13} />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Clean, neutral top-banner metric tile (no background color).
+function MetricTile({ icon: Icon, label, value }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3.5 flex items-center gap-3">
+      {Icon && <Icon size={18} className="text-gray-400 flex-shrink-0" />}
+      <div className="min-w-0">
+        <p className="text-2xl font-bold text-gray-900 leading-tight">{value}</p>
+        <p className="text-xs text-gray-500 leading-tight mt-0.5 truncate">{label}</p>
       </div>
     </div>
   );
 }
 
-// Outbound click-to-call button. POSTs to the server, which rings Austin's
-// phone first and then bridges him to the customer. Disabled for 5s after a
-// successful trigger to guard against accidental double-calls.
+// Bottom-row summary tile: label, primary value, and a small secondary line.
+function SummaryTile({ icon: Icon, label, value, sub }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3.5">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        {Icon && <Icon size={14} className="text-gray-400 flex-shrink-0" />}
+        <p className="text-xs font-medium text-gray-500 truncate">{label}</p>
+      </div>
+      <p className="text-xl font-bold text-gray-900 leading-tight">{value}</p>
+      {sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>}
+    </div>
+  );
+}
+
+// Small up/down trend indicator. Null value renders a muted dash (no baseline).
+function TrendBadge({ value }) {
+  if (value == null) return <span className="text-xs text-gray-300">—</span>;
+  const up = value >= 0;
+  const Icon = up ? ArrowUpRight : ArrowDownRight;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${up ? 'text-emerald-600' : 'text-red-500'}`}>
+      <Icon size={12} />
+      {up ? '+' : ''}{value}%
+    </span>
+  );
+}
+
+// Minimal inline SVG sparkline. Inherits color from the parent via currentColor.
+function Sparkline({ data, width = 132, height = 36 }) {
+  if (!Array.isArray(data) || data.length < 2) return null;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const stepX = width / (data.length - 1);
+  const points = data.map((v, i) => {
+    const x = i * stepX;
+    const y = height - ((v - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} fill="none" className="overflow-visible">
+      <polyline points={points} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// Outbound click-to-call button. POSTs to the server, which rings the owner's
+// phone first and then bridges to the customer. Disabled 5s after a successful
+// trigger to guard against accidental double-calls.
 function CallButton({ lead, name }) {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null); // { type: 'info' | 'error', text }
@@ -275,7 +439,7 @@ function CallButton({ lead, name }) {
       await api.callLead(lead.id);
       setToast({ type: 'info', text: `Calling ${name}… your phone will ring shortly` });
       setTimeout(() => setBusy(false), 5000);
-    } catch (err) {
+    } catch {
       setToast({ type: 'error', text: 'Call failed, please try again' });
       setBusy(false);
     }
@@ -308,29 +472,36 @@ function CallButton({ lead, name }) {
   );
 }
 
-function AttentionRow({ lead, state, tier, reason, onBooked, onLost }) {
+// Compact Action Queue row. Shows intent/critical badge, name + phone, the
+// operational reason it's in the queue, a time indicator, and call + dismiss.
+function AttentionRow({ lead, state, tier, reason, onDismiss }) {
   const navigate = useNavigate();
-  const vd = parseVerticalData(lead);
   const name = getLeadName(lead);
-  const service = getLeadService(lead);
   const followUpLabel = getFollowUpLabel(state.followUpDate);
+  const reasonText = reason || state.recommendation;
+  const reasonIsCritical = !!reason || tier === 1;
+
+  const handleDismissClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onDismiss(lead.id);
+  };
 
   return (
     <div
-      className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer rounded-lg transition-colors ${tierBorderClass(tier)}`}
+      className={`flex items-center gap-2.5 px-3 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors ${tierBorderClass(tier)}`}
       onClick={() => navigate(`/leads/${lead.id}`)}
     >
       {tier === 1 ? <CriticalBadge size="sm" /> : <IntentBadge value={state.intent} size="sm" />}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
           {lead.phone && <span className="text-xs text-gray-400 flex-shrink-0">{lead.phone}</span>}
           {lead.call_type === 'voicemail' && <VoicemailBadge />}
         </div>
-        <p className="text-xs text-gray-500 truncate">{service}</p>
-        {(reason || state.recommendation) && (
-          <p className={`text-xs font-medium truncate mt-0.5 ${(reason || tier === 1) ? 'text-red-600' : 'text-accent'}`}>
-            {reason || state.recommendation}
+        {reasonText && (
+          <p className={`text-xs font-medium truncate mt-0.5 ${reasonIsCritical ? 'text-red-600' : 'text-accent'}`}>
+            {reasonText}
           </p>
         )}
       </div>
@@ -343,118 +514,209 @@ function AttentionRow({ lead, state, tier, reason, onBooked, onLost }) {
           {followUpLabel}
         </span>
       )}
-      <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
         {lead.phone && <CallButton lead={lead} name={name} />}
-        {/* SMS disabled until A2P registration completes. Kept visible but
-            muted/non-functional so the affordance returns easily later. */}
-        <span
-          className="p-1.5 rounded-lg text-gray-200 cursor-not-allowed"
-          title="SMS coming soon"
-          aria-disabled="true"
+        <button
+          onClick={handleDismissClick}
+          className="p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          title="Dismiss from Action Queue"
+          aria-label="Dismiss from Action Queue"
         >
-          <MessageSquare size={14} />
-        </span>
+          <X size={14} />
+        </button>
       </div>
     </div>
   );
 }
 
-// Pull just the city out of a delivery address or city field. Addresses look
-// like "123 Main St, Springfield, IL 62704" — the city is the segment before
-// the state/zip. Falls back to a dedicated city field when present.
-function getDeliveryCity(vd) {
-  if (vd.city) return String(vd.city).trim();
-  const addr = vd.deliveryAddress;
-  if (!addr) return null;
-  const parts = String(addr).split(',').map(p => p.trim()).filter(Boolean);
-  if (parts.length === 0) return null;
-  // 3+ parts: street, city, state zip → city is second-to-last.
-  // 2 parts: city, state zip → city is first.
-  const city = parts.length >= 3 ? parts[parts.length - 2] : parts[0];
-  return city || null;
-}
+const SCHEDULE_TYPE_BADGE = {
+  DROP: 'bg-emerald-100 text-emerald-700',
+  PICK: 'bg-blue-100 text-blue-700',
+  ACTIVE: 'bg-orange-100 text-orange-700',
+};
 
-// Format a YYYY-MM-DD date string without UTC shifting. `new Date('2026-06-01')`
-// parses as UTC midnight, which renders as the prior day in negative-offset
-// zones — so build the date from local Y/M/D parts instead.
-function formatDeliveryDate(value) {
-  if (!value) return null;
-  const [datePart] = String(value).split('T');
-  const [year, month, day] = datePart.split('-');
-  if (!year || !month || !day) return null;
-  const date = new Date(Number(year), Number(month) - 1, Number(day));
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function BookedJobRow({ lead }) {
-  const navigate = useNavigate();
-  const vd = parseVerticalData(lead);
+function ScheduleItem({ item, onClick }) {
+  const { lead, vd, type, time } = item;
   const name = getLeadName(lead);
-  const jobStatus = lead.job_status || 'booked';
-  const statusStyle = JOB_STATUS_STYLES[jobStatus] || 'bg-gray-100 text-gray-500';
-  const size = vd.dumpsterSize || null;
-  const price = vd.quotedPrice || (lead.estimated_revenue ? formatCurrency(lead.estimated_revenue) : null);
-  const city = getDeliveryCity(vd);
-  const deliveryDate = formatDeliveryDate(vd.deliveryDate);
+  const size = formatSize(vd.dumpsterSize);
+  const address = vd.deliveryAddress || null;
 
   return (
-    <div
-      className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
-      onClick={() => navigate(`/leads/${lead.id}`)}
-    >
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium text-gray-900 truncate">{name}</span>
-          {(size || price) && (
-            <span className="text-xs text-gray-500 flex-shrink-0">
-              · {[size, price].filter(Boolean).join(' · ')}
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-gray-400 truncate">
-          {[city, deliveryDate].filter(Boolean).join(' · ') || 'Details TBD'}
-        </p>
-      </div>
-      <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${statusStyle}`}>
-        {jobStatus.replace('_', ' ')}
-      </span>
-    </div>
-  );
-}
-
-function ScheduleGroup({ date, leads }) {
-  const isToday = new Set(['TODAY', 'TOMORROW']).has(date);
-  const navigate = useNavigate();
-
-  return (
-    <div className="mb-3">
-      <p className={`text-xs font-bold uppercase tracking-wide mb-1 ${isToday ? 'text-accent' : 'text-gray-500'}`}>
-        {date}
-      </p>
-      {leads.map(({ lead, type, time }) => {
-        const name = getLeadName(lead);
-        return (
-          <div
-            key={`${lead.id}-${type}`}
-            className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer transition-colors"
-            onClick={() => navigate(`/leads/${lead.id}`)}
-          >
-            <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
-              type === 'delivery' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-            }`}>
-              {type === 'delivery' ? 'DROP' : 'PICK'}
-            </span>
-            <span className="text-sm text-gray-800 flex-1 truncate">{name}</span>
-            {time && <span className="text-xs text-gray-400">{time}</span>}
+    <div onClick={onClick} className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors">
+      <div className="flex items-center gap-3">
+        <div className="w-16 flex-shrink-0 text-xs font-semibold text-gray-700">{time || 'Anytime'}</div>
+        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 ${SCHEDULE_TYPE_BADGE[type]}`}>
+          {type}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
+            {size && <span className="text-xs text-gray-500 flex-shrink-0">{size}</span>}
           </div>
-        );
-      })}
+          <div className="flex items-center gap-1.5 text-xs text-gray-400 truncate">
+            {lead.phone && <span className="flex-shrink-0">{lead.phone}</span>}
+            {address && <span className="truncate">{lead.phone ? '· ' : ''}{address}</span>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-// Mark Booked modal
+function TodaysSchedule({ items }) {
+  const navigate = useNavigate();
+  const todayLabel = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  return (
+    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Calendar size={15} className="text-accent" />
+          <h2 className="text-sm font-bold text-gray-900">Today's Schedule</h2>
+        </div>
+        <span className="text-xs text-gray-400">{todayLabel}</span>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="px-4 py-10 text-center text-sm text-gray-400">Nothing scheduled for today.</div>
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {items.map((it, i) => (
+            <ScheduleItem key={`${it.lead.id}-${it.type}-${i}`} item={it} onClick={() => navigate(`/leads/${it.lead.id}`)} />
+          ))}
+        </div>
+      )}
+
+      <div className="px-4 py-2.5 border-t border-gray-100 mt-auto">
+        <button
+          onClick={() => navigate('/schedule')}
+          className="text-xs font-medium text-accent hover:underline inline-flex items-center gap-1"
+        >
+          View full schedule <ArrowRight size={13} />
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// Revenue & Reporting tile. Computes booked-revenue figures from the operational
+// (booked → completed) jobs passed in. Revenue per job = estimated_revenue, with
+// a fallback to the price parsed from vertical_data (state.estimatedRevenue).
+// Booking date is approximated by updated_at, matching the rest of the dashboard.
+function RevenuePanel({ jobs }) {
+  const [range, setRange] = useState('month');
+
+  const data = useMemo(() => {
+    const now = new Date();
+    const rev = (j) => j.lead.estimated_revenue || j.state.estimatedRevenue || 0;
+    const bookingTime = (j) => (j.lead.updated_at ? new Date(j.lead.updated_at).getTime() : null);
+    const deliveryDay = (j) => dayKey(j.lead.delivery_date || j.vd.deliveryDateISO || j.vd.deliveryDate);
+
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    const lastYearStart = new Date(now.getFullYear() - 1, 0, 1);
+    const weekStart = new Date(now); weekStart.setDate(weekStart.getDate() - 7);
+    const monthElapsed = now - monthStart;
+    const yearElapsed = now - yearStart;
+
+    const sumBetween = (startMs, endMs) => jobs.reduce((s, j) => {
+      const b = bookingTime(j);
+      return (b != null && b >= startMs && b <= endMs) ? s + rev(j) : s;
+    }, 0);
+
+    const pad = (n) => String(n).padStart(2, '0');
+    const mkDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const todayStr = mkDay(now);
+    const in30 = new Date(now); in30.setDate(in30.getDate() + 30);
+    const prev30 = new Date(now); prev30.setDate(prev30.getDate() - 30);
+    const in30Str = mkDay(in30);
+    const prev30Str = mkDay(prev30);
+
+    const sumDelivery = (fromStr, toStr) => jobs.reduce((s, j) => {
+      const d = deliveryDay(j);
+      return (d && d >= fromStr && d <= toStr) ? s + rev(j) : s;
+    }, 0);
+
+    // Sparkline: booked revenue per month over the trailing 6 months.
+    const spark = [];
+    for (let i = 5; i >= 0; i--) {
+      const ms = new Date(now.getFullYear(), now.getMonth() - i, 1).getTime();
+      const me = new Date(now.getFullYear(), now.getMonth() - i + 1, 1).getTime();
+      spark.push(sumBetween(ms, me - 1));
+    }
+
+    return {
+      thisWeek: sumBetween(weekStart.getTime(), now.getTime()),
+      thisMonth: sumBetween(monthStart.getTime(), now.getTime()),
+      lastMonth: sumBetween(lastMonthStart.getTime(), lastMonthStart.getTime() + monthElapsed),
+      thisYear: sumBetween(yearStart.getTime(), now.getTime()),
+      lastYear: sumBetween(lastYearStart.getTime(), lastYearStart.getTime() + yearElapsed),
+      next30: sumDelivery(todayStr, in30Str),
+      prev30: sumDelivery(prev30Str, todayStr),
+      spark,
+    };
+  }, [jobs]);
+
+  const primary = range === 'week' ? data.thisWeek : range === 'year' ? data.thisYear : data.thisMonth;
+  const primaryLabel = range === 'week' ? 'This Week' : range === 'year' ? 'This Year' : 'This Month';
+
+  return (
+    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <DollarSign size={15} className="text-emerald-600" />
+          <h2 className="text-sm font-bold text-gray-900">Booked Revenue</h2>
+        </div>
+        <div className="flex items-center gap-1">
+          {[['week', 'Week'], ['month', 'Month'], ['year', 'Year']].map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setRange(val)}
+              className={`text-[10px] font-semibold tracking-wide px-2 py-1 rounded transition-colors ${
+                range === val ? 'bg-emerald-100 text-emerald-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-5 py-4">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-3xl font-bold text-gray-900 leading-none">{formatMoney(primary)}</p>
+            <p className="text-xs text-gray-500 mt-1">Booked revenue · {primaryLabel}</p>
+          </div>
+          <div className="text-emerald-500 flex-shrink-0">
+            <Sparkline data={data.spark} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-gray-100">
+          <div>
+            <p className="text-xs text-gray-500 mb-1">This Month</p>
+            <p className="text-base font-bold text-gray-900 leading-tight">{formatMoney(data.thisMonth)}</p>
+            <TrendBadge value={pctChange(data.thisMonth, data.lastMonth)} />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 mb-1">Next 30 Days</p>
+            <p className="text-base font-bold text-gray-900 leading-tight">{formatMoney(data.next30)}</p>
+            <TrendBadge value={pctChange(data.next30, data.prev30)} />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 mb-1">This Year</p>
+            <p className="text-base font-bold text-gray-900 leading-tight">{formatMoney(data.thisYear)}</p>
+            <TrendBadge value={pctChange(data.thisYear, data.lastYear)} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Mark Booked modal helpers
 function parseRentalDays(str) {
   if (!str) return null;
   const s = String(str).toLowerCase().trim();
@@ -506,14 +768,11 @@ function AvailabilityNote({ loading, availability, size }) {
 function BookedModal({ lead, onConfirm, onClose }) {
   const vd = parseVerticalData(lead);
   const extractedSize = vd.dumpsterSize || null;
-  // Pre-populate from flat column first, then vertical_data fallback (both should match post-extraction)
   const [date, setDate] = useState(lead.delivery_date || vd.deliveryDate || '');
   const [rentalDays, setRentalDays] = useState(() => {
     const n = parseRentalDays(vd.rentalDuration);
     return n ? String(n) : '';
   });
-  // Default to the size extracted from the call; the user can switch to any pool
-  // size below, which drives the availability check and is saved on confirm.
   const [size, setSize] = useState(extractedSize || '');
   const [poolSizes, setPoolSizes] = useState([]);
   const [availability, setAvailability] = useState(null);
@@ -524,9 +783,6 @@ function BookedModal({ lead, onConfirm, onClose }) {
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
 
-  // Load the inventory pool sizes (one row per size) for the selector. Normalize
-  // the extracted free-text size ("10 yard dumpster") to the matching pool label
-  // so it shows as the selected option.
   useEffect(() => {
     let cancelled = false;
     api.getInventory()
@@ -543,13 +799,8 @@ function BookedModal({ lead, onConfirm, onClose }) {
     return () => { cancelled = true; };
   }, []);
 
-  // The dropdown offers every pool size; if the extracted size isn't in the pool,
-  // surface it too so the default selection is always visible.
   const sizeOptions = poolSizes.some(s => s === size) || !size ? poolSizes : [size, ...poolSizes];
 
-  // Re-check availability whenever the date window or selected size changes.
-  // Pool-based: the server returns per-size counts (owned − in service −
-  // overlapping active jobs).
   useEffect(() => {
     if (!date || !pickupISO || !size) { setAvailability(null); return; }
     let cancelled = false;
@@ -647,8 +898,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
 }
 
 // Quick Availability Check — lightweight, button-triggered availability lookup
-// for use during live calls. Reuses the shared /schedule/availability endpoint
-// (same data the SchedulePage checker and booking modal rely on); no new API.
+// for use during live calls. Reuses the shared /schedule/availability endpoint.
 function QuickAvailabilityCheck() {
   const [sizes, setSizes] = useState([]);
   const [size, setSize] = useState('');
@@ -657,7 +907,6 @@ function QuickAvailabilityCheck() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null); // { status, available, owned }
 
-  // Populate the size dropdown from the inventory pools (one row per size).
   useEffect(() => {
     let cancelled = false;
     api.getInventory()
@@ -677,8 +926,6 @@ function QuickAvailabilityCheck() {
     setResult(null);
     try {
       const data = await api.getAvailability(date, duration);
-      // Prefer an exact size match (dropdown values come from the same pools the
-      // endpoint reports); fall back to matching by leading number just in case.
       const match = (data.bySizes || []).find(s => s.size === size)
         || (data.bySizes || []).find(s => sizeMatches(s.size, size))
         || null;
@@ -785,7 +1032,6 @@ export default function HomeServicesDashboard() {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bookingLead, setBookingLead] = useState(null);
-  const [bookedRange, setBookedRange] = useState('7d');
   const [settings, setSettings] = useState(getSettings);
   const greeting = getGreeting();
 
@@ -833,12 +1079,23 @@ export default function HomeServicesDashboard() {
     };
   }, []);
 
-  const handleLost = useCallback(async (id) => {
+  // Dismiss a lead from the Action Queue. Non-destructive: stamps internal_notes
+  // (which isDismissedFlagged keys off) without touching job_status, so the lead
+  // leaves the queue but remains in All Opportunities. Optimistic, then synced.
+  const handleDismiss = useCallback(async (id) => {
+    const target = leads.find(l => l.id === id);
+    if (!target) return;
+    const stamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const prefix = target.internal_notes ? `${target.internal_notes}\n` : '';
+    const internal_notes = `${prefix}Dismissed from Action Queue [${stamp}]`;
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, internal_notes } : l));
     try {
-      const updated = await api.updateLead(id, { job_status: 'lost', status: 'lost' });
+      const updated = await api.updateLead(id, { internal_notes });
       setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
-    } catch (e) { console.error(e); }
-  }, []);
+    } catch (err) {
+      console.error('Failed to dismiss lead', id, err);
+    }
+  }, [leads]);
 
   const handleBookedConfirm = useCallback(async ({ date, rentalDays, size }) => {
     if (!bookingLead) return;
@@ -848,12 +1105,9 @@ export default function HomeServicesDashboard() {
         status: 'booked',
       };
       const vd = {};
-      // Persist the (possibly changed) dumpster size selected in the modal.
       if (size) vd.dumpsterSize = size;
       if (date) {
         updates.delivery_date = date;
-        // Write the keys the Industry Details field pack reads from (camelCase)
-        // alongside the legacy deliveryDateISO for back-compat with older readers.
         vd.deliveryDate = date;
         vd.deliveryDateISO = date;
         if (rentalDays >= 1) {
@@ -872,17 +1126,13 @@ export default function HomeServicesDashboard() {
     } catch (e) { console.error(e); }
   }, [bookingLead]);
 
-  const { needsAttention, toExpire, bookedJobs, schedule, metrics, insights } = useMemo(() => {
+  const { needsAttention, toExpire, todaysSchedule, operationalLeads, metrics } = useMemo(() => {
     const now = new Date();
     const enriched = leads.map(l => ({ lead: l, state: getLeadActionState(l, now), vd: parseVerticalData(l) }));
 
-    // Action Queue — a lead belongs here only if action is required right now.
-    // classifyForQueue decides membership (overdue/due follow-up, active ASAP,
-    // uncontacted voicemail, critical flags, at-risk booked jobs) and flags
-    // leads whose grace window has lapsed. Critical flags never expire and must
-    // be resolved manually. The queue is then ranked like an ops manager:
-    // priority tier first (getAttentionTier), then most-overdue follow-up, then
-    // highest revenue.
+    // Action Queue — membership + ranking logic is unchanged. classifyForQueue
+    // decides who's in; getAttentionTier ranks them; expired/dismissed leads are
+    // filtered out.
     const aqCfg = {
       asapExpiryH: Number(settings.action_queue_asap_expiry_hours) || 24,
       followupExpiryH: Number(settings.action_queue_followup_expiry_hours) || 48,
@@ -890,140 +1140,125 @@ export default function HomeServicesDashboard() {
     };
     const classified = enriched.map(e => ({ ...e, q: classifyForQueue(e, now, aqCfg) }));
 
-    // Leads whose action window lapsed (and aren't already flagged) are moved to
-    // All Opportunities by the expiration effect below.
     const toExpire = classified
       .filter(e => e.q.expired && !isExpiredFlagged(e.lead))
       .map(e => e.lead);
 
     const needsAttention = classified
-      .filter(e => e.q.inQueue && !isExpiredFlagged(e.lead))
+      .filter(e => e.q.inQueue && !isExpiredFlagged(e.lead) && !isDismissedFlagged(e.lead))
       .map(e => ({ ...e, bookedReason: e.q.reason, tier: getAttentionTier({ ...e, bookedReason: e.q.reason }, now) }))
       .sort((a, b) => {
         if (a.tier !== b.tier) return a.tier - b.tier;
-        // Within a tier: most-overdue follow-up first (nulls last)…
         const fa = a.state.followUpDate ? a.state.followUpDate.getTime() : Infinity;
         const fb = b.state.followUpDate ? b.state.followUpDate.getTime() : Infinity;
         if (fa !== fb) return fa - fb;
-        // …then highest estimated revenue first.
         const ra = a.lead.estimated_revenue || a.state.estimatedRevenue || 0;
         const rb = b.lead.estimated_revenue || b.state.estimatedRevenue || 0;
         return rb - ra;
       });
 
-    // Booked Jobs = operational (booked → completed)
-    const bookedJobs = enriched
-      .filter(e => e.state.isOperational)
-      .sort((a, b) => {
-        const da = a.lead.delivery_date || a.vd.deliveryDateISO || '';
-        const db2 = b.lead.delivery_date || b.vd.deliveryDateISO || '';
-        return da < db2 ? -1 : da > db2 ? 1 : 0;
-      });
+    // Operational jobs (booked → completed) — powers the revenue tile + job metrics.
+    const operationalLeads = enriched.filter(e => e.state.isOperational);
 
-    // Schedule: upcoming deliveries and pickups grouped by date.
-    // Only confirmed jobs (booked → picked_up) appear — not inquiries or opportunities.
-    const SCHEDULE_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up']);
-    const today = new Date(); today.setHours(0,0,0,0);
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-    const in7days = new Date(today); in7days.setDate(in7days.getDate() + 7);
+    // ── Today's schedule ──────────────────────────────────────────────────────
+    const pad = n => String(n).padStart(2, '0');
+    const t = new Date();
+    const todayStr = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
 
-    const scheduleEntries = [];
+    const todaysSchedule = [];
     for (const { lead, vd } of enriched) {
-      if (!SCHEDULE_STATUSES.has(lead.job_status)) continue;
-      const deliveryStr = lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate;
-      const pickupStr = lead.pickup_date || vd.pickupDate;
-      // parseLocalDate keeps the calendar date intact across the UTC→local
-      // boundary; using new Date("YYYY-MM-DD") here would mis-bucket dates by
-      // one day for users west of UTC.
-      if (deliveryStr) {
-        const d = parseLocalDate(deliveryStr);
-        if (d && d >= today && d <= in7days) scheduleEntries.push({ lead, date: d, type: 'delivery', time: vd.deliveryTime || null });
+      if (!OPERATIONAL_JOB_STATUSES.has(lead.job_status)) continue;
+      const deliveryStr = dayKey(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
+      const pickupStr = dayKey(lead.pickup_date || vd.pickupDate);
+      if (deliveryStr === todayStr) {
+        todaysSchedule.push({ lead, vd, type: 'DROP', time: vd.deliveryTime || null });
       }
-      if (pickupStr) {
-        const d = parseLocalDate(pickupStr);
-        if (d && d >= today && d <= in7days) scheduleEntries.push({ lead, date: d, type: 'pickup', time: null });
+      if (pickupStr === todayStr) {
+        todaysSchedule.push({ lead, vd, type: 'PICK', time: vd.pickupTime || null });
+      }
+      // ACTIVE: a rental that's on-site today (delivered before today, not yet
+      // picked up). Only meaningful while the job is mid-rental.
+      if ((lead.job_status === 'delivered' || lead.job_status === 'active_rental')
+        && deliveryStr && deliveryStr < todayStr
+        && (!pickupStr || pickupStr > todayStr)) {
+        todaysSchedule.push({ lead, vd, type: 'ACTIVE', time: null });
       }
     }
-    scheduleEntries.sort((a, b) => a.date - b.date);
+    const TYPE_ORDER = { DROP: 0, ACTIVE: 1, PICK: 2 };
+    todaysSchedule.sort((a, b) => {
+      const ta = parseTimeToMinutes(a.time);
+      const tb = parseTimeToMinutes(b.time);
+      if (ta != null && tb != null && ta !== tb) return ta - tb;
+      if (ta != null && tb == null) return -1;
+      if (ta == null && tb != null) return 1;
+      return (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9);
+    });
 
-    const scheduleGroups = [];
-    const seenDates = new Map();
-    for (const entry of scheduleEntries) {
-      const d = entry.date;
-      let label;
-      const dNorm = new Date(d); dNorm.setHours(0,0,0,0);
-      if (dNorm.getTime() === today.getTime()) label = 'TODAY';
-      else if (dNorm.getTime() === tomorrow.getTime()) label = 'TOMORROW';
-      else label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-
-      if (!seenDates.has(label)) {
-        seenDates.set(label, []);
-        scheduleGroups.push({ date: label, leads: seenDates.get(label) });
-      }
-      seenDates.get(label).push(entry);
-    }
-
-    // Metrics
-    const now2 = new Date();
-    const monthStart = new Date(now2.getFullYear(), now2.getMonth(), 1);
-    const weekStart = new Date(now2); weekStart.setDate(weekStart.getDate() - 7);
+    // ── Metrics ────────────────────────────────────────────────────────────────
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const weekStart = new Date(now); weekStart.setDate(weekStart.getDate() - 7);
+    const revOf = (lead, state) => lead.estimated_revenue || state.estimatedRevenue || 0;
 
     const needsAttentionCount = needsAttention.length;
-    const hotOpps = enriched.filter(e => e.state.isOpportunity && e.state.intent === 'high').length;
-    const bookedThisWeek = leads.filter(l => (l.job_status === 'booked' || l.status === 'booked') && new Date(l.updated_at) >= weekStart).length;
-    const onSchedule = scheduleEntries.filter(e => e.type === 'delivery').length;
-    const completedMonth = leads.filter(l => l.job_status === 'completed' && new Date(l.updated_at) >= monthStart).length;
+    const newLeads7d = leads.filter(l => l.created_at && new Date(l.created_at) >= weekStart).length;
+    const bookedThisWeek = leads.filter(l =>
+      (l.job_status === 'booked' || l.status === 'booked') && l.updated_at && new Date(l.updated_at) >= weekStart
+    ).length;
 
-    // 30 Day Snapshot — rolling 30-day window (today minus 30 days), not the
-    // current calendar month. `today` is normalized to local midnight above.
-    const thirtyDaysAgo = new Date(today); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // On Schedule — ALL booked/scheduled jobs with a future (today onward)
+    // delivery date, regardless of when they were booked: the upcoming pipeline.
+    const onSchedule = enriched.filter(({ lead, vd }) => {
+      if (lead.job_status !== 'booked' && lead.job_status !== 'scheduled') return false;
+      const d = dayKey(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
+      return d && d >= todayStr;
+    }).length;
 
-    const monthLeads = leads.filter(l => new Date(l.created_at) >= thirtyDaysAgo).length;
-    // Both Booked Jobs and Revenue use updated_at (when the job was booked) as
-    // the 30-day window filter, over operational jobs only.
-    const bookedInWindow = enriched.filter(({ lead, state }) =>
-      state.isOperational && lead.updated_at && new Date(lead.updated_at) >= thirtyDaysAgo
-    );
-    const monthBooked = bookedInWindow.length;
-    const bookingRate = monthLeads > 0 ? Math.round((monthBooked / monthLeads) * 100) : 0;
-    // Sum estimated_revenue across ALL booked jobs in the window. The lead-level
-    // estimated_revenue column is null on some jobs, so fall back to the value
-    // derived from vertical_data (quotedPrice) via state.estimatedRevenue.
-    const revenue = bookedInWindow.reduce(
-      (sum, { lead, state }) => sum + (lead.estimated_revenue || state.estimatedRevenue || 0),
-      0
-    );
+    const completedMonth = leads.filter(l =>
+      l.job_status === 'completed' && l.updated_at && new Date(l.updated_at) >= monthStart
+    ).length;
 
-    // AI insights
-    const insights = [];
-    const highNotContacted = enriched.filter(e => e.state.intent === 'high' && e.state.isOpportunity && (e.state.jobStatus === 'inquiry' || !e.state.jobStatus));
-    if (highNotContacted.length > 0) {
-      const potentialRev = highNotContacted.reduce((s, e) => s + (e.state.estimatedRevenue || 450), 0);
-      insights.push(`${highNotContacted.length} high-intent lead${highNotContacted.length === 1 ? '' : 's'} waiting for first contact. Potential revenue at risk: ${formatCurrency(potentialRev)}.`);
-    }
-    if (bookingRate > 0) {
-      insights.push(`Your booking rate over the last 30 days is ${bookingRate}%. Leads contacted within 1 hour are 3× more likely to book.`);
-    }
-    const staleCount = enriched.filter(e => e.state.stale).length;
-    if (staleCount > 0) {
-      insights.push(`${staleCount} lead${staleCount === 1 ? '' : 's'} going cold (48h+ with no contact). Reach out now to recover them.`);
-    }
+    // Bottom row
+    const opportunities = enriched.filter(e => e.state.isOpportunity && e.state.isActive);
+    const estimatesCount = opportunities.length;
+    const estimatesValue = opportunities.reduce((s, e) => s + revOf(e.lead, e.state), 0);
+
+    const jobsTotal = operationalLeads.length;
+    const jobsScheduled = onSchedule;
+
+    const activeJobs = enriched.filter(e =>
+      e.lead.job_status === 'delivered' || e.lead.job_status === 'active_rental'
+    ).length;
+
+    // Pending invoices: operational jobs (excluding completed) not yet paid.
+    const PENDING_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up']);
+    const pending = enriched.filter(e => PENDING_STATUSES.has(e.lead.job_status) && !e.lead.paid_at);
+    const pendingInvoicesCount = pending.length;
+    const pendingInvoicesValue = pending.reduce((s, e) => s + revOf(e.lead, e.state), 0);
+
+    // Overdue: unpaid jobs whose delivery date is already in the past.
+    const overdue = pending.filter(e => {
+      const d = dayKey(e.lead.delivery_date || e.vd.deliveryDateISO || e.vd.deliveryDate);
+      return d && d < todayStr;
+    });
+    const overdueCount = overdue.length;
+    const overdueValue = overdue.reduce((s, e) => s + revOf(e.lead, e.state), 0);
 
     return {
       needsAttention,
       toExpire,
-      bookedJobs,
-      schedule: scheduleGroups,
-      metrics: { needsAttentionCount, hotOpps, bookedThisWeek, onSchedule, completedMonth, monthLeads, monthBooked, bookingRate, revenue },
-      insights,
+      todaysSchedule,
+      operationalLeads,
+      metrics: {
+        needsAttentionCount, newLeads7d, bookedThisWeek, onSchedule, completedMonth,
+        estimatesCount, estimatesValue, jobsTotal, jobsScheduled, activeJobs,
+        pendingInvoicesCount, pendingInvoicesValue, overdueCount, overdueValue,
+      },
     };
   }, [leads, settings]);
 
-  // Expiration runs on every dashboard load (and whenever the lead set changes):
-  // any lead whose Action Queue grace window has lapsed is moved to All
-  // Opportunities with an "Expired — no action taken" stamp in internal_notes,
-  // which keeps it out of the queue on subsequent loads. The in-flight ref
-  // guards against firing the same update twice while a request is pending.
+  // Expiration runs on every dashboard load: any lead whose Action Queue grace
+  // window has lapsed is moved to All Opportunities with an "Expired" stamp,
+  // keeping it out of the queue on subsequent loads.
   const expiringRef = useRef(new Set());
   useEffect(() => {
     if (!toExpire || toExpire.length === 0) return;
@@ -1042,19 +1277,6 @@ export default function HomeServicesDashboard() {
     });
   }, [toExpire]);
 
-  // Booked Jobs panel filter — client-side window over the already-computed list.
-  // Rolling windows measured back from now on booking date (updated_at), matching
-  // the 30 Day Snapshot's Booked Jobs logic:
-  // 1D = booked in last 24h, 7D = last 7 days, 30D = last 30 days.
-  const filteredBookedJobs = useMemo(() => {
-    const days = bookedRange === '1d' ? 1 : bookedRange === '30d' ? 30 : 7;
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    return bookedJobs.filter(({ lead }) => {
-      if (!lead.updated_at) return false;
-      return new Date(lead.updated_at).getTime() >= cutoff;
-    });
-  }, [bookedJobs, bookedRange]);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -1070,159 +1292,78 @@ export default function HomeServicesDashboard() {
       {/* Greeting */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{greeting}, {settings.ownerFirstName}! 👋</h1>
-          <p className="text-sm text-gray-500 mt-1">Here's what needs your attention today.</p>
+          <h1 className="text-2xl font-bold text-gray-900">{greeting}, {settings.ownerFirstName || 'there'}! 👋</h1>
+          <p className="text-sm text-gray-500 mt-1">Here's what's happening with your business today.</p>
         </div>
         <p className="text-sm text-gray-400 mt-1 flex-shrink-0">{today}</p>
       </div>
 
-      {/* Top metric cards */}
-      <div className="grid grid-cols-5 gap-3">
-        <MetricCard icon={AlertTriangle} label="Action Queue" value={metrics.needsAttentionCount}
-          color="bg-red-50" textColor="text-red-700" />
-        <MetricCard icon={TrendingUp} label="Hot Opportunities" value={metrics.hotOpps}
-          color="bg-amber-50" textColor="text-amber-700" />
-        <MetricCard icon={CalendarCheck2} label="Booked This Week" value={metrics.bookedThisWeek}
-          color="bg-emerald-50" textColor="text-emerald-700" />
-        <MetricCard icon={Truck} label="On Schedule (7d)" value={metrics.onSchedule}
-          color="bg-blue-50" textColor="text-blue-700" />
-        <MetricCard icon={CheckCircle2} label="Completed This Month" value={metrics.completedMonth}
-          color="bg-gray-50" textColor="text-gray-600" />
+      {/* Morning Brief banner — renders only in the morning, until dismissed */}
+      <MorningBrief />
+
+      {/* Top metric tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <MetricTile icon={AlertTriangle} label="Action Queue" value={metrics.needsAttentionCount} />
+        <MetricTile icon={UserPlus} label="New Leads" value={metrics.newLeads7d} />
+        <MetricTile icon={CalendarCheck2} label="Booked This Week" value={metrics.bookedThisWeek} />
+        <MetricTile icon={Truck} label="On Schedule" value={metrics.onSchedule} />
+        <MetricTile icon={CheckCircle2} label="Completed This Month" value={metrics.completedMonth} />
       </div>
 
-      {/* Main two-column layout */}
-      <div className="grid grid-cols-[1fr_360px] gap-5">
-        {/* LEFT COLUMN */}
-        <div className="space-y-5 min-w-0">
-          {/* Action Queue */}
-          <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle size={15} className="text-red-500" />
-                <h2 className="text-sm font-bold text-gray-900">Action Queue</h2>
-              </div>
-              {needsAttention.length > 0 && (
-                <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">
-                  {needsAttention.length} action{needsAttention.length !== 1 ? 's' : ''}
-                </span>
-              )}
+      {/* Action Queue (left ~45%) | Today's Schedule (right ~55%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-[45fr_55fr] gap-5 items-start">
+        {/* Action Queue */}
+        <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} className="text-red-500" />
+              <h2 className="text-sm font-bold text-gray-900">Action Queue</h2>
             </div>
-            {needsAttention.length === 0 ? (
-              <div className="px-4 py-8 text-center text-sm text-gray-400">
-                Inbox clear — great work! 🎉
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-50">
-                {needsAttention.map(({ lead, state, tier, bookedReason }) => (
-                  <AttentionRow
-                    key={lead.id}
-                    lead={lead}
-                    state={state}
-                    tier={tier}
-                    reason={bookedReason}
-                    onBooked={() => setBookingLead(lead)}
-                    onLost={handleLost}
-                  />
-                ))}
-              </div>
+            {needsAttention.length > 0 && (
+              <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">
+                {needsAttention.length} action{needsAttention.length !== 1 ? 's' : ''}
+              </span>
             )}
-          </section>
-
-          {/* Quick Availability Check */}
-          <QuickAvailabilityCheck />
-        </div>
-
-        {/* RIGHT COLUMN */}
-        <div className="space-y-5">
-          {/* Booked Jobs */}
-          <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CalendarCheck2 size={15} className="text-emerald-600" />
-                <h2 className="text-sm font-bold text-gray-900">Booked Jobs</h2>
-              </div>
-              <div className="flex items-center gap-1">
-                {['1d', '7d', '30d'].map(r => (
-                  <button
-                    key={r}
-                    onClick={() => setBookedRange(r)}
-                    className={`text-[10px] font-semibold tracking-wide px-2 py-1 rounded transition-colors ${
-                      bookedRange === r
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {r.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {filteredBookedJobs.length === 0 ? (
-              <p className="px-4 py-6 text-center text-xs text-gray-400">
-                {bookedJobs.length === 0 ? 'No booked jobs yet.' : 'No booked jobs in this period.'}
-              </p>
-            ) : (
-              <div className="divide-y divide-gray-50 px-2 py-1">
-                {filteredBookedJobs.slice(0, 8).map(({ lead }) => (
-                  <BookedJobRow key={lead.id} lead={lead} />
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Upcoming Schedule */}
-          <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-              <Truck size={15} className="text-blue-600" />
-              <h2 className="text-sm font-bold text-gray-900">Upcoming Schedule</h2>
-            </div>
-            {schedule.length === 0 ? (
-              <p className="px-4 py-6 text-center text-xs text-gray-400">No deliveries or pickups in the next 7 days.</p>
-            ) : (
-              <div className="px-4 py-3">
-                {schedule.map(group => (
-                  <ScheduleGroup key={group.date} date={group.date} leads={group.leads} />
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-      </div>
-
-      {/* AI Insights */}
-      {insights.length > 0 && (
-        <section className="bg-blue-50 rounded-xl border border-blue-100 px-5 py-4">
-          <p className="text-xs font-bold text-blue-600 uppercase tracking-wide mb-2">AI Insights</p>
-          <div className="space-y-1.5">
-            {insights.map((insight, i) => (
-              <p key={i} className="text-sm text-blue-800">{insight}</p>
-            ))}
           </div>
+          {needsAttention.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-gray-400">
+              Inbox clear — great work! 🎉
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {needsAttention.map(({ lead, state, tier, bookedReason }) => (
+                <AttentionRow
+                  key={lead.id}
+                  lead={lead}
+                  state={state}
+                  tier={tier}
+                  reason={bookedReason}
+                  onDismiss={handleDismiss}
+                />
+              ))}
+            </div>
+          )}
         </section>
-      )}
 
-      {/* 30 Day Snapshot */}
-      <section className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <h2 className="text-sm font-bold text-gray-700 mb-4">30 Day Snapshot</h2>
-        <div className="grid grid-cols-4 gap-4">
-          <div className="text-center">
-            <p className="text-2xl font-bold text-gray-900">{metrics.monthLeads}</p>
-            <p className="text-xs text-gray-500 mt-0.5">Leads Captured</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-emerald-600">{metrics.monthBooked}</p>
-            <p className="text-xs text-gray-500 mt-0.5">Booked Jobs</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-blue-600">{metrics.bookingRate}%</p>
-            <p className="text-xs text-gray-500 mt-0.5">Booking Rate</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-violet-600">${Math.round(metrics.revenue).toLocaleString()}</p>
-            <p className="text-xs text-gray-500 mt-0.5">Revenue</p>
-          </div>
-        </div>
-      </section>
+        {/* Today's Schedule */}
+        <TodaysSchedule items={todaysSchedule} />
+      </div>
+
+      {/* Revenue & Reporting (~60%) | Quick Availability Check (~40%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-5 items-start">
+        <RevenuePanel jobs={operationalLeads} />
+        <QuickAvailabilityCheck />
+      </div>
+
+      {/* Bottom summary row */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <SummaryTile icon={UserPlus} label="New Leads" value={metrics.newLeads7d} sub="Last 7 days" />
+        <SummaryTile icon={FileText} label="Estimates" value={metrics.estimatesCount} sub={`${formatMoney(metrics.estimatesValue)} pending`} />
+        <SummaryTile icon={Briefcase} label="Jobs" value={metrics.jobsTotal} sub={`${metrics.jobsScheduled} scheduled`} />
+        <SummaryTile icon={Truck} label="Active Jobs" value={metrics.activeJobs} sub="In progress" />
+        <SummaryTile icon={FileText} label="Pending Invoices" value={metrics.pendingInvoicesCount} sub={`${formatMoney(metrics.pendingInvoicesValue)} outstanding`} />
+        <SummaryTile icon={AlertCircle} label="Overdue" value={metrics.overdueCount} sub={`${formatMoney(metrics.overdueValue)} overdue`} />
+      </div>
 
       {/* Booked modal */}
       {bookingLead && (

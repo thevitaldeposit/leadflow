@@ -66,6 +66,7 @@ export const api = {
 
   // Dashboard
   getDashboardStats: () => request('/dashboard/stats'),
+  getMorningBrief: () => request('/dashboard/morning-brief'),
 
   // Inventory pools (path stays /dumpsters for back-compat; each row is a size pool)
   getInventory: (params = {}) => {

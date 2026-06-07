@@ -25,6 +25,7 @@ const settingsRouter = require('./routes/settings');
 const paymentRouter = require('./routes/payment');
 const authRouter = require('./routes/auth');
 const signupsRouter = require('./routes/signups');
+const dashboardRouter = require('./routes/dashboard');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -121,6 +122,7 @@ app.use('/api/devices', devicesRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/signups', signupsRouter);
+app.use('/api/dashboard', dashboardRouter);
 // Public payment page — must be before the SPA catch-all
 app.use('/pay', paymentRouter);
 

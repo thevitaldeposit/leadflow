@@ -8,6 +8,7 @@ import SettingsPage from './pages/SettingsPage';
 import InventoryPage from './pages/InventoryPage';
 import FilteredLeadsPage from './pages/FilteredLeadsPage';
 import SchedulePage from './pages/SchedulePage';
+import InsightsPage from './pages/InsightsPage';
 import AllLeadsPage from './pages/AllLeadsPage';
 import StreamSignupsPage from './pages/StreamSignupsPage';
 import LoginPage from './pages/LoginPage';
@@ -57,6 +58,7 @@ function AppRoutes() {
             <Route path="/opportunities" element={<FilteredLeadsPage mode="opportunities" />} />
             <Route path="/booked" element={<FilteredLeadsPage mode="booked" />} />
             <Route path="/schedule" element={<SchedulePage />} />
+            <Route path="/insights" element={<InsightsPage />} />
             <Route path="/completed" element={<FilteredLeadsPage mode="completed" />} />
             <Route path="/all-leads" element={<AllLeadsPage />} />
             <Route path="/stream-signups" element={<StreamSignupsPage />} />
