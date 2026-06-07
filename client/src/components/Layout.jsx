@@ -6,6 +6,7 @@ import {
   FileText,
   Image,
   Mic,
+  PencilLine,
   Zap,
   List,
   CalendarCheck2,
@@ -33,6 +34,7 @@ const PAGE_TITLES = {
   '/completed': 'Completed',
   '/leads': 'All Leads',
   '/all-leads': 'All Leads (Unfiltered)',
+  '/new/manual': 'New Lead — Manual Entry',
   '/new/transcript': 'New Lead — Transcript',
   '/new/upsheet': 'New Lead — Up Sheet',
   '/new/audio': 'New Lead — Audio Recording',
@@ -183,6 +185,10 @@ export default function Layout({ children }) {
             </button>
             {newOpen && (
               <div className="ml-6 mt-1 space-y-0.5">
+                <NavLink to="/new/manual" className={linkClass}>
+                  <PencilLine size={15} />
+                  Manual Entry
+                </NavLink>
                 <NavLink to="/new/transcript" className={linkClass}>
                   <FileText size={15} />
                   Transcript

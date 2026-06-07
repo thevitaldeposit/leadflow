@@ -151,6 +151,32 @@ export const HOME_SERVICES_FIELD_PACKS = {
   },
 };
 
+// Per-vertical wording so shared UI (e.g. the manual lead form) labels date and
+// job fields in the language each trade uses, without hardcoding "Delivery Date"
+// everywhere. Keyed by sub_vertical; falls back to dumpster_rental.
+const TERMINOLOGY = {
+  dumpster_rental: {
+    dateLabel: 'Delivery Date',
+    pickupLabel: 'Pickup Date',
+    durationLabel: 'Rental Duration',
+    sizeLabel: 'Dumpster Size',
+    addressLabel: 'Delivery Address',
+    accessLabel: 'Access / Delivery Notes',
+  },
+  hvac: {
+    dateLabel: 'Job Date',
+    pickupLabel: 'Completion Date',
+    durationLabel: 'Estimated Duration',
+    sizeLabel: 'Equipment',
+    addressLabel: 'Property Address',
+    accessLabel: 'Access Notes',
+  },
+};
+
+export function getTerminology(subVertical = 'dumpster_rental') {
+  return TERMINOLOGY[subVertical] || TERMINOLOGY.dumpster_rental;
+}
+
 export function getSubVertical(lead) {
   const sv = lead?.sub_vertical;
   if (sv && HOME_SERVICES_FIELD_PACKS[sv]) return sv;

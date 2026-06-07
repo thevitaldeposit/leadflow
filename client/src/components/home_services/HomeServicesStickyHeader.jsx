@@ -7,6 +7,7 @@ import {
 import UrgencyBadge from './UrgencyBadge';
 import IntentBadge from './IntentBadge';
 import VoicemailBadge from './VoicemailBadge';
+import ManualBadge from './ManualBadge';
 import { api } from '../../utils/api';
 import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES } from '../../utils/verticalConfig';
 
@@ -270,6 +271,7 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
             </div>
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
               {lead.call_type === 'voicemail' && <VoicemailBadge size="md" />}
+              {lead.source === 'manual' && <ManualBadge size="md" />}
               <IntentBadge value={state.intent} size="md" />
               <UrgencyBadge value={vd.urgency} size="md" />
               <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${jobStatusStyle}`}>

@@ -4,6 +4,7 @@ import { CheckCircle2, XCircle, Clock, Sparkles } from 'lucide-react';
 import IntentBadge from './IntentBadge';
 import UrgencyBadge from './UrgencyBadge';
 import VoicemailBadge from './VoicemailBadge';
+import ManualBadge from './ManualBadge';
 import HomeServicesStatusBadge from './HomeServicesStatusBadge';
 import { api } from '../../utils/api';
 import { parseVerticalData, getLeadActionState } from '../../utils/verticalConfig';
@@ -68,6 +69,7 @@ export default function HomeServicesLeadCard({ lead, onChange }) {
         </div>
         <div className="flex items-center gap-1.5 flex-wrap justify-end flex-shrink-0">
           {lead.call_type === 'voicemail' && <VoicemailBadge />}
+          {lead.source === 'manual' && <ManualBadge />}
           <IntentBadge value={state.intent} />
           <UrgencyBadge value={vd.urgency} />
         </div>

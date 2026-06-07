@@ -5,7 +5,7 @@ const { sendPaymentSms } = require('../services/smsService');
 const { initiateClickToCall } = require('../services/callService');
 const { logActivity, getActivityForLead } = require('../services/activityLog');
 const { emitToBusiness } = require('../socket');
-const { attachBusiness } = require('../middleware/auth');
+const { attachBusiness, requireAuth } = require('../middleware/auth');
 
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
 // request to the caller's business when a token is present, else to Valley Binz.
@@ -25,6 +25,17 @@ function appendInternalNote(leadId, existingNotes, line) {
   const entry = `[${stamp}] ${line}`;
   const combined = existingNotes ? `${existingNotes}\n${entry}` : entry;
   db.prepare('UPDATE leads SET internal_notes = ? WHERE id = ?').run(combined, leadId);
+}
+
+// Pickup date = delivery date + rental duration (whole days). Mirrors the
+// client booking modal's calcPickupFromDuration so manual entries land on the
+// same pickup the dispatcher would expect. Returns ISO YYYY-MM-DD or null.
+function calcPickupFromDuration(deliveryISO, days) {
+  if (!deliveryISO || !(days >= 1)) return null;
+  const d = new Date(`${deliveryISO}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate() + Math.round(days));
+  return d.toISOString().slice(0, 10);
 }
 
 // GET /api/leads
@@ -286,6 +297,140 @@ router.post('/:id/call', async (req, res) => {
   } catch (err) {
     console.error('POST /leads/:id/call error:', err);
     res.status(500).json({ error: 'Failed to start call' });
+  }
+});
+
+// POST /api/leads/manual — owner-created lead/job for customers who didn't come
+// in through a phone call (walk-in, text, email, manual entry). Web-dashboard
+// only, so it requires a real token rather than the soft attachBusiness above.
+router.post('/manual', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const b = req.body || {};
+    const str = (v) => (typeof v === 'string' ? v.trim() : (v == null ? '' : String(v).trim()));
+
+    // Contact
+    const firstName = str(b.firstName);
+    const lastName = str(b.lastName);
+    const phone = str(b.phone);
+    const email = str(b.email);
+
+    // Job details (dumpster_rental). vertical/sub_vertical are accepted so this
+    // endpoint stays usable as more verticals get manual entry, defaulting to the
+    // home_services dumpster_rental schema the form is built around.
+    const vertical = str(b.vertical) || 'home_services';
+    const subVertical = str(b.subVertical) || 'dumpster_rental';
+    const dumpsterSize = str(b.dumpsterSize);
+    const debrisType = str(b.debrisType);
+    const deliveryDate = str(b.deliveryDate); // ISO YYYY-MM-DD from the date picker
+    const rentalDurationDays = b.rentalDuration === '' || b.rentalDuration == null
+      ? null : Number(b.rentalDuration);
+    const deliveryAddress = str(b.deliveryAddress);
+    const accessNotes = str(b.accessNotes);
+
+    // Quote / payment
+    const priceNum = b.price === '' || b.price == null ? null : Number(b.price);
+    const hasPrice = priceNum != null && !Number.isNaN(priceNum);
+    const paymentStatus = b.paymentStatus === 'paid'
+      ? 'Paid' : (b.paymentStatus === 'not_paid' ? 'Not paid' : null);
+
+    // Status / intent. "Book Job" forces booked; otherwise honor the dropdown.
+    const book = b.book === true;
+    const chosenJobStatus = ['inquiry', 'opportunity', 'booked'].includes(b.jobStatus)
+      ? b.jobStatus : 'inquiry';
+    const jobStatus = book ? 'booked' : chosenJobStatus;
+    const intent = ['cold', 'warm', 'high'].includes(b.intent) ? b.intent : null;
+    const notes = str(b.notes);
+
+    // Validation: name + phone + at least one job detail field.
+    if (!firstName) return res.status(400).json({ error: 'Customer first name is required' });
+    if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+    const hasJobDetail = !!(
+      dumpsterSize || debrisType || deliveryDate || (rentalDurationDays >= 1) ||
+      deliveryAddress || accessNotes || hasPrice
+    );
+    if (!hasJobDetail) {
+      return res.status(400).json({ error: 'Add at least one job detail (size, date, address, price, etc.)' });
+    }
+
+    const pickupDate = calcPickupFromDuration(deliveryDate, rentalDurationDays);
+    const fullName = [firstName, lastName].filter(Boolean).join(' ');
+    const quotedPrice = hasPrice ? `$${priceNum}` : null;
+    const isBooked = jobStatus === 'booked';
+    const outcome = isBooked ? 'booked' : 'quote_requested';
+
+    // vertical_data mirrors the dumpster_rental field pack so the Industry
+    // Details / Quote sections render the same as a call-captured lead.
+    const verticalData = {
+      customerName: fullName || null,
+      dumpsterSize: dumpsterSize || null,
+      debrisType: debrisType || null,
+      deliveryAddress: deliveryAddress || null,
+      accessNotes: accessNotes || null,
+      quotedPrice,
+      paymentStatus,
+      intentLevel: intent,
+      outcome,
+      source: 'manual',
+    };
+    if (deliveryDate) {
+      verticalData.deliveryDate = deliveryDate;
+      verticalData.deliveryDateISO = deliveryDate;
+      verticalData.rawDeliveryDate = deliveryDate;
+    }
+    if (pickupDate) verticalData.pickupDate = pickupDate;
+    if (rentalDurationDays >= 1) verticalData.rentalDuration = `${Math.round(rentalDurationDays)} days`;
+    if (notes) {
+      verticalData.notes = notes;
+      // Surface the owner's note as the at-a-glance recommendation on cards.
+      verticalData.aiRecommendation = notes;
+    }
+
+    const nowISO = new Date().toISOString();
+    const legacyStatus = isBooked ? 'booked' : 'new';
+    // Already-collected payment: record it and skip the payment link below.
+    const paidAt = paymentStatus === 'Paid' ? nowISO : null;
+
+    const insert = db.prepare(`
+      INSERT INTO leads (
+        business_id, vertical, sub_vertical, source, call_type, extraction_type,
+        customer_first_name, customer_last_name, phone, email,
+        status, job_status, outcome, customer_intent,
+        delivery_date, raw_delivery_date, pickup_date, estimated_revenue,
+        paid_at, vertical_data, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = insert.run(
+      businessId, vertical, subVertical, 'manual', 'manual', 'manual',
+      firstName, lastName || null, phone, email || null,
+      legacyStatus, jobStatus, outcome, intent || null,
+      deliveryDate || null, deliveryDate || null, pickupDate || null, hasPrice ? priceNum : null,
+      paidAt, JSON.stringify(verticalData), nowISO, nowISO
+    );
+
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(Number(result.lastInsertRowid));
+
+    logActivity(lead.id, 'note_added', 'Lead manually created by owner');
+
+    // Booked directly → same payment SMS path the PUT booking transition uses,
+    // unless the owner already marked it paid.
+    if (isBooked && !paidAt) {
+      sendPaymentSms(lead).then((r) => {
+        if (r.sent) {
+          emitToBusiness(lead.business_id, 'payment_sms_sent', {
+            leadId: lead.id,
+            customerName: r.customerName,
+            phone: r.phone,
+          });
+        }
+      }).catch((err) => console.error('[leads/manual] SMS send error:', err));
+    }
+
+    emitToBusiness(lead.business_id, 'new_lead', lead);
+    res.status(201).json(lead);
+  } catch (err) {
+    console.error('POST /leads/manual error:', err);
+    res.status(500).json({ error: 'Failed to create lead' });
   }
 });
 

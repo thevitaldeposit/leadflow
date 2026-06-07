@@ -1,8 +1,9 @@
 import { useParams, NavLink } from 'react-router-dom';
-import { FileText, Image, Mic } from 'lucide-react';
+import { FileText, Image, Mic, PencilLine } from 'lucide-react';
 import TranscriptInput from '../components/TranscriptInput';
 import UpsheetUpload from '../components/UpsheetUpload';
 import AudioUpload from '../components/AudioUpload';
+import ManualLeadForm from '../components/ManualLeadForm';
 
 export default function NewLeadPage() {
   const { type } = useParams();
@@ -18,6 +19,10 @@ export default function NewLeadPage() {
     <div className="space-y-5">
       {/* Tab switcher */}
       <div className="flex items-center gap-2 bg-white rounded-xl border border-gray-100 shadow-sm p-2 w-fit">
+        <NavLink to="/new/manual" className={tabClass('manual')}>
+          <PencilLine size={15} />
+          Manual Entry
+        </NavLink>
         <NavLink to="/new/transcript" className={tabClass('transcript')}>
           <FileText size={15} />
           Transcript
@@ -32,6 +37,7 @@ export default function NewLeadPage() {
         </NavLink>
       </div>
 
+      {type === 'manual' && <ManualLeadForm />}
       {type === 'transcript' && <TranscriptInput />}
       {type === 'upsheet' && <UpsheetUpload />}
       {type === 'audio' && <AudioUpload />}

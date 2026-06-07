@@ -45,6 +45,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
   deleteLead: (id) => request(`/leads/${id}`, { method: 'DELETE' }),
+  createManualLead: (body) =>
+    request('/leads/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
 
   // Extraction
   extractTranscript: (transcript) =>

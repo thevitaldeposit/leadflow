@@ -68,6 +68,7 @@ function extractionLabel(type) {
     case 'upsheet_image': return 'From up sheet';
     case 'audio_upload': return 'From audio recording';
     case 'phone_auto': return 'Auto-captured (phone)';
+    case 'manual': return 'Manually added';
     default: return type || 'Unknown source';
   }
 }
