@@ -298,6 +298,112 @@ const LEADS = [
     urgency: 'Next Week',
   }),
 
+  // ───── TODAY'S SCHEDULE: drops, pickups, and an active rental ─────
+  // These exercise the dashboard's "Today's Schedule" panel, which derives the
+  // badge from dates + status (see HomeServicesDashboard.jsx):
+  //   • DROP   = delivery_date === today      (time from vd.deliveryTime)
+  //   • PICK   = pickup_date === today        (time from vd.pickupTime)
+  //   • ACTIVE = delivered before today, picked up after today, AND
+  //              job_status is 'delivered' / 'active_rental'
+  // So PICK jobs carry a PAST delivery_date (else they'd also count as a DROP),
+  // and the ACTIVE rental uses job_status 'active_rental' (a 'booked' mid-rental
+  // job is never rendered as ACTIVE).
+
+  // DROP #1 — delivering today at 8:00 AM.
+  bookedJob({
+    firstName: 'Carlos',
+    phone: '815-555-0201',
+    status: 'booked',
+    jobStatus: 'booked',
+    createdDaysAgo: 3,
+    updatedDaysAgo: 2,
+    deliveryDate: TODAY,
+    dumpsterSize: '15 yard',
+    debrisType: 'household junk',
+    deliveryAddress: '525 Gooding St, LaSalle, IL 61301',
+    rentalDuration: '7 days',
+    price: 475,
+    paidDaysAgo: 2,
+    intentLevel: 'high',
+    urgency: 'This Week',
+    extraVd: { deliveryTime: '8:00 AM' },
+  }),
+  // DROP #2 — delivering today at 11:00 AM.
+  bookedJob({
+    firstName: 'Diane',
+    phone: '815-555-0212',
+    status: 'booked',
+    jobStatus: 'booked',
+    createdDaysAgo: 4,
+    updatedDaysAgo: 2,
+    deliveryDate: TODAY,
+    dumpsterSize: '20 yard',
+    debrisType: 'remodel debris',
+    deliveryAddress: '415 W Dakota St, Spring Valley, IL 61362',
+    rentalDuration: '14 days',
+    price: 545,
+    paymentSmsSentDaysAgo: 1,
+    intentLevel: 'high',
+    urgency: 'This Week',
+    extraVd: { deliveryTime: '11:00 AM' },
+  }),
+  // PICK #1 — picked up today at 1:00 PM (delivered 7 days ago).
+  bookedJob({
+    firstName: 'Frank',
+    phone: '815-555-0223',
+    status: 'booked',
+    jobStatus: 'booked',
+    createdDaysAgo: 9,
+    updatedDaysAgo: 7,
+    deliveryDate: addDaysISO(TODAY, -7),
+    dumpsterSize: '10 yard',
+    debrisType: 'yard waste',
+    deliveryAddress: '1015 Shooting Park Rd, Peru, IL 61354',
+    rentalDuration: '7 days',
+    price: 445,
+    paidDaysAgo: 7,
+    intentLevel: 'high',
+    urgency: 'This Week',
+    extraVd: { pickupTime: '1:00 PM' },
+  }),
+  // PICK #2 — picked up today at 3:30 PM (delivered 10 days ago).
+  bookedJob({
+    firstName: 'Wendy',
+    phone: '815-555-0234',
+    status: 'booked',
+    jobStatus: 'booked',
+    createdDaysAgo: 12,
+    updatedDaysAgo: 10,
+    deliveryDate: addDaysISO(TODAY, -10),
+    dumpsterSize: '20 yard',
+    debrisType: 'construction debris',
+    deliveryAddress: '612 Columbus St, Ottawa, IL 61350',
+    rentalDuration: '10 days',
+    price: 525,
+    paidDaysAgo: 10,
+    intentLevel: 'high',
+    urgency: 'This Week',
+    extraVd: { pickupTime: '3:30 PM' },
+  }),
+  // ACTIVE rental — delivered yesterday, on-site today, picked up tomorrow.
+  bookedJob({
+    firstName: 'Hector',
+    phone: '815-555-0245',
+    status: 'booked',
+    jobStatus: 'active_rental',
+    createdDaysAgo: 3,
+    updatedDaysAgo: 1,
+    deliveryDate: addDaysISO(TODAY, -1),
+    dumpsterSize: '10 yard',
+    debrisType: 'household junk',
+    deliveryAddress: '220 Church St, Utica, IL 61373',
+    rentalDuration: '2 days',
+    price: 455,
+    paidDaysAgo: 1,
+    intentLevel: 'high',
+    urgency: 'This Week',
+  }),
+
   // ───── HOT OPPORTUNITIES (high intent, quoted, not booked) ─────
   buildLead({
     firstName: 'Amanda',
