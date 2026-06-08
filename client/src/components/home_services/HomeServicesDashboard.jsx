@@ -394,11 +394,12 @@ function MorningBrief() {
   );
 }
 
-// Clean, neutral top-banner metric tile (no background color).
-function MetricTile({ icon: Icon, label, value }) {
+// Clean, neutral top-banner metric tile. Only the icon carries color; the tile
+// background stays neutral. iconColor defaults to gray when not supplied.
+function MetricTile({ icon: Icon, label, value, iconColor = 'text-gray-400' }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3.5 flex items-center gap-3">
-      {Icon && <Icon size={18} className="text-gray-400 flex-shrink-0" />}
+      {Icon && <Icon size={18} className={`${iconColor} flex-shrink-0`} />}
       <div className="min-w-0">
         <p className="text-2xl font-bold text-gray-900 leading-tight">{value}</p>
         <p className="text-xs text-gray-500 leading-tight mt-0.5 truncate">{label}</p>
@@ -1357,15 +1358,15 @@ export default function HomeServicesDashboard() {
 
       {/* Top metric tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <MetricTile icon={AlertTriangle} label="Action Queue" value={metrics.needsAttentionCount} />
-        <MetricTile icon={UserPlus} label="New Leads" value={metrics.newLeads7d} />
-        <MetricTile icon={CalendarCheck2} label="Booked This Week" value={metrics.bookedThisWeek} />
-        <MetricTile icon={Truck} label="On Schedule" value={metrics.onSchedule} />
-        <MetricTile icon={CheckCircle2} label="Completed This Month" value={metrics.completedMonth} />
+        <MetricTile icon={AlertTriangle} label="Action Queue" value={metrics.needsAttentionCount} iconColor="text-red-500" />
+        <MetricTile icon={UserPlus} label="New Leads" value={metrics.newLeads7d} iconColor="text-blue-500" />
+        <MetricTile icon={CalendarCheck2} label="Booked This Week" value={metrics.bookedThisWeek} iconColor="text-emerald-500" />
+        <MetricTile icon={Truck} label="On Schedule" value={metrics.onSchedule} iconColor="text-purple-500" />
+        <MetricTile icon={CheckCircle2} label="Completed This Month" value={metrics.completedMonth} iconColor="text-teal-600" />
       </div>
 
-      {/* Action Queue (left ~45%) | Today's Schedule (right ~55%) */}
-      <div className="grid grid-cols-1 lg:grid-cols-[45fr_55fr] gap-5 items-start">
+      {/* Action Queue (left 50%) | Today's Schedule (right 50%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
         {/* Action Queue */}
         <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
