@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import socket from '../../socket';
-import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES } from '../../utils/verticalConfig';
+import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, getTerminology, getSubVertical } from '../../utils/verticalConfig';
 import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
 import CriticalBadge from './CriticalBadge';
@@ -532,11 +532,10 @@ function AttentionRow({ lead, state, tier, reason, onDismiss }) {
 const SCHEDULE_TYPE_BADGE = {
   DROP: 'bg-emerald-100 text-emerald-700',
   PICK: 'bg-blue-100 text-blue-700',
-  ACTIVE: 'bg-orange-100 text-orange-700',
 };
 
 function ScheduleItem({ item, onClick }) {
-  const { lead, vd, type, time } = item;
+  const { lead, vd, type, label, time } = item;
   const name = getLeadName(lead);
   const size = formatSize(vd.dumpsterSize);
   const address = vd.deliveryAddress || null;
@@ -546,7 +545,7 @@ function ScheduleItem({ item, onClick }) {
       <div className="flex items-center gap-3">
         <div className="w-16 flex-shrink-0 text-xs font-semibold text-gray-700">{time || 'Anytime'}</div>
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 ${SCHEDULE_TYPE_BADGE[type]}`}>
-          {type}
+          {label || type}
         </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
@@ -767,6 +766,7 @@ function AvailabilityNote({ loading, availability, size }) {
 
 function BookedModal({ lead, onConfirm, onClose }) {
   const vd = parseVerticalData(lead);
+  const t = getTerminology(lead.vertical, getSubVertical(lead));
   const extractedSize = vd.dumpsterSize || null;
   const [date, setDate] = useState(lead.delivery_date || vd.deliveryDate || '');
   const [rentalDays, setRentalDays] = useState(() => {
@@ -824,7 +824,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              Dumpster Size <span className="text-red-500">*</span>
+              {t.jobUnit} Size <span className="text-red-500">*</span>
             </label>
             <select
               value={size}
@@ -839,7 +839,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              Delivery Date <span className="text-red-500">*</span>
+              {t.startDate} <span className="text-red-500">*</span>
             </label>
             <input
               type="date"
@@ -850,7 +850,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              Rental Duration (days) <span className="text-red-500">*</span>
+              {t.durationLabel} (days) <span className="text-red-500">*</span>
             </label>
             <input
               type="number"
@@ -861,9 +861,9 @@ function BookedModal({ lead, onConfirm, onClose }) {
               className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             />
             {pickupISO ? (
-              <p className="text-xs text-gray-500 mt-1">Pickup: {formatPickupDate(pickupISO)}</p>
+              <p className="text-xs text-gray-500 mt-1">{t.endAction}: {formatPickupDate(pickupISO)}</p>
             ) : (
-              <p className="text-xs text-gray-400 mt-1">Enter duration to calculate pickup date</p>
+              <p className="text-xs text-gray-400 mt-1">Enter duration to calculate {t.endAction.toLowerCase()} date</p>
             )}
           </div>
           <div>
@@ -1165,26 +1165,23 @@ export default function HomeServicesDashboard() {
     const t = new Date();
     const todayStr = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
 
+    // A job only appears on Today's Schedule when something physically happens
+    // today — a drop off (delivery_date) or a pick up (pickup_date). An ongoing
+    // active rental with neither dated today is NOT shown.
     const todaysSchedule = [];
     for (const { lead, vd } of enriched) {
       if (!OPERATIONAL_JOB_STATUSES.has(lead.job_status)) continue;
+      const term = getTerminology(lead.vertical, getSubVertical(lead));
       const deliveryStr = dayKey(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
       const pickupStr = dayKey(lead.pickup_date || vd.pickupDate);
       if (deliveryStr === todayStr) {
-        todaysSchedule.push({ lead, vd, type: 'DROP', time: vd.deliveryTime || null });
+        todaysSchedule.push({ lead, vd, type: 'DROP', label: term.startBadge, time: vd.deliveryTime || null });
       }
       if (pickupStr === todayStr) {
-        todaysSchedule.push({ lead, vd, type: 'PICK', time: vd.pickupTime || null });
-      }
-      // ACTIVE: a rental that's on-site today (delivered before today, not yet
-      // picked up). Only meaningful while the job is mid-rental.
-      if ((lead.job_status === 'delivered' || lead.job_status === 'active_rental')
-        && deliveryStr && deliveryStr < todayStr
-        && (!pickupStr || pickupStr > todayStr)) {
-        todaysSchedule.push({ lead, vd, type: 'ACTIVE', time: null });
+        todaysSchedule.push({ lead, vd, type: 'PICK', label: term.endBadge, time: vd.pickupTime || null });
       }
     }
-    const TYPE_ORDER = { DROP: 0, ACTIVE: 1, PICK: 2 };
+    const TYPE_ORDER = { DROP: 0, PICK: 1 };
     todaysSchedule.sort((a, b) => {
       const ta = parseTimeToMinutes(a.time);
       const tb = parseTimeToMinutes(b.time);

@@ -75,7 +75,7 @@ export default function ManualLeadForm() {
   // verticals later.
   const vertical = 'home_services';
   const subVertical = 'dumpster_rental';
-  const t = getTerminology(subVertical);
+  const t = getTerminology(vertical, subVertical);
 
   const [form, setForm] = useState({
     firstName: '',
@@ -168,13 +168,13 @@ export default function ManualLeadForm() {
             {DEBRIS_TYPES.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
         </Field>
-        <Field label={t.dateLabel}>
+        <Field label={t.startDate}>
           <input className={inputCls} type="date" value={form.deliveryDate} onChange={set('deliveryDate')} />
         </Field>
         <Field label={`${t.durationLabel} (days)`}>
           <input className={inputCls} type="number" min="1" value={form.rentalDuration} onChange={set('rentalDuration')} placeholder="e.g. 7" />
         </Field>
-        <Field label={t.pickupLabel}>
+        <Field label={t.endDate}>
           <div className="text-sm text-gray-600 px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg min-h-[38px] flex items-center">
             {pickupISO ? formatPickup(pickupISO) : <span className="text-gray-400 italic">Set date + duration to calculate</span>}
           </div>

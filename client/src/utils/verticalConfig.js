@@ -156,25 +156,42 @@ export const HOME_SERVICES_FIELD_PACKS = {
 // everywhere. Keyed by sub_vertical; falls back to dumpster_rental.
 const TERMINOLOGY = {
   dumpster_rental: {
-    dateLabel: 'Delivery Date',
-    pickupLabel: 'Pickup Date',
+    startDate: 'Delivery Date',
+    endDate: 'Pickup Date',
+    startAction: 'Delivery',
+    endAction: 'Pickup',
+    startBadge: 'DROP',
+    endBadge: 'PICK',
+    jobUnit: 'Dumpster',
+    jobUnitSize: true, // show size (10yd, 20yd etc)
     durationLabel: 'Rental Duration',
+    // Extended labels for the manual lead form's dumpster-specific fields.
     sizeLabel: 'Dumpster Size',
     addressLabel: 'Delivery Address',
     accessLabel: 'Access / Delivery Notes',
   },
   hvac: {
-    dateLabel: 'Job Date',
-    pickupLabel: 'Completion Date',
-    durationLabel: 'Estimated Duration',
+    startDate: 'Job Date',
+    endDate: 'Completion Date',
+    startAction: 'Job Start',
+    endAction: 'Job Complete',
+    startBadge: 'JOB',
+    endBadge: 'DONE',
+    jobUnit: 'Job',
+    jobUnitSize: false,
+    durationLabel: 'Job Duration',
+    // Extended labels for the manual lead form.
     sizeLabel: 'Equipment',
     addressLabel: 'Property Address',
     accessLabel: 'Access Notes',
   },
 };
 
-export function getTerminology(subVertical = 'dumpster_rental') {
-  return TERMINOLOGY[subVertical] || TERMINOLOGY.dumpster_rental;
+// Returns the terminology object for a vertical/sub-vertical, falling back to
+// dumpster_rental defaults. The `vertical` arg is accepted for forward-compat
+// with future top-level verticals; today the sub_vertical drives the wording.
+export function getTerminology(vertical, subVertical) {
+  return TERMINOLOGY[subVertical] || TERMINOLOGY[vertical] || TERMINOLOGY.dumpster_rental;
 }
 
 export function getSubVertical(lead) {
@@ -374,7 +391,8 @@ export function getLeadActionState(lead, now = new Date()) {
   const pack = HOME_SERVICES_FIELD_PACKS[subVertical];
   const primary = pack ? (vd[pack.summaryKey] || vd.serviceType) : (vd.serviceType || null);
   const dateHint = vd.deliveryDate || vd.appointmentDate || null;
-  const summaryDetail = [primary, dateHint && `Delivery ${dateHint}`].filter(Boolean).join(' — ');
+  const term = getTerminology(lead?.vertical, subVertical);
+  const summaryDetail = [primary, dateHint && `${term.startAction} ${dateHint}`].filter(Boolean).join(' — ');
 
   let estimatedRevenue = null;
   if (typeof vd.estimatedRevenue === 'number' && !Number.isNaN(vd.estimatedRevenue)) {

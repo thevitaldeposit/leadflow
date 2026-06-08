@@ -9,7 +9,7 @@ import IntentBadge from './IntentBadge';
 import VoicemailBadge from './VoicemailBadge';
 import ManualBadge from './ManualBadge';
 import { api } from '../../utils/api';
-import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES } from '../../utils/verticalConfig';
+import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES, getTerminology, getSubVertical } from '../../utils/verticalConfig';
 
 function parseRentalDays(str) {
   if (!str) return null;
@@ -70,6 +70,7 @@ function AvailabilityNote({ loading, availability, size }) {
 
 function BookedModal({ lead, onConfirm, onClose }) {
   const vd = parseVerticalData(lead);
+  const t = getTerminology(lead.vertical, getSubVertical(lead));
   const extractedSize = vd.dumpsterSize || null;
   // Pre-populate from flat column first, then vertical_data fallback (both should match post-extraction)
   const [date, setDate] = useState(lead.delivery_date || vd.deliveryDate || '');
@@ -137,7 +138,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              Dumpster Size <span className="text-red-500">*</span>
+              {t.jobUnit} Size <span className="text-red-500">*</span>
             </label>
             <select
               value={size}
@@ -152,7 +153,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              Delivery Date <span className="text-red-500">*</span>
+              {t.startDate} <span className="text-red-500">*</span>
             </label>
             <input
               type="date"
@@ -163,7 +164,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              Rental Duration (days) <span className="text-red-500">*</span>
+              {t.durationLabel} (days) <span className="text-red-500">*</span>
             </label>
             <input
               type="number"
@@ -174,9 +175,9 @@ function BookedModal({ lead, onConfirm, onClose }) {
               className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             />
             {pickupISO ? (
-              <p className="text-xs text-gray-500 mt-1">Pickup: {formatPickupDate(pickupISO)}</p>
+              <p className="text-xs text-gray-500 mt-1">{t.endAction}: {formatPickupDate(pickupISO)}</p>
             ) : (
-              <p className="text-xs text-gray-400 mt-1">Enter duration to calculate pickup date</p>
+              <p className="text-xs text-gray-400 mt-1">Enter duration to calculate {t.endAction.toLowerCase()} date</p>
             )}
           </div>
           <div>

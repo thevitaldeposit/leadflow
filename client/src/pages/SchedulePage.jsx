@@ -2,6 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Calendar, Package } from 'lucide-react';
 import { api } from '../utils/api';
+import { getTerminology } from '../utils/verticalConfig';
+
+// This page serves the Home Services dumpster-rental business; wording comes from
+// the shared terminology table so the same calendar can label other verticals.
+const term = getTerminology('home_services', 'dumpster_rental');
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -234,8 +239,8 @@ function CalendarSection() {
           </button>
         </div>
         <div className="flex items-center gap-4 text-xs text-gray-500">
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />Delivery</span>
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />Pickup</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />{term.startAction}</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />{term.endAction}</span>
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block" />Active</span>
         </div>
       </div>
@@ -335,8 +340,8 @@ function CalendarSection() {
 
 function DayJobRow({ job, type, navigate }) {
   const typeConfig = {
-    delivery: { label: 'DROP', bg: 'bg-emerald-100 text-emerald-700' },
-    pickup: { label: 'PICK', bg: 'bg-blue-100 text-blue-700' },
+    delivery: { label: term.startBadge, bg: 'bg-emerald-100 text-emerald-700' },
+    pickup: { label: term.endBadge, bg: 'bg-blue-100 text-blue-700' },
     active: { label: 'ACTIVE', bg: 'bg-orange-100 text-orange-700' },
   };
   const { label, bg } = typeConfig[type];

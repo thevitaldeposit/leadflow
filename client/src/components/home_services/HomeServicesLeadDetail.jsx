@@ -23,6 +23,7 @@ import {
   parseVerticalData,
   getFieldPack,
   getSubVertical,
+  getTerminology,
 } from '../../utils/verticalConfig';
 
 function EditableText({ label, value, onSave, multiline = false }) {
@@ -472,6 +473,14 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   const vd = parseVerticalData(lead);
   const subVertical = getSubVertical(lead);
   const pack = getFieldPack(lead);
+  const t = getTerminology(lead.vertical, subVertical);
+
+  // Vertical-aware labels for the date fields — DB keys stay deliveryDate/pickupDate.
+  const fieldLabel = (field) => {
+    if (field.key === 'deliveryDate') return t.startDate;
+    if (field.key === 'pickupDate') return t.endDate;
+    return field.label;
+  };
 
   const applyUpdate = async (body) => {
     setSaving(true);
@@ -663,7 +672,7 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
           {pack.industryFields.map(field => (
             <PackField
               key={field.key}
-              field={field}
+              field={{ ...field, label: fieldLabel(field) }}
               vd={vd}
               saveVertical={saveVertical}
               customSave={field.key === 'deliveryDate' ? saveDeliveryDate : undefined}
