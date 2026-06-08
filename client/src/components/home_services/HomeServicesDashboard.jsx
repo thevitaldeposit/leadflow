@@ -618,8 +618,8 @@ function TodaysSchedule({ items }) {
   const todayLabel = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   return (
-    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col min-h-[440px]">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
           <Calendar size={15} className="text-accent" />
           <h2 className="text-sm font-bold text-gray-900">Today's Schedule</h2>
@@ -630,14 +630,14 @@ function TodaysSchedule({ items }) {
       {items.length === 0 ? (
         <div className="px-4 py-10 text-center text-sm text-gray-400">Nothing scheduled for today.</div>
       ) : (
-        <div className="divide-y divide-gray-100">
+        <div className="divide-y divide-gray-100 overflow-y-auto max-h-[360px] scrollbar-subtle">
           {items.map((it, i) => (
             <ScheduleItem key={`${it.lead.id}-${it.type}-${i}`} item={it} onClick={() => navigate(`/leads/${it.lead.id}`)} />
           ))}
         </div>
       )}
 
-      <div className="px-4 py-2.5 border-t border-gray-100 mt-auto">
+      <div className="px-4 py-2.5 border-t border-gray-100 mt-auto flex-shrink-0">
         <button
           onClick={() => navigate('/schedule')}
           className="text-xs font-medium text-accent hover:underline inline-flex items-center gap-1"
@@ -1365,11 +1365,13 @@ export default function HomeServicesDashboard() {
         <MetricTile icon={CheckCircle2} label="Completed This Month" value={metrics.completedMonth} iconColor="text-teal-600" />
       </div>
 
-      {/* Action Queue (left 50%) | Today's Schedule (right 50%) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+      {/* Action Queue (left 50%) | Today's Schedule (right 50%).
+          Both panels share a min-height so they stay vertically matched, and
+          each scrolls its own list internally instead of growing the page. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
         {/* Action Queue */}
-        <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col min-h-[440px]">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2">
               <AlertTriangle size={15} className="text-red-500" />
               <h2 className="text-sm font-bold text-gray-900">Action Queue</h2>
@@ -1385,7 +1387,7 @@ export default function HomeServicesDashboard() {
               Inbox clear — great work! 🎉
             </div>
           ) : (
-            <div className="divide-y divide-gray-50">
+            <div className="divide-y divide-gray-50 overflow-y-auto max-h-[360px] scrollbar-subtle">
               {needsAttention.map(({ lead, state, tier, bookedReason }) => (
                 <AttentionRow
                   key={lead.id}
