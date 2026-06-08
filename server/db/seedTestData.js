@@ -77,6 +77,7 @@ function buildLead({
   updatedDaysAgo = null,
   deliveryDate = null,
   pickupDate = null,
+  scheduledTime = null,
   estimatedRevenue = null,
   paidDaysAgo = null,
   paymentSmsSentDaysAgo = null,
@@ -113,6 +114,7 @@ function buildLead({
 
     delivery_date: deliveryDate,
     pickup_date: pickupDate,
+    scheduled_time: scheduledTime,
     estimated_revenue: estimatedRevenue,
     paid_at: paidDaysAgo != null ? ts(addDays(NOW, -paidDaysAgo)) : null,
     payment_sms_sent_at:
@@ -133,6 +135,7 @@ function bookedJob(opts) {
     ...opts,
     deliveryDate,
     pickupDate,
+    scheduledTime: opts.scheduledTime || null,
     estimatedRevenue: price,
     vd: {
       dumpsterSize: opts.dumpsterSize,
@@ -301,8 +304,8 @@ const LEADS = [
   // ───── TODAY'S SCHEDULE: drops, pickups, and an active rental ─────
   // These exercise the dashboard's "Today's Schedule" panel, which derives the
   // badge from dates + status (see HomeServicesDashboard.jsx):
-  //   • DROP   = delivery_date === today      (time from vd.deliveryTime)
-  //   • PICK   = pickup_date === today        (time from vd.pickupTime)
+  //   • DROP   = delivery_date === today      (time from scheduled_time)
+  //   • PICK   = pickup_date === today        (time from scheduled_time)
   //   • ACTIVE = delivered before today, picked up after today, AND
   //              job_status is 'delivered' / 'active_rental'
   // So PICK jobs carry a PAST delivery_date (else they'd also count as a DROP),
@@ -326,7 +329,7 @@ const LEADS = [
     paidDaysAgo: 2,
     intentLevel: 'high',
     urgency: 'This Week',
-    extraVd: { deliveryTime: '8:00 AM' },
+    scheduledTime: '08:00',
   }),
   // DROP #2 — delivering today at 11:00 AM.
   bookedJob({
@@ -345,7 +348,7 @@ const LEADS = [
     paymentSmsSentDaysAgo: 1,
     intentLevel: 'high',
     urgency: 'This Week',
-    extraVd: { deliveryTime: '11:00 AM' },
+    scheduledTime: '11:00',
   }),
   // PICK #1 — picked up today at 1:00 PM (delivered 7 days ago).
   bookedJob({
@@ -364,7 +367,7 @@ const LEADS = [
     paidDaysAgo: 7,
     intentLevel: 'high',
     urgency: 'This Week',
-    extraVd: { pickupTime: '1:00 PM' },
+    scheduledTime: '13:00',
   }),
   // PICK #2 — picked up today at 3:30 PM (delivered 10 days ago).
   bookedJob({
@@ -383,7 +386,7 @@ const LEADS = [
     paidDaysAgo: 10,
     intentLevel: 'high',
     urgency: 'This Week',
-    extraVd: { pickupTime: '3:30 PM' },
+    scheduledTime: '15:30',
   }),
   // ACTIVE rental — delivered yesterday, on-site today, picked up tomorrow.
   bookedJob({

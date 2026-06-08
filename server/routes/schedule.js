@@ -60,7 +60,7 @@ router.get('/calendar', (req, res) => {
     // - active rental spanning into the month (delivery before month-end, pickup after month-start or null)
     const leads = db.prepare(`
       SELECT id, customer_first_name, customer_last_name, vertical_data, sub_vertical,
-             job_status, delivery_date, pickup_date, estimated_revenue
+             job_status, delivery_date, scheduled_time, pickup_date, estimated_revenue
       FROM leads
       WHERE vertical = 'home_services'
         AND business_id = ?
@@ -92,6 +92,7 @@ router.get('/calendar', (req, res) => {
         address: vd.deliveryAddress || null,
         jobStatus: lead.job_status,
         deliveryDate: lead.delivery_date,
+        scheduledTime: lead.scheduled_time || null,
         pickupDate: lead.pickup_date,
       };
 

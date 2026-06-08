@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import socket from '../../socket';
-import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, getTerminology, getSubVertical } from '../../utils/verticalConfig';
+import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, getTerminology, getSubVertical, formatTime12 } from '../../utils/verticalConfig';
 import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
 import CriticalBadge from './CriticalBadge';
@@ -543,7 +543,7 @@ function ScheduleItem({ item, onClick }) {
   return (
     <div onClick={onClick} className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors">
       <div className="flex items-center gap-3">
-        <div className="w-16 flex-shrink-0 text-xs font-semibold text-gray-700">{time || 'Anytime'}</div>
+        <div className={`w-20 flex-shrink-0 text-xs font-semibold ${time ? 'text-gray-700' : 'text-gray-400'}`}>{time ? formatTime12(time) : 'Flexible'}</div>
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 ${SCHEDULE_TYPE_BADGE[type]}`}>
           {label || type}
         </span>
@@ -1175,10 +1175,10 @@ export default function HomeServicesDashboard() {
       const deliveryStr = dayKey(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
       const pickupStr = dayKey(lead.pickup_date || vd.pickupDate);
       if (deliveryStr === todayStr) {
-        todaysSchedule.push({ lead, vd, type: 'DROP', label: term.startBadge, time: vd.deliveryTime || null });
+        todaysSchedule.push({ lead, vd, type: 'DROP', label: term.startBadge, time: lead.scheduled_time || null });
       }
       if (pickupStr === todayStr) {
-        todaysSchedule.push({ lead, vd, type: 'PICK', label: term.endBadge, time: vd.pickupTime || null });
+        todaysSchedule.push({ lead, vd, type: 'PICK', label: term.endBadge, time: lead.scheduled_time || null });
       }
     }
     const TYPE_ORDER = { DROP: 0, PICK: 1 };

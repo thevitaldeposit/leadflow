@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Calendar, Package } from 'lucide-react';
 import { api } from '../utils/api';
-import { getTerminology } from '../utils/verticalConfig';
+import { getTerminology, formatTime12 } from '../utils/verticalConfig';
 
 // This page serves the Home Services dumpster-rental business; wording comes from
 // the shared terminology table so the same calendar can label other verticals.
@@ -26,6 +26,24 @@ function formatDate(iso) {
   if (!iso) return '—';
   const [y, m, d] = iso.split('-');
   return new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Minutes past midnight for an "HH:MM" scheduled time, or null when unset
+// (which sorts after all timed jobs).
+function timeToMinutes(t) {
+  if (!t) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t).trim());
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+// Sort jobs so timed ones lead (ascending), with "Flexible" (untimed) jobs after.
+function byScheduledTime(a, b) {
+  const ta = timeToMinutes(a.scheduledTime);
+  const tb = timeToMinutes(b.scheduledTime);
+  if (ta == null && tb == null) return 0;
+  if (ta == null) return 1;
+  if (tb == null) return -1;
+  return ta - tb;
 }
 
 
@@ -319,10 +337,10 @@ function CalendarSection() {
                 <p className="px-4 py-6 text-xs text-gray-400 italic">No jobs on this day.</p>
               ) : (
                 <div className="divide-y divide-gray-50">
-                  {selectedData.deliveries.map(job => (
+                  {[...selectedData.deliveries].sort(byScheduledTime).map(job => (
                     <DayJobRow key={`d-${job.id}`} job={job} type="delivery" navigate={navigate} />
                   ))}
-                  {selectedData.pickups.map(job => (
+                  {[...selectedData.pickups].sort(byScheduledTime).map(job => (
                     <DayJobRow key={`p-${job.id}`} job={job} type="pickup" navigate={navigate} />
                   ))}
                   {selectedData.activeRentals.map(job => (
@@ -345,6 +363,8 @@ function DayJobRow({ job, type, navigate }) {
     active: { label: 'ACTIVE', bg: 'bg-orange-100 text-orange-700' },
   };
   const { label, bg } = typeConfig[type];
+  // Active rentals are ongoing, so a specific time of day doesn't apply to them.
+  const timeLabel = type === 'active' ? null : (formatTime12(job.scheduledTime) || 'Flexible');
 
   return (
     <button
@@ -355,7 +375,14 @@ function DayJobRow({ job, type, navigate }) {
         {label}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-gray-800 truncate">{job.customerName}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-gray-800 truncate">{job.customerName}</p>
+          {timeLabel && (
+            <span className={`text-xs font-semibold flex-shrink-0 ${job.scheduledTime ? 'text-gray-600' : 'text-gray-400'}`}>
+              {timeLabel}
+            </span>
+          )}
+        </div>
         {job.dumpsterSize && <p className="text-xs text-gray-500">{job.dumpsterSize}</p>}
         {job.address && <p className="text-xs text-gray-400 truncate">{job.address}</p>}
       </div>

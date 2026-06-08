@@ -24,6 +24,7 @@ import {
   getFieldPack,
   getSubVertical,
   getTerminology,
+  formatTime12,
 } from '../../utils/verticalConfig';
 
 function EditableText({ label, value, onSave, multiline = false }) {
@@ -223,11 +224,50 @@ function DateField({ label, value, rawValue, onSave, showTBDWhenEmpty = false })
   );
 }
 
+// Inline time-of-day editor. Reads/writes "HH:MM" 24-hour strings (the format
+// stored on the flat scheduled_time column) but displays the 12-hour form.
+// Shows a "No specific time" placeholder when unset, matching DateField's UX.
+function TimeField({ label, value, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const formatted = formatTime12(value);
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      {editing ? (
+        <input
+          autoFocus
+          type="time"
+          value={value || ''}
+          onChange={e => onSave(e.target.value || null)}
+          onBlur={() => setEditing(false)}
+          className="text-sm border border-accent rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-accent"
+        />
+      ) : (
+        <button
+          onClick={() => setEditing(true)}
+          className="text-sm text-left text-gray-800 hover:text-accent hover:bg-blue-50 px-1 py-0.5 rounded transition-colors min-h-[26px]"
+        >
+          {formatted || <span className="text-gray-300 italic">No specific time</span>}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Render a single field-pack entry as an editable control.
-function PackField({ field, vd, saveVertical, customSave }) {
+function PackField({ field, vd, lead, saveVertical, saveCommon, customSave }) {
   const value = vd[field.key];
   const onSave = customSave ?? saveVertical(field.key);
   const cls = field.span === 2 ? 'col-span-2' : '';
+  if (field.type === 'time') {
+    // `time` fields live on a flat lead column (field.flatKey), not vertical_data.
+    return (
+      <div className={cls}>
+        <TimeField label={field.label} value={lead?.[field.flatKey]} onSave={saveCommon(field.flatKey)} />
+      </div>
+    );
+  }
   if (field.type === 'bool') {
     return <div className={cls}><EditableBool label={field.label} value={value} onSave={onSave} /></div>;
   }
@@ -479,6 +519,7 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   const fieldLabel = (field) => {
     if (field.key === 'deliveryDate') return t.startDate;
     if (field.key === 'pickupDate') return t.endDate;
+    if (field.key === 'scheduledTime') return t.startTime;
     return field.label;
   };
 
@@ -674,7 +715,9 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
               key={field.key}
               field={{ ...field, label: fieldLabel(field) }}
               vd={vd}
+              lead={lead}
               saveVertical={saveVertical}
+              saveCommon={saveCommon}
               customSave={field.key === 'deliveryDate' ? saveDeliveryDate : undefined}
             />
           ))}

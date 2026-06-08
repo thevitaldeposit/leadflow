@@ -29,6 +29,9 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN assigned_dumpster_id INTEGER',
   'ALTER TABLE leads ADD COLUMN raw_delivery_date TEXT',
   'ALTER TABLE leads ADD COLUMN delivery_date TEXT',
+  // Specific delivery/pickup time of day, stored as "HH:MM" 24-hour. Null = no
+  // specific time set ("Flexible" on the schedule).
+  'ALTER TABLE leads ADD COLUMN scheduled_time TEXT',
   'ALTER TABLE leads ADD COLUMN pickup_date TEXT',
   'ALTER TABLE leads ADD COLUMN estimated_revenue REAL',
   // Phase 2: auto-booking detection

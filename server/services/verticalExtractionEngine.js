@@ -92,6 +92,9 @@ const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
   dumpster_rental: {
     promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency OR want delivery today or tomorrow, This Week if this week, Next Week if next week, otherwise Flexible. A same-day or next-day ("tomorrow") delivery request is always ASAP and high intent — the owner needs to call back within a few hours.
 
+Delivery time rule:
+- If the customer mentions a specific time of day for delivery or pickup (e.g. "can you deliver at 8am", "morning delivery", "after 2pm", "first thing", "around noon"), set scheduledTime to that time in 24-hour "HH:MM" format (e.g. "08:00", "13:30", "12:00"). For vague phrases pick a sensible concrete time ("morning" → "08:00", "afternoon" → "13:00", "first thing" → "07:00", "noon" → "12:00"). If no time is mentioned, set scheduledTime to null.
+
 Date range rules:
 - If the customer describes a range (e.g. "tomorrow until Thursday", "Monday to Friday", "June 3rd through the 5th"), treat the START of the range as the delivery date and the END as the pickup date. Set rawDeliveryDate and deliveryDateISO to the start only; set pickupDate to the resolved ISO date of the end.
 - rentalDuration must be the number of calendar days between delivery and pickup, calculated as pickupDate minus deliveryDate. Do NOT count endpoints inclusively. "Wednesday to Thursday" = 1 day. "Monday to Friday" = 4 days.
@@ -111,6 +114,7 @@ ${BOOKING_SIGNAL_RULE}`,
   "deliveryDate": string | null,
   "rawDeliveryDate": string | null,
   "deliveryDateISO": string | null,
+  "scheduledTime": string | null,
   "pickupDate": string | null,
   "rentalDuration": string | null,
   "debrisType": string | null,
@@ -520,6 +524,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     if (verticalSpecific.job_status) flatExtra.job_status = verticalSpecific.job_status;
     if (verticalSpecific.rawDeliveryDate) flatExtra.raw_delivery_date = verticalSpecific.rawDeliveryDate;
     if (verticalSpecific.deliveryDateISO) flatExtra.delivery_date = verticalSpecific.deliveryDateISO;
+    if (verticalSpecific.scheduledTime) flatExtra.scheduled_time = verticalSpecific.scheduledTime;
     if (typeof verticalSpecific.estimatedRevenue === 'number') flatExtra.estimated_revenue = verticalSpecific.estimatedRevenue;
     if (verticalSpecific.autoBooked === true) flatExtra.auto_booked = 1;
     if (verticalSpecific.pickupDate) flatExtra.pickup_date = verticalSpecific.pickupDate;

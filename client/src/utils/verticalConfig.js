@@ -110,6 +110,10 @@ export const HOME_SERVICES_FIELD_PACKS = {
       { key: 'dumpsterSize', label: 'Dumpster Size', type: 'text' },
       { key: 'debrisType', label: 'Debris Type', type: 'text' },
       { key: 'deliveryDate', label: 'Delivery Date', type: 'date', rawKey: 'rawDeliveryDate' },
+      // Specific time of day for the drop-off. Stored on the flat scheduled_time
+      // column (HH:MM 24-hour), not in vertical_data — flatKey points the field
+      // renderer at the lead column instead of vd.
+      { key: 'scheduledTime', label: 'Delivery Time', type: 'time', flatKey: 'scheduled_time' },
       { key: 'pickupDate', label: 'Pickup Date', type: 'date', showTBDWhenEmpty: true },
       { key: 'rentalDuration', label: 'Rental Duration', type: 'text' },
       { key: 'permitNeeded', label: 'Permit Needed', type: 'bool' },
@@ -158,6 +162,7 @@ const TERMINOLOGY = {
   dumpster_rental: {
     startDate: 'Delivery Date',
     endDate: 'Pickup Date',
+    startTime: 'Delivery Time',
     startAction: 'Delivery',
     endAction: 'Pickup',
     startBadge: 'DROP',
@@ -173,6 +178,7 @@ const TERMINOLOGY = {
   hvac: {
     startDate: 'Job Date',
     endDate: 'Completion Date',
+    startTime: 'Appointment Time',
     startAction: 'Job Start',
     endAction: 'Job Complete',
     startBadge: 'JOB',
@@ -192,6 +198,20 @@ const TERMINOLOGY = {
 // with future top-level verticals; today the sub_vertical drives the wording.
 export function getTerminology(vertical, subVertical) {
   return TERMINOLOGY[subVertical] || TERMINOLOGY[vertical] || TERMINOLOGY.dumpster_rental;
+}
+
+// Format an "HH:MM" 24-hour time string as 12-hour "8:00 AM". Returns null for
+// empty/missing values; passes through anything that isn't HH:MM unchanged.
+export function formatTime12(hhmm) {
+  if (!hhmm) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm).trim());
+  if (!m) return String(hhmm);
+  let h = Number(m[1]);
+  const min = m[2];
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${min} ${ap}`;
 }
 
 export function getSubVertical(lead) {
