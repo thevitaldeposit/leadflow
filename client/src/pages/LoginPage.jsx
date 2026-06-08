@@ -27,7 +27,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm p-8">
         <div className="flex items-center justify-center gap-2 mb-6">
           <Zap size={24} className="text-accent" />
-          <span className="font-bold text-xl tracking-tight">LeadFlow</span>
+          <span className="font-bold text-xl tracking-tight">Stream</span>
         </div>
         <h1 className="text-lg font-semibold text-center text-gray-900">Sign in</h1>
         <p className="text-sm text-gray-500 text-center mb-6">Access your dashboard</p>

@@ -128,7 +128,7 @@ export default function Layout({ children }) {
         <div className="h-14 flex items-center px-5 border-b border-white/10">
           <div className="flex items-center gap-2">
             <Zap size={20} className="text-accent" />
-            <span className="text-white font-bold text-lg tracking-tight">LeadFlow</span>
+            <span className="text-white font-bold text-lg tracking-tight">Stream</span>
           </div>
         </div>
 
@@ -236,7 +236,7 @@ export default function Layout({ children }) {
             <LogOut size={14} />
             Sign out
           </button>
-          <p className="text-[10px] text-gray-600">LeadFlow v2.0</p>
+          <p className="text-[10px] text-gray-600">Stream v1.0</p>
         </div>
       </aside>
 
