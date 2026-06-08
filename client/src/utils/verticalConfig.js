@@ -116,7 +116,8 @@ export const HOME_SERVICES_FIELD_PACKS = {
       { key: 'scheduledTime', label: 'Delivery Time', type: 'time', flatKey: 'scheduled_time' },
       { key: 'pickupDate', label: 'Pickup Date', type: 'date', showTBDWhenEmpty: true },
       { key: 'rentalDuration', label: 'Rental Duration', type: 'text' },
-      { key: 'permitNeeded', label: 'Permit Needed', type: 'bool' },
+      // permitNeeded is still captured by extraction + stored in vertical_data,
+      // but intentionally not surfaced here — low signal, clutters the UI.
       { key: 'deliveryAddress', label: 'Delivery Address', type: 'text', span: 2 },
       { key: 'accessNotes', label: 'Access Notes', type: 'multiline', span: 2 },
     ],
