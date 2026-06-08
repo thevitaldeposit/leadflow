@@ -303,6 +303,18 @@ export default function SettingsPage() {
               className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Missed call expiry (hours)
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={settings.action_queue_missed_call_expiry_hours ?? 24}
+              onChange={e => update('action_queue_missed_call_expiry_hours', Math.max(1, Number(e.target.value) || 24))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
         </div>
       </div>
 

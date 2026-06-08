@@ -43,9 +43,12 @@ const NEW_COLUMNS = [
   // Recording lifecycle
   'ALTER TABLE leads ADD COLUMN recording_deleted_at TEXT',
   // Voicemail capture: distinguishes voicemail leads from answered calls
+  // (also carries 'missed_call' for unanswered calls with no voicemail).
   'ALTER TABLE leads ADD COLUMN call_type TEXT',
   // Free-text internal log (outbound click-to-call attempts, etc.)
   'ALTER TABLE leads ADD COLUMN internal_notes TEXT',
+  // When a follow-up is due. Set to capture time for missed calls (immediate).
+  'ALTER TABLE leads ADD COLUMN follow_up_date TEXT',
 ];
 
 // ── Multi-tenancy: per-business unique constraints ──────────────────────────

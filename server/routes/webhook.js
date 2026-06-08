@@ -35,6 +35,136 @@ function recallSession(callSid) {
   return { from: row.from_number || null, businessId: row.business_id || null };
 }
 
+// Non-destructive variant of recallSession: read the stashed caller/business
+// WITHOUT deleting the row. The dial-status callback fires mid-call (when the
+// forwarded leg ends) and must leave the session intact for the later
+// recording/voicemail callback that consumes it via recallSession.
+function peekSession(callSid) {
+  if (!callSid) return { from: null, businessId: null };
+  const row = db.prepare('SELECT from_number, business_id FROM call_sessions WHERE call_sid = ?').get(callSid);
+  if (!row) return { from: null, businessId: null };
+  return { from: row.from_number || null, businessId: row.business_id || null };
+}
+
+// Format a raw caller ID ("+15551234567") to the dashboard's "555-123-4567".
+// Returns null when there aren't enough digits to be a real number.
+function formatCallerPhone(raw) {
+  if (!raw) return null;
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length < 10) return null;
+  const local = digits.slice(-10);
+  return `${local.slice(0, 3)}-${local.slice(3, 6)}-${local.slice(6)}`;
+}
+
+// When a real lead (an answered conversation or a voicemail) arrives from a
+// number that recently produced a missed-call placeholder, fold the placeholder
+// into the new lead rather than leaving a duplicate in the Action Queue. Covers
+// both the same call (no-answer → caller then leaves a voicemail) and a separate
+// callback within 30 minutes. caller_number / caller_phone_raw store the raw
+// E.164 caller ID, so a last-10-digits LIKE match is reliable.
+function mergeRecentMissedCall(businessId, fromNumber, supersedingLead) {
+  try {
+    if (!fromNumber || !supersedingLead) return;
+    const digits = String(fromNumber).replace(/\D/g, '');
+    if (digits.length < 10) return;
+    const local = digits.slice(-10);
+    const missed = db.prepare(`
+      SELECT * FROM leads
+      WHERE call_type = 'missed_call'
+        AND (discarded = 0 OR discarded IS NULL)
+        AND business_id IS ?
+        AND id != ?
+        AND created_at >= datetime('now', '-30 minutes')
+        AND (caller_number LIKE ? OR caller_phone_raw LIKE ?)
+      ORDER BY created_at DESC LIMIT 1
+    `).get(businessId, supersedingLead.id, `%${local}%`, `%${local}%`);
+    if (!missed) return;
+    db.prepare('UPDATE leads SET discarded = 1 WHERE id = ?').run(missed.id);
+    logActivity(supersedingLead.id, 'note', 'Merged an earlier missed call from this number into this lead');
+    emitToBusiness(businessId, 'lead_removed', { id: missed.id, business_id: businessId });
+    console.log(`[webhook] Merged missed-call lead ${missed.id} into lead ${supersedingLead.id}`);
+  } catch (err) {
+    console.error('[webhook] mergeRecentMissedCall error:', err.message);
+  }
+}
+
+// Detect and record a missed call from the forwarded-leg status callback.
+// Twilio posts here when the owner's leg ends; if the owner never answered
+// (no-answer / busy / failed / canceled) the inbound caller reached no one, so
+// we create a missed-call lead. Answered legs are ignored — /twilio/recording
+// handles those. If the caller goes on to leave a voicemail, processVoicemail
+// merges this placeholder away via mergeRecentMissedCall.
+async function handleDialStatus(payload) {
+  const parentSid = payload.ParentCallSid || payload.CallSid;
+  const session = peekSession(parentSid);
+  const from = session.from || payload.From || null;
+  const businessId = session.businessId || getDefaultBusinessId();
+
+  // Only the dialed (owner) leg matters here. A 'completed'/'answered' status
+  // means the owner picked up — the call was handled live, not missed.
+  const status = String(payload.DialCallStatus || payload.CallStatus || '').toLowerCase();
+  if (status === 'completed' || status === 'answered' || status === 'in-progress') {
+    console.log(`[webhook/dial-status] owner answered (${status}) for ${parentSid} — not a missed call`);
+    return;
+  }
+
+  // Guard against duplicates from Twilio retries or rapid repeat calls: if a
+  // missed-call placeholder for this number already exists in the last few
+  // minutes, keep that one instead of stacking another.
+  if (from) {
+    const digits = from.replace(/\D/g, '');
+    if (digits.length >= 10) {
+      const local = digits.slice(-10);
+      const recent = db.prepare(`
+        SELECT id FROM leads
+        WHERE call_type = 'missed_call'
+          AND (discarded = 0 OR discarded IS NULL)
+          AND created_at >= datetime('now', '-5 minutes')
+          AND (caller_number LIKE ? OR caller_phone_raw LIKE ?)
+        LIMIT 1
+      `).get(`%${local}%`, `%${local}%`);
+      if (recent) {
+        console.log(`[webhook/dial-status] missed-call placeholder already exists for ${from} — skipping`);
+        return;
+      }
+    }
+  }
+
+  const defaultVertical = process.env.LEADFLOW_DEFAULT_VERTICAL || 'auto_dealer';
+  const isHomeServices = defaultVertical === 'home_services';
+  const phone = formatCallerPhone(from);
+  const displayName = phone || 'the caller';
+
+  const verticalData = {
+    notes: 'Missed call — no voicemail left',
+    aiRecommendation: `Call back ${displayName} — missed call, no voicemail`,
+    missedCall: true,
+  };
+
+  const leadData = {
+    extraction_type: 'phone_auto',
+    call_type: 'missed_call',
+    job_status: 'inquiry',
+    status: 'new',
+    auto_captured: 1,
+    caller_phone_raw: from || null,
+    caller_number: from || null,
+    phone: phone || null,
+    phone_confidence: phone ? 0.7 : 0,
+    follow_up_date: new Date().toISOString(),
+    source: 'twilio_missed_call',
+    vertical: defaultVertical,
+    sub_vertical: isHomeServices ? 'dumpster_rental' : null,
+    vertical_data: JSON.stringify(verticalData),
+    business_id: businessId,
+  };
+
+  const lead = insertLead(leadData);
+  logActivity(lead.id, 'missed_call', 'Missed call received — no voicemail');
+  emitToBusiness(lead.business_id, 'new_lead', lead);
+  console.log(`[webhook/dial-status] Missed-call lead ${lead.id} created for ${from || 'unknown'} (status: ${status || 'none'})`);
+}
+
 setInterval(() => {
   db.prepare("DELETE FROM call_sessions WHERE created_at < datetime('now', '-1 hour')").run();
 }, 15 * 60 * 1000).unref();
@@ -233,6 +363,10 @@ async function processRecording(payload) {
       const inboundDur = formatDuration(CallDuration || transcription_seconds);
       logActivity(lead.id, 'inbound_call', `Inbound call received${inboundDur ? ` (${inboundDur})` : ''}`);
 
+      // A real conversation supersedes any missed-call placeholder from this
+      // number in the last 30 minutes (e.g. caller back after a missed call).
+      mergeRecentMissedCall(lead.business_id, From, lead);
+
       // Auto-booking: when the AI detected a confirmed booking, verify pool
       // inventory is actually available for the requested size over the rental
       // window BEFORE confirming and sending a payment link. Inventory is
@@ -308,6 +442,8 @@ async function processRecording(payload) {
 
     const legacyInboundDur = formatDuration(CallDuration || transcription_seconds);
     logActivity(lead.id, 'inbound_call', `Inbound call received${legacyInboundDur ? ` (${legacyInboundDur})` : ''}`);
+
+    mergeRecentMissedCall(lead.business_id, From, lead);
 
     emitToBusiness(lead.business_id, 'new_lead', lead);
     console.log(`[webhook] Lead ${lead.id} created from Twilio recording ${RecordingSid}`);
@@ -460,6 +596,10 @@ async function processVoicemail(payload) {
       const vmDur = formatDuration(transcription_seconds);
       logActivity(lead.id, 'voicemail', `Voicemail received${vmDur ? ` (${vmDur})` : ''}`);
 
+      // A left voicemail supersedes the missed-call placeholder for this call
+      // (or an earlier missed call from the same number) — remove the duplicate.
+      mergeRecentMissedCall(lead.business_id, From, lead);
+
       emitToBusiness(lead.business_id, 'new_lead', lead);
       console.log(`[webhook] Voicemail lead ${lead.id} created from Twilio recording ${RecordingSid} (vertical: ${defaultVertical})`);
       return;
@@ -492,6 +632,8 @@ async function processVoicemail(payload) {
 
     const legacyVmDur = formatDuration(transcription_seconds);
     logActivity(lead.id, 'voicemail', `Voicemail received${legacyVmDur ? ` (${legacyVmDur})` : ''}`);
+
+    mergeRecentMissedCall(lead.business_id, From, lead);
 
     emitToBusiness(lead.business_id, 'new_lead', lead);
     console.log(`[webhook] Voicemail lead ${lead.id} created from Twilio recording ${RecordingSid}`);
@@ -530,6 +672,20 @@ router.post('/twilio/voicemail-recording', (req, res) => {
 
   processVoicemail(payload).catch(err => {
     console.error('[webhook] Unhandled error in processVoicemail:', err);
+  });
+});
+
+// POST /api/webhook/twilio/dial-status — status callback for the forwarded
+// owner leg (attached to the <Number> in /twilio/voice). Fires when that leg
+// ends; an unanswered leg means the inbound caller reached no one, so we record
+// a missed call. Purely additive — it does not affect routing, recording, caller
+// ID passthrough, or the voicemail fall-through.
+router.post('/twilio/dial-status', (req, res) => {
+  // Respond immediately so Twilio doesn't retry
+  res.sendStatus(200);
+
+  handleDialStatus(req.body).catch(err => {
+    console.error('[webhook] Unhandled error in handleDialStatus:', err);
   });
 });
 
@@ -583,6 +739,12 @@ router.post('/twilio/voice', (req, res) => {
     console.log(`[webhook/voice]   voicemail greeting: ${greetingUrl}`);
     console.log(`[webhook/voice]   voicemail callback: ${voicemailCallbackUrl}`);
 
+    // Status callback for the forwarded leg. Fires when the owner's leg ends so
+    // an unanswered call (no-answer/busy/canceled) can be logged as a missed
+    // call. Attached to <Number>, so it does not alter the dial or fall-through.
+    const dialStatusUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/dial-status`;
+    console.log(`[webhook/voice]   dial status callback: ${dialStatusUrl}`);
+
     // Omit callerId so Twilio passes the original caller's number through to
     // the forwarded leg with its original STIR/SHAKEN attestation intact.
     console.log(`[webhook/voice]   dial callerId: (passthrough — original caller ${from})`);
@@ -595,7 +757,7 @@ router.post('/twilio/voice', (req, res) => {
   <Play>${recordingNoticeUrl}</Play>
   <Pause length="2"/>
   <Dial timeout="20" record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
-    <Number>${userPhone}</Number>
+    <Number statusCallback="${dialStatusUrl}" statusCallbackEvent="completed" statusCallbackMethod="POST">${userPhone}</Number>
   </Dial>
   <Play>${greetingUrl}</Play>
   <Record maxLength="120" playBeep="true" recordingStatusCallback="${voicemailCallbackUrl}" recordingStatusCallbackMethod="POST" recordingStatusCallbackEvent="completed"/>

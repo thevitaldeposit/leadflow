@@ -372,6 +372,15 @@ export function getLeadActionState(lead, now = new Date()) {
       || 'this caller';
     recommendation = `Call back ${vmName} — came in via voicemail`;
   }
+  // Missed calls (unanswered, no voicemail) read as a callback prompt naming the
+  // caller — falling back to the phone number when no name is known yet.
+  const isMissedCall = lead?.call_type === 'missed_call';
+  if (isMissedCall) {
+    const mcName = vd.customerName
+      || [lead?.customer_first_name, lead?.customer_last_name].filter(Boolean).join(' ')
+      || lead?.phone || lead?.caller_number || 'this caller';
+    recommendation = `Call back ${mcName} — missed call, no voicemail`;
+  }
 
   // Buckets used by Today's Priorities — ordered by priority floor below.
   // asap sits above follow_up_due so ASAP customers are never buried.

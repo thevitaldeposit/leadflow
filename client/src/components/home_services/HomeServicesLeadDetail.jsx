@@ -445,6 +445,7 @@ const ACTIVITY_ICONS = {
   status_change: '📋',
   note_added: '📋',
   voicemail: '🎙️',
+  missed_call: '📵',
 };
 
 // SQLite's CURRENT_TIMESTAMP emits "YYYY-MM-DD HH:MM:SS" in UTC with no zone;

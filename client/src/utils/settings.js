@@ -13,6 +13,7 @@ const DEFAULTS = {
   action_queue_asap_expiry_hours: 24,
   action_queue_followup_expiry_hours: 48,
   action_queue_voicemail_expiry_hours: 24,
+  action_queue_missed_call_expiry_hours: 24,
 };
 
 export function getSettings() {

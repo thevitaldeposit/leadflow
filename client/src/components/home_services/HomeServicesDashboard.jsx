@@ -11,6 +11,7 @@ import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
 import CriticalBadge from './CriticalBadge';
 import VoicemailBadge from './VoicemailBadge';
+import MissedCallBadge from './MissedCallBadge';
 import { getSettings, saveSettings } from '../../utils/settings';
 import { useNavigate } from 'react-router-dom';
 
@@ -87,6 +88,21 @@ function getFollowUpLabel(followUpDate) {
   if (hrs < 24) return `Due in ${hrs}h`;
   const days = Math.round(totalMinutes / 1440);
   return `Due in ${days}d`;
+}
+
+// Compact "time since" label for a past timestamp (e.g. a missed call's age):
+// "just now", "12m ago", "3h ago", "2d ago". Returns null for missing/future.
+function getElapsedLabel(date) {
+  if (!date) return null;
+  const diff = Date.now() - new Date(date).getTime();
+  if (Number.isNaN(diff) || diff < 0) return null;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hrs = Math.floor(minutes / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
 }
 
 function getGreeting() {
@@ -215,6 +231,15 @@ function classifyForQueue(e, now, cfg) {
     reasons.push({ active });
   }
 
+  // Missed calls (unanswered, no voicemail) stay in the queue until contacted,
+  // then expire out after their grace window (default 24h).
+  const isMissedCall = lead.call_type === 'missed_call';
+  if (isMissedCall && neverContacted) {
+    const created = lead.created_at ? new Date(lead.created_at).getTime() : null;
+    const active = created == null ? true : now.getTime() <= created + cfg.missedCallExpiryH * MS_HOUR;
+    reasons.push({ active });
+  }
+
   if (reasons.length === 0) return { inQueue: false, expired: false, reason: null };
 
   const anyActive = reasons.some(r => r.active);
@@ -251,6 +276,17 @@ function getAttentionTier(e, now = new Date()) {
 
   // TIER 2 — VOICEMAIL UNCONTACTED: customer is waiting on a callback.
   if (isVoicemail && neverContacted) return 2;
+
+  // MISSED CALLS — urgency decays with age. Fractional tiers slot them between
+  // the existing integer tiers without disturbing them: fresh misses sit just
+  // below voicemails (above ASAP), then progressively lower as they age out.
+  if (lead.call_type === 'missed_call' && neverContacted) {
+    const ageH = lead.created_at ? (now.getTime() - new Date(lead.created_at).getTime()) / MS_HOUR : 0;
+    if (ageH < 1) return 2.5;   // first hour — high urgency, just after voicemails
+    if (ageH < 2) return 4.5;   // 1–2h — below high-intent follow-ups
+    if (ageH < 4) return 5.5;   // 2–4h — above the lowest standard tier
+    return 6.5;                 // 4h+ — bottom of the queue (until 24h expiry)
+  }
 
   // TIER 3 — ASAP or near-term delivery (today/tomorrow) leads.
   const deliveryDate = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
@@ -476,8 +512,16 @@ function CallButton({ lead, name }) {
 // operational reason it's in the queue, a time indicator, and call + dismiss.
 function AttentionRow({ lead, state, tier, reason, onDismiss }) {
   const navigate = useNavigate();
+  const isMissedCall = lead.call_type === 'missed_call';
   const name = getLeadName(lead);
+  // Missed calls often have no name yet — fall back to the caller's number.
+  const displayName = (isMissedCall && name === 'Unknown')
+    ? (lead.phone || lead.caller_number || 'Unknown caller')
+    : name;
+  const showPhone = lead.phone && lead.phone !== displayName;
   const followUpLabel = getFollowUpLabel(state.followUpDate);
+  // Missed calls track time elapsed since the call instead of a follow-up date.
+  const elapsedLabel = isMissedCall && !followUpLabel ? getElapsedLabel(lead.created_at) : null;
   const reasonText = reason || state.recommendation;
   const reasonIsCritical = !!reason || tier === 1;
 
@@ -495,9 +539,10 @@ function AttentionRow({ lead, state, tier, reason, onDismiss }) {
       {tier === 1 ? <CriticalBadge size="sm" /> : <IntentBadge value={state.intent} size="sm" />}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
-          {lead.phone && <span className="text-xs text-gray-400 flex-shrink-0">{lead.phone}</span>}
+          <span className="text-sm font-semibold text-gray-900 truncate">{displayName}</span>
+          {showPhone && <span className="text-xs text-gray-400 flex-shrink-0">{lead.phone}</span>}
           {lead.call_type === 'voicemail' && <VoicemailBadge />}
+          {isMissedCall && <MissedCallBadge />}
         </div>
         {reasonText && (
           <p className={`text-xs font-medium truncate mt-0.5 ${reasonIsCritical ? 'text-red-600' : 'text-accent'}`}>
@@ -512,6 +557,11 @@ function AttentionRow({ lead, state, tier, reason, onDismiss }) {
             : 'bg-amber-100 text-amber-700'
         }`}>
           {followUpLabel}
+        </span>
+      )}
+      {elapsedLabel && (
+        <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 bg-orange-100 text-orange-700">
+          {elapsedLabel}
         </span>
       )}
       <div className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
@@ -1068,13 +1118,19 @@ export default function HomeServicesDashboard() {
       if (lead.vertical !== 'home_services') return;
       setLeads(prev => prev.map(l => l.id === lead.id ? lead : l));
     };
+    // A missed-call placeholder merged into a later voicemail/conversation lead.
+    const handleLeadRemoved = ({ id }) => {
+      setLeads(prev => prev.filter(l => l.id !== id));
+    };
     const handleReconnect = () => { loadRef.current().catch(console.error); };
     socket.on('new_lead', handleNewLead);
     socket.on('lead_updated', handleLeadUpdated);
+    socket.on('lead_removed', handleLeadRemoved);
     socket.io.on('reconnect', handleReconnect);
     return () => {
       socket.off('new_lead', handleNewLead);
       socket.off('lead_updated', handleLeadUpdated);
+      socket.off('lead_removed', handleLeadRemoved);
       socket.io.off('reconnect', handleReconnect);
     };
   }, []);
@@ -1137,6 +1193,7 @@ export default function HomeServicesDashboard() {
       asapExpiryH: Number(settings.action_queue_asap_expiry_hours) || 24,
       followupExpiryH: Number(settings.action_queue_followup_expiry_hours) || 48,
       voicemailExpiryH: Number(settings.action_queue_voicemail_expiry_hours) || 24,
+      missedCallExpiryH: Number(settings.action_queue_missed_call_expiry_hours) || 24,
     };
     const classified = enriched.map(e => ({ ...e, q: classifyForQueue(e, now, aqCfg) }));
 
