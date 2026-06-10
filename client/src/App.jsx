@@ -15,6 +15,7 @@ import StreamSignupsPage from './pages/StreamSignupsPage';
 import LoginPage from './pages/LoginPage';
 import LandingPage from './pages/LandingPage';
 import SignupPage from './pages/SignupPage';
+import SubscriptionGate from './components/SubscriptionGate';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // Pathless layout route: renders the dashboard chrome once and lets nested
@@ -46,29 +47,39 @@ function AppRoutes() {
         <Route path="/signup" element={<SignupPage />} />
 
         {user ? (
-          // Authenticated: the dashboard lives at its existing paths.
-          <Route element={<DashboardLayout />}>
-            <Route path="/" element={<DashboardPage />} />
-            {/* Stripe checkout success_url lands here — alias of the dashboard home. */}
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/new" element={<Navigate to="/new/transcript" replace />} />
-            <Route path="/new/:type" element={<NewLeadPage />} />
-            <Route path="/leads" element={<LeadListPage />} />
-            <Route path="/leads/:id" element={<LeadDetailPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/billing" element={<BillingPage />} />
-            <Route path="/inventory" element={<InventoryPage />} />
-            <Route path="/action-queue" element={<FilteredLeadsPage mode="action_queue" />} />
-            <Route path="/opportunities" element={<FilteredLeadsPage mode="opportunities" />} />
-            <Route path="/booked" element={<FilteredLeadsPage mode="booked" />} />
-            <Route path="/schedule" element={<SchedulePage />} />
-            <Route path="/insights" element={<InsightsPage />} />
-            <Route path="/completed" element={<FilteredLeadsPage mode="completed" />} />
-            <Route path="/all-leads" element={<AllLeadsPage />} />
-            <Route path="/stream-signups" element={<StreamSignupsPage />} />
-            {/* Unknown path (incl. /login while signed in) → dashboard home. */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
+          // Authenticated. Billing stays reachable outside the subscription gate
+          // so a blocked account can still update payment or resubscribe — it keeps
+          // the normal dashboard chrome. Every other route sits behind
+          // SubscriptionGate, which replaces the whole screen (chrome included)
+          // with a full-screen block page when the subscription isn't usable.
+          <>
+            <Route element={<DashboardLayout />}>
+              <Route path="/billing" element={<BillingPage />} />
+            </Route>
+            <Route element={<SubscriptionGate />}>
+              <Route element={<DashboardLayout />}>
+                <Route path="/" element={<DashboardPage />} />
+                {/* Stripe checkout success_url lands here — alias of the dashboard home. */}
+                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/new" element={<Navigate to="/new/transcript" replace />} />
+                <Route path="/new/:type" element={<NewLeadPage />} />
+                <Route path="/leads" element={<LeadListPage />} />
+                <Route path="/leads/:id" element={<LeadDetailPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/inventory" element={<InventoryPage />} />
+                <Route path="/action-queue" element={<FilteredLeadsPage mode="action_queue" />} />
+                <Route path="/opportunities" element={<FilteredLeadsPage mode="opportunities" />} />
+                <Route path="/booked" element={<FilteredLeadsPage mode="booked" />} />
+                <Route path="/schedule" element={<SchedulePage />} />
+                <Route path="/insights" element={<InsightsPage />} />
+                <Route path="/completed" element={<FilteredLeadsPage mode="completed" />} />
+                <Route path="/all-leads" element={<AllLeadsPage />} />
+                <Route path="/stream-signups" element={<StreamSignupsPage />} />
+                {/* Unknown path (incl. /login while signed in) → dashboard home. */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Route>
+          </>
         ) : (
           // Guest: public marketing site + login. Dashboard paths fall through
           // to the catch-all and are sent to the login screen.
