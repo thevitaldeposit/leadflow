@@ -329,6 +329,9 @@ function runMigrations() {
     'ALTER TABLE businesses ADD COLUMN stripe_subscription_id TEXT',
     "ALTER TABLE businesses ADD COLUMN subscription_status TEXT DEFAULT 'inactive'",
     'ALTER TABLE businesses ADD COLUMN trial_days INTEGER',
+    // When an admin-granted free trial ends (now + trial_days). Nullable; set by
+    // the admin panel's "Set Trial" action alongside subscription_status='trialing'.
+    'ALTER TABLE businesses ADD COLUMN trial_end_date DATETIME',
   ];
   for (const stmt of BILLING_COLUMNS) {
     try {

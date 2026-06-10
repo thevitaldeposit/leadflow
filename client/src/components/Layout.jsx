@@ -13,7 +13,7 @@ import {
   Package,
   CheckSquare,
   Database,
-  Radio,
+  Shield,
   CreditCard,
   LogOut,
 } from 'lucide-react';
@@ -40,6 +40,7 @@ const PAGE_TITLES = {
   '/new/audio': 'New Lead — Audio Recording',
   '/settings': 'Settings',
   '/billing': 'Billing',
+  '/admin': 'Admin',
 };
 
 let toastIdCounter = 0;
@@ -234,11 +235,11 @@ export default function Layout({ children }) {
             All Leads
           </NavLink>
 
-          {/* Stream admin — only the Stream/Valley Binz account (business 1). */}
+          {/* Admin panel — only the Stream/Valley Binz account (business 1). */}
           {business?.id === 1 && (
-            <NavLink to="/stream-signups" className={linkClass}>
-              <Radio size={18} />
-              Stream Signups
+            <NavLink to="/admin" className={linkClass}>
+              <Shield size={18} />
+              Admin
             </NavLink>
           )}
 

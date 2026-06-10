@@ -1,9 +1,12 @@
-const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
-const { hashPassword, comparePassword, generateToken } = require('../services/authService');
-const { sendPasswordResetEmail } = require('../services/emailService');
+const {
+  hashPassword,
+  comparePassword,
+  generateToken,
+  sendPasswordResetForUser,
+} = require('../services/authService');
 const { requireAuth } = require('../middleware/auth');
 
 // Mark the auth cookie Secure (HTTPS-only) in production; allow plain HTTP in dev.
@@ -226,15 +229,8 @@ router.post('/forgot-password', async (req, res) => {
 
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normEmail);
     if (user) {
-      const token = crypto.randomBytes(32).toString('hex');
-      const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
-      db.prepare(
-        'UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?'
-      ).run(token, expires, user.id);
-
-      const resetUrl = `https://joinstream.app/reset-password?token=${token}`;
       try {
-        await sendPasswordResetEmail(user.email, resetUrl);
+        await sendPasswordResetForUser(user);
       } catch (mailErr) {
         // Log but don't surface — the generic 200 below keeps the endpoint from
         // revealing whether the address exists, even on a mail failure.

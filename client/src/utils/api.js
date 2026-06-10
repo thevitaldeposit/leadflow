@@ -163,4 +163,23 @@ export const api = {
   getSubscriptionStatus: () => request('/billing/subscription-status'),
   createCheckoutSession: () => request('/billing/create-checkout-session', { method: 'POST' }),
   createPortalSession: () => request('/billing/create-portal-session', { method: 'POST' }),
+
+  // Admin panel — all endpoints are restricted to business_id = 1 (403 otherwise).
+  getAdminBusinesses: () => request('/admin/businesses'),
+  setBusinessSubscription: (id, status) =>
+    request(`/admin/businesses/${id}/subscription`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }),
+  setBusinessTrial: (id, trialDays) =>
+    request(`/admin/businesses/${id}/trial`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trialDays }),
+    }),
+  markBusinessOnboarded: (id) =>
+    request(`/admin/businesses/${id}/onboarding`, { method: 'PATCH' }),
+  resetBusinessPassword: (id) =>
+    request(`/admin/businesses/${id}/reset-password`, { method: 'POST' }),
 };

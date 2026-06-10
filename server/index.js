@@ -28,6 +28,7 @@ const signupsRouter = require('./routes/signups');
 const contactRouter = require('./routes/contact');
 const dashboardRouter = require('./routes/dashboard');
 const { router: billingRouter, handleStripeWebhook } = require('./routes/billing');
+const adminRouter = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -132,6 +133,7 @@ app.use('/api/signups', signupsRouter);
 app.use('/api/contact', contactRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/billing', billingRouter);
+app.use('/api/admin', adminRouter);
 // Public payment page — must be before the SPA catch-all
 app.use('/pay', paymentRouter);
 

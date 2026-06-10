@@ -11,7 +11,7 @@ import FilteredLeadsPage from './pages/FilteredLeadsPage';
 import SchedulePage from './pages/SchedulePage';
 import InsightsPage from './pages/InsightsPage';
 import AllLeadsPage from './pages/AllLeadsPage';
-import StreamSignupsPage from './pages/StreamSignupsPage';
+import AdminPage from './pages/AdminPage';
 import LoginPage from './pages/LoginPage';
 import LandingPage from './pages/LandingPage';
 import SignupPage from './pages/SignupPage';
@@ -84,7 +84,7 @@ function AppRoutes() {
                 <Route path="/insights" element={<InsightsPage />} />
                 <Route path="/completed" element={<FilteredLeadsPage mode="completed" />} />
                 <Route path="/all-leads" element={<AllLeadsPage />} />
-                <Route path="/stream-signups" element={<StreamSignupsPage />} />
+                <Route path="/admin" element={<AdminPage />} />
                 {/* Unknown path (incl. /login while signed in) → dashboard home. */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

@@ -95,4 +95,18 @@ function attachBusiness(req, res, next) {
   }
 }
 
-module.exports = { requireAuth, attachBusiness };
+// The Stream admin account. Only this business may reach the admin panel and its
+// endpoints; every other tenant is rejected with 403.
+const ADMIN_BUSINESS_ID = 1;
+
+// Authorization guard for admin-only routes. Must run AFTER requireAuth so
+// req.business is populated. Returns 403 for any business that isn't the Stream
+// admin account (business_id = 1).
+function requireAdmin(req, res, next) {
+  if (!req.business || req.business.id !== ADMIN_BUSINESS_ID) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, attachBusiness, requireAdmin };

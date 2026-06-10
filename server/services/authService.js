@@ -1,5 +1,8 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const db = require('../db/database');
+const { sendPasswordResetEmail } = require('./emailService');
 
 // JWT_SECRET must be set in the environment: locally in .env, and in the Railway
 // project's environment variables for production. It is read LAZILY (never at
@@ -45,4 +48,30 @@ function verifyToken(token) {
   return jwt.verify(token, getSecret());
 }
 
-module.exports = { hashPassword, comparePassword, generateToken, verifyToken };
+// ── Password reset ──────────────────────────────────────────────────────────
+// One-hour reset token lifetime; the public reset page reads the token from the
+// query string at this URL.
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const RESET_URL_BASE = 'https://joinstream.app/reset-password';
+
+// Issue a password-reset token for `user`, persist it with a 1-hour expiry, and
+// email the reset link. Shared by the public forgot-password route and the admin
+// panel's "Reset Password" action so both produce identical tokens and links.
+// Throws if the email fails to send — callers decide whether to surface that.
+async function sendPasswordResetForUser(user) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
+  db.prepare(
+    'UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?'
+  ).run(token, expires, user.id);
+  const resetUrl = `${RESET_URL_BASE}?token=${token}`;
+  await sendPasswordResetEmail(user.email, resetUrl);
+}
+
+module.exports = {
+  hashPassword,
+  comparePassword,
+  generateToken,
+  verifyToken,
+  sendPasswordResetForUser,
+};
