@@ -305,6 +305,21 @@ function runMigrations() {
     )
   `);
 
+  // Password-reset columns on users. Additive — same attempt-and-swallow-
+  // duplicate pattern as the column blocks below. A reset token is a random hex
+  // string with a short expiry; both are cleared once the password is reset.
+  const USER_COLUMNS = [
+    'ALTER TABLE users ADD COLUMN password_reset_token TEXT',
+    'ALTER TABLE users ADD COLUMN password_reset_expires DATETIME',
+  ];
+  for (const stmt of USER_COLUMNS) {
+    try {
+      db.exec(stmt);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  }
+
   // Stripe subscription billing columns on businesses. Additive — same
   // attempt-and-swallow-duplicate pattern as NEW_COLUMNS. subscription_status
   // values: inactive (default), trialing, active, past_due, canceled.

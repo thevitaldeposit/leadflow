@@ -1,7 +1,9 @@
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 const { hashPassword, comparePassword, generateToken } = require('../services/authService');
+const { sendPasswordResetEmail } = require('../services/emailService');
 const { requireAuth } = require('../middleware/auth');
 
 // Mark the auth cookie Secure (HTTPS-only) in production; allow plain HTTP in dev.
@@ -208,6 +210,74 @@ router.post('/change-password', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('POST /auth/change-password error:', err);
     res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+// POST /api/auth/forgot-password — email a reset link if the account exists.
+// Public (no auth). Always returns 200 with the same body whether or not the
+// email matches an account, so the response never reveals which emails exist.
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return res.status(400).json({ error: 'email is required' });
+    }
+    const normEmail = String(email).trim().toLowerCase();
+
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normEmail);
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+      db.prepare(
+        'UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?'
+      ).run(token, expires, user.id);
+
+      const resetUrl = `https://joinstream.app/reset-password?token=${token}`;
+      try {
+        await sendPasswordResetEmail(user.email, resetUrl);
+      } catch (mailErr) {
+        // Log but don't surface — the generic 200 below keeps the endpoint from
+        // revealing whether the address exists, even on a mail failure.
+        console.error('POST /auth/forgot-password email send error:', mailErr);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /auth/forgot-password error:', err);
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+// POST /api/auth/reset-password — set a new password using a valid reset token.
+// Public (no auth). The token must match and not be expired.
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: 'token and newPassword are required' });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    const now = new Date().toISOString();
+    const user = db
+      .prepare('SELECT * FROM users WHERE password_reset_token = ? AND password_reset_expires > ?')
+      .get(String(token), now);
+    if (!user) {
+      return res.status(400).json({ error: 'Reset link is invalid or has expired' });
+    }
+
+    const passwordHash = await hashPassword(String(newPassword));
+    db.prepare(
+      'UPDATE users SET password_hash = ?, password_reset_token = NULL, password_reset_expires = NULL WHERE id = ?'
+    ).run(passwordHash, user.id);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /auth/reset-password error:', err);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 

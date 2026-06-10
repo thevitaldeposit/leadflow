@@ -54,6 +54,11 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
             />
+            <div className="mt-1.5 text-right">
+              <Link to="/forgot-password" className="text-sm font-medium text-accent hover:opacity-80">
+                Forgot your password?
+              </Link>
+            </div>
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}

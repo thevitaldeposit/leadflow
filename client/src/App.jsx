@@ -15,6 +15,8 @@ import StreamSignupsPage from './pages/StreamSignupsPage';
 import LoginPage from './pages/LoginPage';
 import LandingPage from './pages/LandingPage';
 import SignupPage from './pages/SignupPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import SubscriptionGate from './components/SubscriptionGate';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -86,6 +88,8 @@ function AppRoutes() {
           <>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="*" element={<Navigate to="/login" replace />} />
           </>
         )}
