@@ -124,4 +124,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
   getSignups: () => request('/signups'),
+
+  // Billing (Stripe subscriptions)
+  getSubscriptionStatus: () => request('/billing/subscription-status'),
+  createCheckoutSession: () => request('/billing/create-checkout-session', { method: 'POST' }),
+  createPortalSession: () => request('/billing/create-portal-session', { method: 'POST' }),
 };

@@ -14,6 +14,7 @@ import {
   CheckSquare,
   Database,
   Radio,
+  CreditCard,
   LogOut,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
@@ -38,6 +39,7 @@ const PAGE_TITLES = {
   '/new/upsheet': 'New Lead — Up Sheet',
   '/new/audio': 'New Lead — Audio Recording',
   '/settings': 'Settings',
+  '/billing': 'Billing',
 };
 
 let toastIdCounter = 0;
@@ -243,6 +245,11 @@ export default function Layout({ children }) {
           <NavLink to="/settings" className={linkClass}>
             <Settings size={18} />
             Settings
+          </NavLink>
+
+          <NavLink to="/billing" className={linkClass}>
+            <CreditCard size={18} />
+            Billing
           </NavLink>
         </nav>
 

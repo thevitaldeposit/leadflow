@@ -305,6 +305,24 @@ function runMigrations() {
     )
   `);
 
+  // Stripe subscription billing columns on businesses. Additive — same
+  // attempt-and-swallow-duplicate pattern as NEW_COLUMNS. subscription_status
+  // values: inactive (default), trialing, active, past_due, canceled.
+  // trial_days is set manually by an admin to grant a beta customer a free trial.
+  const BILLING_COLUMNS = [
+    'ALTER TABLE businesses ADD COLUMN stripe_customer_id TEXT',
+    'ALTER TABLE businesses ADD COLUMN stripe_subscription_id TEXT',
+    "ALTER TABLE businesses ADD COLUMN subscription_status TEXT DEFAULT 'inactive'",
+    'ALTER TABLE businesses ADD COLUMN trial_days INTEGER',
+  ];
+  for (const stmt of BILLING_COLUMNS) {
+    try {
+      db.exec(stmt);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  }
+
   // Attach business_id to every pre-existing table. SQLite has no
   // "ADD COLUMN IF NOT EXISTS", so we reuse the NEW_COLUMNS pattern above:
   // attempt the ALTER and swallow only the "duplicate column name" error, which

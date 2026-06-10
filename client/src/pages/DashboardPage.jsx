@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Dashboard from '../components/Dashboard';
 import VerticalTabs from '../components/VerticalTabs';
 import HomeServicesDashboard from '../components/home_services/HomeServicesDashboard';
+import SubscriptionBanner from '../components/SubscriptionBanner';
 import { getActiveVertical, setActiveVertical } from '../utils/verticalConfig';
 
 export default function DashboardPage() {
@@ -14,6 +15,7 @@ export default function DashboardPage() {
 
   return (
     <>
+      <SubscriptionBanner />
       <VerticalTabs active={vertical} onChange={handleTabChange} />
       {vertical === 'home_services' ? <HomeServicesDashboard /> : <Dashboard />}
     </>

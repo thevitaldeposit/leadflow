@@ -26,6 +26,7 @@ const paymentRouter = require('./routes/payment');
 const authRouter = require('./routes/auth');
 const signupsRouter = require('./routes/signups');
 const dashboardRouter = require('./routes/dashboard');
+const { router: billingRouter, handleStripeWebhook } = require('./routes/billing');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -36,6 +37,11 @@ const PORT = process.env.PORT || 3001;
 app.set('trust proxy', true);
 
 app.use(cors());
+
+// Stripe webhook must read the exact raw request body to verify the signature,
+// so it is registered with express.raw() BEFORE express.json() parses bodies.
+app.post('/api/webhook/stripe', express.raw({ type: 'application/json' }), handleStripeWebhook);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -123,6 +129,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/signups', signupsRouter);
 app.use('/api/dashboard', dashboardRouter);
+app.use('/api/billing', billingRouter);
 // Public payment page — must be before the SPA catch-all
 app.use('/pay', paymentRouter);
 

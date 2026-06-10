@@ -5,6 +5,7 @@ import NewLeadPage from './pages/NewLeadPage';
 import LeadDetailPage from './pages/LeadDetailPage';
 import LeadListPage from './pages/LeadListPage';
 import SettingsPage from './pages/SettingsPage';
+import BillingPage from './pages/BillingPage';
 import InventoryPage from './pages/InventoryPage';
 import FilteredLeadsPage from './pages/FilteredLeadsPage';
 import SchedulePage from './pages/SchedulePage';
@@ -48,11 +49,14 @@ function AppRoutes() {
           // Authenticated: the dashboard lives at its existing paths.
           <Route element={<DashboardLayout />}>
             <Route path="/" element={<DashboardPage />} />
+            {/* Stripe checkout success_url lands here — alias of the dashboard home. */}
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/new" element={<Navigate to="/new/transcript" replace />} />
             <Route path="/new/:type" element={<NewLeadPage />} />
             <Route path="/leads" element={<LeadListPage />} />
             <Route path="/leads/:id" element={<LeadDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/billing" element={<BillingPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/action-queue" element={<FilteredLeadsPage mode="action_queue" />} />
             <Route path="/opportunities" element={<FilteredLeadsPage mode="opportunities" />} />
