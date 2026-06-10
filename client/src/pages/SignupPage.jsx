@@ -221,6 +221,18 @@ function PaymentForm({ onComplete, onBack }) {
       <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
         <Lock size={12} /> Secured by Stripe · cancel anytime
       </p>
+
+      <p className="text-center text-xs leading-relaxed text-slate-400">
+        By subscribing you agree to our{' '}
+        <Link to="/terms" target="_blank" className="font-medium text-slate-500 hover:text-slate-700">
+          Terms of Service
+        </Link>{' '}
+        and{' '}
+        <Link to="/privacy" target="_blank" className="font-medium text-slate-500 hover:text-slate-700">
+          Privacy Policy
+        </Link>
+        .
+      </p>
     </form>
   );
 }

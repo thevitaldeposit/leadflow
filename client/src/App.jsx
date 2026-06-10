@@ -17,6 +17,8 @@ import LandingPage from './pages/LandingPage';
 import SignupPage from './pages/SignupPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import TermsOfServicePage from './pages/TermsOfServicePage';
 import SubscriptionGate from './components/SubscriptionGate';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -47,6 +49,10 @@ function AppRoutes() {
       <Routes>
         {/* Public Stream lead-capture flow — always reachable, no dashboard chrome. */}
         <Route path="/signup" element={<SignupPage />} />
+
+        {/* Public legal pages — reachable whether signed in or not. */}
+        <Route path="/privacy" element={<PrivacyPolicyPage />} />
+        <Route path="/terms" element={<TermsOfServicePage />} />
 
         {user ? (
           // Authenticated. Billing stays reachable outside the subscription gate

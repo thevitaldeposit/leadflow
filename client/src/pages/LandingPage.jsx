@@ -244,9 +244,17 @@ export default function LandingPage() {
       <footer className="border-t border-slate-100 bg-white">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 sm:flex-row">
           <Wordmark className="text-slate-900" />
-          <p className="text-sm text-slate-500">
-            © {new Date().getFullYear()} Stream. All rights reserved.
-          </p>
+          <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-6">
+            <Link to="/privacy" className="text-sm text-slate-500 transition-colors hover:text-slate-900">
+              Privacy Policy
+            </Link>
+            <Link to="/terms" className="text-sm text-slate-500 transition-colors hover:text-slate-900">
+              Terms of Service
+            </Link>
+            <p className="text-sm text-slate-500">
+              © {new Date().getFullYear()} Stream. All rights reserved.
+            </p>
+          </div>
         </div>
       </footer>
     </div>
