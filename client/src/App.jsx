@@ -19,6 +19,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsOfServicePage from './pages/TermsOfServicePage';
+import ContactPage from './pages/ContactPage';
 import SubscriptionGate from './components/SubscriptionGate';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -53,6 +54,7 @@ function AppRoutes() {
         {/* Public legal pages — reachable whether signed in or not. */}
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route path="/terms" element={<TermsOfServicePage />} />
+        <Route path="/contact" element={<ContactPage />} />
 
         {user ? (
           // Authenticated. Billing stays reachable outside the subscription gate

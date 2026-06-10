@@ -143,6 +143,14 @@ export const api = {
     }),
   getSignups: () => request('/signups'),
 
+  // Contact form — public, relays the message to info@joinstream.app via Resend
+  sendContactMessage: (body) =>
+    request('/contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
   // Billing (Stripe subscriptions)
   // Public, pre-account: creates the customer + incomplete subscription for the
   // signup payment step and returns a PaymentIntent client_secret for Elements.

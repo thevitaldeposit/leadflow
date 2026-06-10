@@ -81,6 +81,12 @@ export default function LandingPage() {
             <Wordmark />
             <div className="flex items-center gap-3 sm:gap-5">
               <Link
+                to="/contact"
+                className="hidden text-sm font-medium text-slate-300 transition-colors hover:text-white sm:inline"
+              >
+                Contact
+              </Link>
+              <Link
                 to="/login"
                 className="text-sm font-medium text-slate-300 transition-colors hover:text-white"
               >
@@ -245,6 +251,9 @@ export default function LandingPage() {
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 sm:flex-row">
           <Wordmark className="text-slate-900" />
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-6">
+            <Link to="/contact" className="text-sm text-slate-500 transition-colors hover:text-slate-900">
+              Contact
+            </Link>
             <Link to="/privacy" className="text-sm text-slate-500 transition-colors hover:text-slate-900">
               Privacy Policy
             </Link>
