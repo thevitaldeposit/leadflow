@@ -10,7 +10,7 @@ const PUBLISHABLE_KEY =
   'pk_live_51TeixSJFKsvbIGLcnr6Jw7s5kLyvSMOMO2EmH07TrJnlKTeusufXfnPyZhfSq9ZRouj4dh1vxZnsawcWim6ds6RO00lAmuT284';
 
 let _stripe;
-function getStripe() {
+export function getStripe() {
   if (!_stripe) _stripe = loadStripe(PUBLISHABLE_KEY);
   return _stripe;
 }

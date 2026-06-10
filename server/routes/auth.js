@@ -52,9 +52,23 @@ function publicUser(user) {
 }
 
 // POST /api/auth/register — create a new business + owner user, return a JWT.
+// The multi-step signup flow calls this AFTER payment succeeds, passing the
+// Stripe customer/subscription ids so the business lands subscribed. Twilio and
+// user phone numbers are no longer collected at signup — they're set later in
+// Settings — so they're omitted here (defaulting to NULL).
 router.post('/register', async (req, res) => {
   try {
-    const { businessName, ownerFirstName, email, password, twilioPhoneNumber, userPhoneNumber } = req.body || {};
+    const {
+      businessName,
+      firstName,
+      lastName,
+      ownerFirstName, // legacy alias for firstName
+      email,
+      password,
+      industryType,
+      stripeCustomerId,
+      stripeSubscriptionId,
+    } = req.body || {};
 
     if (!businessName || !email || !password) {
       return res.status(400).json({ error: 'businessName, email, and password are required' });
@@ -63,11 +77,16 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
     const normEmail = String(email).trim().toLowerCase();
+    const ownerFirst = firstName || ownerFirstName;
 
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(normEmail);
     if (existing) {
       return res.status(409).json({ error: 'An account with that email already exists' });
     }
+
+    // A Stripe customer id means payment was just completed on the signup form,
+    // so the business starts active; without one it starts inactive (soft-gated).
+    const subscriptionStatus = stripeCustomerId ? 'active' : 'inactive';
 
     const passwordHash = await hashPassword(String(password));
     const slug = uniqueSlug(slugify(businessName));
@@ -80,15 +99,20 @@ router.post('/register', async (req, res) => {
     try {
       const bizInfo = db
         .prepare(`
-          INSERT INTO businesses (name, owner_first_name, slug, twilio_phone_number, user_phone_number)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO businesses
+            (name, owner_first_name, owner_last_name, slug, industry_type,
+             stripe_customer_id, stripe_subscription_id, subscription_status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           String(businessName),
-          ownerFirstName ? String(ownerFirstName) : null,
+          ownerFirst ? String(ownerFirst) : null,
+          lastName ? String(lastName) : null,
           slug,
-          twilioPhoneNumber || null,
-          userPhoneNumber || null
+          industryType ? String(industryType) : null,
+          stripeCustomerId ? String(stripeCustomerId) : null,
+          stripeSubscriptionId ? String(stripeSubscriptionId) : null,
+          subscriptionStatus
         );
       businessId = Number(bizInfo.lastInsertRowid);
       const userInfo = db

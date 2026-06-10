@@ -9,6 +9,18 @@ const { requireAuth } = require('../middleware/auth');
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
 
+// A second Stripe client pinned to a known-good API version, used ONLY by the
+// embedded signup payment endpoint below. Creating a subscription and reading
+// its first invoice's PaymentIntent client_secret (for Stripe Elements) relies
+// on the `latest_invoice.payment_intent` expand path, which exists on
+// 2024-06-20 but was reshaped on newer ("Basil"+) API versions. Pinning keeps
+// the signup flow stable regardless of the account's default API version,
+// without changing the shared `stripe` client used by every other endpoint.
+const SIGNUP_API_VERSION = '2024-06-20';
+const signupStripe = STRIPE_SECRET_KEY
+  ? require('stripe')(STRIPE_SECRET_KEY, { apiVersion: SIGNUP_API_VERSION })
+  : null;
+
 const PRICE_ID = process.env.STRIPE_PRICE_ID;
 const DASHBOARD_URL = 'https://joinstream.app/dashboard?subscribed=true';
 const SIGNUP_URL = 'https://joinstream.app/signup';
@@ -53,6 +65,60 @@ async function ensureCustomer(business) {
   db.prepare('UPDATE businesses SET stripe_customer_id = ? WHERE id = ?').run(customer.id, business.id);
   return customer.id;
 }
+
+// POST /api/billing/public/create-subscription — UNAUTHENTICATED. Powers the
+// embedded (Stripe Elements) payment step of the multi-step signup form, which
+// runs before the account exists. Creates a Stripe customer and an incomplete
+// $149/mo subscription, then returns the first invoice's PaymentIntent
+// client_secret for the client to confirm with the PaymentElement. The account
+// itself is created afterward by POST /api/auth/register, which records the
+// returned customer/subscription ids and flips the business to active.
+router.post('/public/create-subscription', async (req, res) => {
+  if (!signupStripe) {
+    return res.status(503).json({ error: 'Billing is not configured' });
+  }
+  if (!PRICE_ID) {
+    return res.status(503).json({ error: 'Billing price is not configured' });
+  }
+  try {
+    const { email, name, businessName } = req.body || {};
+    if (!email) {
+      return res.status(400).json({ error: 'email is required' });
+    }
+
+    const customer = await signupStripe.customers.create({
+      email: String(email).trim().toLowerCase(),
+      name: name ? String(name) : undefined,
+      metadata: {
+        business_name: businessName ? String(businessName) : '',
+        source: 'signup',
+      },
+    });
+
+    const subscription = await signupStripe.subscriptions.create({
+      customer: customer.id,
+      items: [{ price: PRICE_ID, quantity: 1 }],
+      payment_behavior: 'default_incomplete',
+      payment_settings: { save_default_payment_method: 'on_subscription' },
+      expand: ['latest_invoice.payment_intent'],
+    });
+
+    const clientSecret =
+      subscription.latest_invoice &&
+      subscription.latest_invoice.payment_intent &&
+      subscription.latest_invoice.payment_intent.client_secret;
+
+    if (!clientSecret) {
+      console.error('[stripe] No PaymentIntent client_secret on signup subscription', subscription.id);
+      return res.status(500).json({ error: 'Could not initialize payment' });
+    }
+
+    res.json({ clientSecret, customerId: customer.id, subscriptionId: subscription.id });
+  } catch (err) {
+    console.error('POST /billing/public/create-subscription error:', err);
+    res.status(500).json({ error: 'Failed to start subscription' });
+  }
+});
 
 // POST /api/billing/create-checkout-session — start a $149/mo subscription
 // checkout for the authenticated business. Stores the Stripe customer id on the

@@ -32,6 +32,16 @@ export function AuthProvider({ children }) {
     return user;
   }, []);
 
+  // Create an account and log in in one step — the register response sets the
+  // same httpOnly cookie as login and returns the new user + business, so we
+  // flip to authenticated immediately (no extra getMe round-trip).
+  const register = useCallback(async (payload) => {
+    const { user, business } = await api.register(payload);
+    setUser(user);
+    setBusiness(business);
+    return { user, business };
+  }, []);
+
   const logout = useCallback(async () => {
     try { await api.logout(); } catch { /* clear locally regardless */ }
     setUser(null);
@@ -39,7 +49,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, business, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, business, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,10 +1,42 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { AudioLines, ArrowRight, CalendarCheck, Check } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import {
+  AudioLines, ArrowRight, ArrowLeft, Check, Lock, Loader2,
+  Trash2, Wind, Droplets, Trees, HardHat, Building2,
+} from 'lucide-react';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { api } from '../utils/api';
+import { getStripe } from '../utils/stripe';
+import { useAuth } from '../context/AuthContext';
+import { setActiveVertical } from '../utils/verticalConfig';
 
-const BUSINESS_TYPES = ['Dumpster Rental', 'HVAC', 'Plumbing', 'Landscaping', 'Roofing', 'Other'];
 const CALENDLY_URL = 'https://calendly.com/threetscapital/30min';
+const PRICE_LABEL = '$149/month';
+const TOTAL_STEPS = 4;
+
+// Industry options shown as a visual card selector on Step 2. The id doubles as
+// the value persisted to businesses.industry_type.
+const INDUSTRIES = [
+  { id: 'Dumpster Rental', Icon: Trash2 },
+  { id: 'HVAC', Icon: Wind },
+  { id: 'Plumbing', Icon: Droplets },
+  { id: 'Landscaping', Icon: Trees },
+  { id: 'Roofing', Icon: HardHat },
+  { id: 'Other', Icon: Building2 },
+];
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Stripe Elements appearance — tuned to the blue accent used across the app.
+const STRIPE_APPEARANCE = {
+  theme: 'stripe',
+  variables: {
+    colorPrimary: '#2563eb',
+    borderRadius: '8px',
+    fontSizeBase: '14px',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+  },
+};
 
 function Wordmark() {
   return (
@@ -15,18 +47,30 @@ function Wordmark() {
   );
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Subtle 4-segment progress bar at the top of the card.
+function StepBar({ step }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+        <div
+          key={i}
+          className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${
+            i < step ? 'bg-blue-600' : 'bg-slate-200'
+          }`}
+        />
+      ))}
+    </div>
+  );
+}
 
-function validate(form) {
-  const errors = {};
-  if (!form.firstName.trim()) errors.firstName = 'Required';
-  if (!form.businessName.trim()) errors.businessName = 'Required';
-  if (!form.businessType) errors.businessType = 'Please choose your business type';
-  if (!form.phone.trim()) errors.phone = 'Required';
-  else if (form.phone.replace(/\D/g, '').length < 7) errors.phone = 'Enter a valid phone number';
-  if (!form.email.trim()) errors.email = 'Required';
-  else if (!EMAIL_RE.test(form.email.trim())) errors.email = 'Enter a valid email address';
-  return errors;
+function Field({ label, error, children }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
+      {children}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  );
 }
 
 // Calendly inline embed. Loads the widget assets once, then renders the
@@ -37,8 +81,6 @@ function CalendlyEmbed({ name, email }) {
   const ref = useRef(null);
 
   useEffect(() => {
-    // Capture the node up front so the cleanup closure isn't reading a ref that
-    // may have changed (and to keep render/cleanup pointed at the same element).
     const node = ref.current;
     if (!node) return undefined;
 
@@ -87,33 +129,149 @@ function CalendlyEmbed({ name, email }) {
     <div
       ref={ref}
       className="calendly-inline-widget w-full overflow-hidden rounded-xl"
-      style={{ minWidth: '320px', height: '700px' }}
+      style={{ minWidth: '320px', height: '660px' }}
     />
   );
 }
 
-function Field({ label, error, children }) {
+// ── Step 3 payment form ──────────────────────────────────────────────────────
+// Lives inside <Elements> so the Stripe hooks resolve. Confirms the PaymentIntent
+// created server-side, then calls onComplete() (which registers the account and
+// advances). A failed payment surfaces an error and lets the user retry without
+// losing any of their info.
+function PaymentForm({ onComplete, onBack }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!stripe || !elements || processing) return;
+
+    setProcessing(true);
+    setError(null);
+
+    const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      // return_url is required by the API, but card payments resolve inline with
+      // redirect:'if_required' and never actually navigate there.
+      confirmParams: { return_url: `${window.location.origin}/signup` },
+      redirect: 'if_required',
+    });
+
+    if (confirmError) {
+      setError(confirmError.message || 'Payment failed. Please check your details and try again.');
+      setProcessing(false);
+      return;
+    }
+
+    if (paymentIntent && (paymentIntent.status === 'succeeded' || paymentIntent.status === 'processing')) {
+      try {
+        await onComplete();
+        // onComplete advances to Step 4, unmounting this form — nothing more to do.
+      } catch (err) {
+        setError(
+          err.message ||
+            'Your payment went through, but we hit a snag creating your account. Please contact support.'
+        );
+        setProcessing(false);
+      }
+      return;
+    }
+
+    setError('Payment could not be completed. Please try again.');
+    setProcessing(false);
+  };
+
   return (
-    <div>
-      <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
-      {children}
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
-    </div>
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <PaymentElement options={{ layout: 'tabs' }} />
+
+      {error && (
+        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+      )}
+
+      <button
+        type="submit"
+        disabled={!stripe || processing}
+        className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+      >
+        {processing ? (
+          <>
+            <Loader2 size={16} className="animate-spin" /> Processing…
+          </>
+        ) : (
+          <>
+            Start My Subscription
+            <ArrowRight size={17} className="transition-transform group-hover:translate-x-0.5" />
+          </>
+        )}
+      </button>
+
+      <button
+        type="button"
+        onClick={onBack}
+        disabled={processing}
+        className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+      >
+        <ArrowLeft size={15} /> Back
+      </button>
+
+      <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+        <Lock size={12} /> Secured by Stripe · cancel anytime
+      </p>
+    </form>
   );
 }
 
+// ── Step 1/2 validation ───────────────────────────────────────────────────────
+function validateAccount(form) {
+  const errors = {};
+  if (!form.firstName.trim()) errors.firstName = 'Required';
+  if (!form.lastName.trim()) errors.lastName = 'Required';
+  if (!form.email.trim()) errors.email = 'Required';
+  else if (!EMAIL_RE.test(form.email.trim())) errors.email = 'Enter a valid email address';
+  if (!form.password) errors.password = 'Required';
+  else if (form.password.length < 8) errors.password = 'Must be at least 8 characters';
+  if (!form.confirmPassword) errors.confirmPassword = 'Required';
+  else if (form.password !== form.confirmPassword) errors.confirmPassword = 'Passwords do not match';
+  return errors;
+}
+
+function validateBusiness(form) {
+  const errors = {};
+  if (!form.industryType) errors.industryType = 'Please choose your industry';
+  if (!form.businessName.trim()) errors.businessName = 'Required';
+  return errors;
+}
+
+// Identity of the inputs a Stripe subscription is created from. When unchanged
+// between Step 2 visits we reuse the existing PaymentIntent instead of creating
+// a duplicate (incomplete) subscription.
+function paymentSignature(form) {
+  return [form.email.trim().toLowerCase(), form.firstName.trim(), form.lastName.trim(), form.businessName.trim()].join('|');
+}
+
 export default function SignupPage() {
+  const navigate = useNavigate();
+  const { register } = useAuth();
+  const stripePromise = useMemo(() => getStripe(), []);
+
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     firstName: '',
-    businessName: '',
-    businessType: '',
-    phone: '',
+    lastName: '',
     email: '',
+    password: '',
+    confirmPassword: '',
+    industryType: '',
+    businessName: '',
   });
   const [errors, setErrors] = useState({});
-  const [submitError, setSubmitError] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [payment, setPayment] = useState(null); // { clientSecret, customerId, subscriptionId, sig }
+  const [preparing, setPreparing] = useState(false); // creating the Stripe subscription
+  const [prepError, setPrepError] = useState(null);
 
   useEffect(() => {
     document.title = 'Get Started — Stream';
@@ -129,178 +287,324 @@ export default function SignupPage() {
       errors[name] ? 'border-red-400' : 'border-slate-300'
     }`;
 
-  const onSubmit = async (e) => {
+  // Step 1 → 2
+  const submitAccount = (e) => {
     e.preventDefault();
-    setSubmitError(null);
+    const v = validateAccount(form);
+    if (Object.keys(v).length) {
+      setErrors(v);
+      return;
+    }
+    setStep(2);
+  };
 
-    const validationErrors = validate(form);
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
+  // Step 2 → 3: validate, then create (or reuse) the Stripe subscription so the
+  // PaymentElement on Step 3 has a client secret to confirm.
+  const submitBusiness = async (e) => {
+    e.preventDefault();
+    const v = validateBusiness(form);
+    if (Object.keys(v).length) {
+      setErrors(v);
       return;
     }
 
-    const payload = {
-      firstName: form.firstName.trim(),
-      businessName: form.businessName.trim(),
-      businessType: form.businessType,
-      phone: form.phone.trim(),
-      email: form.email.trim(),
-    };
+    const sig = paymentSignature(form);
+    if (payment && payment.sig === sig) {
+      setStep(3);
+      return;
+    }
 
-    setSubmitting(true);
+    setPreparing(true);
+    setPrepError(null);
     try {
-      await api.createSignup(payload);
-      setStep(2);
+      const data = await api.createSignupSubscription({
+        email: form.email.trim(),
+        name: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(),
+        businessName: form.businessName.trim(),
+      });
+      setPayment({ ...data, sig });
+      setStep(3);
     } catch (err) {
-      // A server error response (has a status) is something the user can act on
-      // — surface it and let them retry. A bare network error (no status, server
-      // unreachable) must never block the booking: stash the lead locally and
-      // move on to Screen 2 anyway.
-      if (err.status) {
-        setSubmitError(err.message || 'Something went wrong. Please try again.');
-      } else {
-        try {
-          const pending = JSON.parse(localStorage.getItem('stream_pending_signups') || '[]');
-          pending.push({ ...payload, savedAt: new Date().toISOString() });
-          localStorage.setItem('stream_pending_signups', JSON.stringify(pending));
-        } catch {
-          /* localStorage unavailable — nothing more we can do, still proceed */
-        }
-        setStep(2);
-      }
+      setPrepError(err.message || 'Could not start checkout. Please try again.');
     } finally {
-      setSubmitting(false);
+      setPreparing(false);
     }
   };
 
+  // Called after the PaymentElement confirms. Creates the account (attaching the
+  // Stripe ids), logs in, points the new tenant at the Home Services dashboard,
+  // and advances to the scheduling step. Throws so PaymentForm can surface errors.
+  const finishSignup = async () => {
+    await register({
+      firstName: form.firstName.trim(),
+      lastName: form.lastName.trim(),
+      email: form.email.trim(),
+      password: form.password,
+      businessName: form.businessName.trim(),
+      industryType: form.industryType,
+      stripeCustomerId: payment?.customerId,
+      stripeSubscriptionId: payment?.subscriptionId,
+    });
+    setActiveVertical('home_services');
+    setStep(4);
+  };
+
+  const containerWidth = step === 4 ? 'max-w-2xl' : 'max-w-lg';
+
   return (
-    <div className="h-screen w-full overflow-y-auto bg-slate-50">
+    <div className="min-h-screen w-full overflow-y-auto bg-slate-50">
+      <style>{`
+        @keyframes signup-step-in {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .signup-step { animation: signup-step-in 0.28s ease-out; }
+      `}</style>
+
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <Wordmark />
-          <span className="text-sm text-slate-500">Step {step} of 2</span>
+          <span className="text-sm text-slate-500">Step {step} of {TOTAL_STEPS}</span>
         </div>
       </header>
 
-      {step === 1 ? (
-        <div className="mx-auto flex max-w-md flex-col px-6 py-12 sm:py-16">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Get started</h1>
-            <p className="mt-2 text-slate-600">
-              Tell us a bit about your business and we'll get you set up.
-            </p>
-          </div>
+      <main className="mx-auto flex w-full flex-col px-4 py-10 sm:py-14">
+        <div className={`mx-auto w-full ${containerWidth}`}>
+          <StepBar step={step} />
 
-          <form onSubmit={onSubmit} className="mt-8 space-y-5 rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
-            <Field label="First name" error={errors.firstName}>
-              <input
-                type="text"
-                autoComplete="given-name"
-                autoFocus
-                value={form.firstName}
-                onChange={(e) => setField('firstName', e.target.value)}
-                placeholder="Jane"
-                className={inputClass('firstName')}
-              />
-            </Field>
+          <div key={step} className="signup-step mt-6">
+            {/* ── Step 1 — Account Info ─────────────────────────────────── */}
+            {step === 1 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create your account</h1>
+                <p className="mt-1.5 text-sm text-slate-600">Let's get you set up with Stream.</p>
 
-            <Field label="Business name" error={errors.businessName}>
-              <input
-                type="text"
-                autoComplete="organization"
-                value={form.businessName}
-                onChange={(e) => setField('businessName', e.target.value)}
-                placeholder="Acme Dumpster Rental"
-                className={inputClass('businessName')}
-              />
-            </Field>
+                <form onSubmit={submitAccount} className="mt-6 space-y-5">
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <Field label="First name" error={errors.firstName}>
+                      <input
+                        type="text"
+                        autoComplete="given-name"
+                        autoFocus
+                        value={form.firstName}
+                        onChange={(e) => setField('firstName', e.target.value)}
+                        placeholder="Jane"
+                        className={inputClass('firstName')}
+                      />
+                    </Field>
+                    <Field label="Last name" error={errors.lastName}>
+                      <input
+                        type="text"
+                        autoComplete="family-name"
+                        value={form.lastName}
+                        onChange={(e) => setField('lastName', e.target.value)}
+                        placeholder="Doe"
+                        className={inputClass('lastName')}
+                      />
+                    </Field>
+                  </div>
 
-            <Field label="Type of business" error={errors.businessType}>
-              <select
-                value={form.businessType}
-                onChange={(e) => setField('businessType', e.target.value)}
-                className={`${inputClass('businessType')} ${form.businessType ? '' : 'text-slate-400'}`}
-              >
-                <option value="" disabled>
-                  Select…
-                </option>
-                {BUSINESS_TYPES.map((t) => (
-                  <option key={t} value={t} className="text-slate-900">
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </Field>
+                  <Field label="Email address" error={errors.email}>
+                    <input
+                      type="email"
+                      autoComplete="email"
+                      value={form.email}
+                      onChange={(e) => setField('email', e.target.value)}
+                      placeholder="jane@acme.com"
+                      className={inputClass('email')}
+                    />
+                  </Field>
 
-            <Field label="Phone number" error={errors.phone}>
-              <input
-                type="tel"
-                autoComplete="tel"
-                value={form.phone}
-                onChange={(e) => setField('phone', e.target.value)}
-                placeholder="(555) 123-4567"
-                className={inputClass('phone')}
-              />
-            </Field>
+                  <Field label="Password" error={errors.password}>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={form.password}
+                      onChange={(e) => setField('password', e.target.value)}
+                      placeholder="At least 8 characters"
+                      className={inputClass('password')}
+                    />
+                  </Field>
 
-            <Field label="Email address" error={errors.email}>
-              <input
-                type="email"
-                autoComplete="email"
-                value={form.email}
-                onChange={(e) => setField('email', e.target.value)}
-                placeholder="jane@acme.com"
-                className={inputClass('email')}
-              />
-            </Field>
+                  <Field label="Confirm password" error={errors.confirmPassword}>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={form.confirmPassword}
+                      onChange={(e) => setField('confirmPassword', e.target.value)}
+                      placeholder="Re-enter your password"
+                      className={inputClass('confirmPassword')}
+                    />
+                  </Field>
 
-            {submitError && (
-              <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{submitError}</div>
+                  <button
+                    type="submit"
+                    className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                  >
+                    Next
+                    <ArrowRight size={17} className="transition-transform group-hover:translate-x-0.5" />
+                  </button>
+                </form>
+
+                <p className="mt-5 text-center text-sm text-slate-500">
+                  Already have an account?{' '}
+                  <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
+                    Sign in
+                  </Link>
+                </p>
+              </div>
             )}
 
-            <button
-              type="submit"
-              disabled={submitting}
-              className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
-            >
-              {submitting ? 'Saving…' : 'Next'}
-              {!submitting && (
-                <ArrowRight size={17} className="transition-transform group-hover:translate-x-0.5" />
-              )}
-            </button>
-          </form>
+            {/* ── Step 2 — Your Business ────────────────────────────────── */}
+            {step === 2 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tell us about your business</h1>
+                <p className="mt-1.5 text-sm text-slate-600">This tailors Stream to how you work.</p>
 
-          <p className="mt-5 text-center text-sm text-slate-500">
-            Already have an account?{' '}
-            <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-              Sign in
-            </Link>
-          </p>
-        </div>
-      ) : (
-        <div className="mx-auto max-w-3xl px-6 py-12 sm:py-14">
-          <div className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
-              <CalendarCheck size={24} />
-            </div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-              One last step — pick a time that works for you
-            </h1>
-            <p className="mx-auto mt-3 max-w-xl text-slate-600">
+                <form onSubmit={submitBusiness} className="mt-6 space-y-5">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">Industry type</label>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {INDUSTRIES.map(({ id, Icon }) => {
+                        const selected = form.industryType === id;
+                        return (
+                          <button
+                            type="button"
+                            key={id}
+                            onClick={() => setField('industryType', id)}
+                            className={`flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-center transition-all ${
+                              selected
+                                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/30'
+                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Icon size={22} className={selected ? 'text-blue-600' : 'text-slate-400'} />
+                            <span className={`text-xs font-medium ${selected ? 'text-blue-700' : 'text-slate-600'}`}>
+                              {id}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {errors.industryType && <p className="mt-1.5 text-xs text-red-600">{errors.industryType}</p>}
+                  </div>
+
+                  {/* Business name appears once an industry is chosen. */}
+                  {form.industryType && (
+                    <div className="signup-step">
+                      <Field label="Business name" error={errors.businessName}>
+                        <input
+                          type="text"
+                          autoComplete="organization"
+                          autoFocus
+                          value={form.businessName}
+                          onChange={(e) => setField('businessName', e.target.value)}
+                          placeholder="Acme Dumpster Rental"
+                          className={inputClass('businessName')}
+                        />
+                      </Field>
+                    </div>
+                  )}
+
+                  {prepError && (
+                    <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{prepError}</div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={preparing}
+                    className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+                  >
+                    {preparing ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" /> Preparing checkout…
+                      </>
+                    ) : (
+                      <>
+                        Next
+                        <ArrowRight size={17} className="transition-transform group-hover:translate-x-0.5" />
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStep(1)}
+                    disabled={preparing}
+                    className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                  >
+                    <ArrowLeft size={15} /> Back
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* ── Step 3 — Payment ──────────────────────────────────────── */}
+            {step === 3 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">Payment</h1>
+                <p className="mt-1.5 text-sm text-slate-600">Start your subscription to activate Stream.</p>
+
+                {/* Order summary */}
+                <div className="mt-6 flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Stream — {PRICE_LABEL}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">Full access to your operations dashboard.</p>
+                  </div>
+                  <p className="whitespace-nowrap text-base font-bold text-slate-900">$149</p>
+                </div>
+
+                <div className="mt-6">
+                  {payment?.clientSecret ? (
+                    <Elements
+                      stripe={stripePromise}
+                      options={{ clientSecret: payment.clientSecret, appearance: STRIPE_APPEARANCE }}
+                    >
+                      <PaymentForm onComplete={finishSignup} onBack={() => setStep(2)} />
+                    </Elements>
+                  ) : (
+                    <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+                      <Loader2 size={16} className="animate-spin" /> Loading secure checkout…
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Step 4 — Schedule Setup Call ──────────────────────────── */}
+            {step === 4 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+                <div className="text-center">
+                  <h1 className="text-2xl font-bold tracking-tight text-slate-900">You're in! 🎉</h1>
+                  <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+                    Schedule your setup call to activate your advanced booking and extraction features.
+                  </p>
+                </div>
+
+                <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
+                  <CalendlyEmbed name={`${form.firstName} ${form.lastName}`.trim()} email={form.email.trim()} />
+                </div>
+
+                <div className="mt-5 text-center">
+                  <button
+                    onClick={() => navigate('/dashboard')}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"
+                  >
+                    Skip for now <ArrowRight size={15} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {step === 4 && (
+            <div className="mt-5 flex items-center justify-center gap-2 text-center text-sm text-slate-500">
+              <Check size={15} className="flex-shrink-0 text-blue-600" />
               We'll walk you through everything on a quick 30-minute call.
-            </p>
-          </div>
-
-          <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-            <CalendlyEmbed name={form.firstName} email={form.email} />
-          </div>
-
-          <div className="mt-5 flex items-center justify-center gap-2 text-center text-sm text-slate-500">
-            <Check size={15} className="flex-shrink-0 text-blue-600" />
-            Not ready to book yet? No problem — we'll reach out to you soon.
-          </div>
+            </div>
+          )}
         </div>
-      )}
+      </main>
     </div>
   );
 }

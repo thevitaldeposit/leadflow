@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Zap } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -65,6 +66,13 @@ export default function LoginPage() {
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-sm text-gray-500">
+          Don't have an account?{' '}
+          <Link to="/signup" className="font-medium text-accent hover:opacity-80">
+            Sign up
+          </Link>
+        </p>
       </div>
     </div>
   );

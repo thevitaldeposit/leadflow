@@ -4,7 +4,7 @@ const db = require('../db/database');
 // subscription_status powers the dashboard soft-gate banner; the Stripe ids stay
 // server-side and are read directly from the businesses table where needed.
 const BUSINESS_COLUMNS =
-  'id, name, owner_first_name, slug, twilio_phone_number, user_phone_number, subscription_status, created_at';
+  'id, name, owner_first_name, slug, twilio_phone_number, user_phone_number, subscription_status, industry_type, onboarding_complete, created_at';
 
 // The default tenant. Until every client sends a token, tokenless requests on
 // shared routes (leads/upload/devices) and Twilio calls that don't match a known

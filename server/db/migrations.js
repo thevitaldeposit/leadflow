@@ -323,6 +323,24 @@ function runMigrations() {
     }
   }
 
+  // Signup-flow columns on businesses. Additive — same attempt-and-swallow
+  // pattern. industry_type stores the vertical chosen at signup (Dumpster
+  // Rental, HVAC, …). owner_last_name carries the last name collected on the
+  // signup form. onboarding_complete gates the post-signup dashboard banner
+  // (1 once the setup call is done; the banner hides as soon as it flips).
+  const SIGNUP_COLUMNS = [
+    'ALTER TABLE businesses ADD COLUMN industry_type TEXT',
+    'ALTER TABLE businesses ADD COLUMN owner_last_name TEXT',
+    'ALTER TABLE businesses ADD COLUMN onboarding_complete INTEGER DEFAULT 0',
+  ];
+  for (const stmt of SIGNUP_COLUMNS) {
+    try {
+      db.exec(stmt);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  }
+
   // Attach business_id to every pre-existing table. SQLite has no
   // "ADD COLUMN IF NOT EXISTS", so we reuse the NEW_COLUMNS pattern above:
   // attempt the ALTER and swallow only the "duplicate column name" error, which

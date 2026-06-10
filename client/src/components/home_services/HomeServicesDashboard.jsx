@@ -14,6 +14,7 @@ import VoicemailBadge from './VoicemailBadge';
 import MissedCallBadge from './MissedCallBadge';
 import { getSettings, saveSettings } from '../../utils/settings';
 import { useNavigate } from 'react-router-dom';
+import OnboardingBanner from '../OnboardingBanner';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -1355,6 +1356,9 @@ export default function HomeServicesDashboard() {
 
       {/* Morning Brief banner — renders only in the morning, until dismissed */}
       <MorningBrief />
+
+      {/* Post-signup onboarding nudge — until the setup call activates features */}
+      <OnboardingBanner />
 
       {/* Top metric tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">

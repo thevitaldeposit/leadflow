@@ -22,6 +22,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     }),
+  register: (body) =>
+    request('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   getMe: () => request('/auth/me'),
   changePassword: (currentPassword, newPassword) =>
@@ -126,6 +132,14 @@ export const api = {
   getSignups: () => request('/signups'),
 
   // Billing (Stripe subscriptions)
+  // Public, pre-account: creates the customer + incomplete subscription for the
+  // signup payment step and returns a PaymentIntent client_secret for Elements.
+  createSignupSubscription: (body) =>
+    request('/billing/public/create-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   getSubscriptionStatus: () => request('/billing/subscription-status'),
   createCheckoutSession: () => request('/billing/create-checkout-session', { method: 'POST' }),
   createPortalSession: () => request('/billing/create-portal-session', { method: 'POST' }),
