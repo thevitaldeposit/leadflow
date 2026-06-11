@@ -689,6 +689,47 @@ router.post('/twilio/dial-status', (req, res) => {
   });
 });
 
+// Build the voicemail fallback TwiML (greeting + record). Shared by the <Dial>
+// action handler so a genuinely unanswered call still reaches voicemail. The
+// callback URLs are recomputed from the request so they resolve to the public
+// tunnel host (see the host note in /twilio/voice).
+function buildVoicemailTwiml(req) {
+  const publicHost = req.get('x-forwarded-host') || req.get('host');
+  const greetingUrl = `${req.protocol}://${publicHost}/Valley_Binz_Voicemail.mp3`;
+  const voicemailCallbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/voicemail-recording`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${greetingUrl}</Play>
+  <Record maxLength="120" playBeep="true" recordingStatusCallback="${voicemailCallbackUrl}" recordingStatusCallbackMethod="POST" recordingStatusCallbackEvent="completed"/>
+  <Say voice="Polly.Joanna" language="en-US">Thank you. Goodbye.</Say>
+  <Hangup/>
+</Response>`;
+}
+
+// POST /api/webhook/twilio/dial-action — the <Dial> action callback. Twilio
+// posts here when the forwarded (owner) leg ends, with a DialCallStatus telling
+// us why. If the owner ANSWERED and the call then ended ('completed'/'answered'),
+// hang up immediately so the caller is NOT dumped into voicemail. Only fall
+// through to the voicemail greeting when the owner never picked up
+// ('no-answer' / 'busy' / 'failed' / 'canceled'). Recording + transcription run
+// independently off the <Dial> recordingStatusCallback and are unaffected.
+router.post('/twilio/dial-action', (req, res) => {
+  const status = String(req.body.DialCallStatus || '').toLowerCase();
+  console.log(`[webhook/dial-action] DialCallStatus=${status || 'none'} for ${req.body.CallSid || 'unknown'}`);
+
+  if (status === 'completed' || status === 'answered') {
+    console.log('[webhook/dial-action]   owner answered then hung up — ending call (no voicemail)');
+    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Hangup/>
+</Response>`);
+    return;
+  }
+
+  console.log(`[webhook/dial-action]   owner did not answer (${status || 'none'}) — playing voicemail greeting`);
+  res.type('text/xml').send(buildVoicemailTwiml(req));
+});
+
 // POST /api/webhook/twilio/voice — TwiML response to forward and record calls
 router.post('/twilio/voice', (req, res) => {
   try {
@@ -731,13 +772,16 @@ router.post('/twilio/voice', (req, res) => {
     const callbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/recording`;
     console.log(`[webhook/voice]   recording callback: ${callbackUrl}`);
 
-    // Voicemail fallback assets: the greeting is served statically from
-    // server/public, and the recorded message posts to a dedicated endpoint.
-    const greetingUrl = `${req.protocol}://${publicHost}/Valley_Binz_Voicemail.mp3`;
+    // Voicemail fallback assets: the recording notice plays before dialing; the
+    // greeting + voicemail recording live in the <Dial> action handler
+    // (/twilio/dial-action), which decides whether voicemail should play at all.
     const recordingNoticeUrl = `${req.protocol}://${publicHost}/call_recording_notice_bella.mp3`;
-    const voicemailCallbackUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/voicemail-recording`;
-    console.log(`[webhook/voice]   voicemail greeting: ${greetingUrl}`);
-    console.log(`[webhook/voice]   voicemail callback: ${voicemailCallbackUrl}`);
+
+    // The <Dial> action callback. Twilio posts the DialCallStatus here when the
+    // owner leg ends; the handler hangs up on an answered call and only plays
+    // voicemail when the owner never answered. This replaces the old fall-through.
+    const dialActionUrl = `${req.protocol}://${publicHost}/api/webhook/twilio/dial-action`;
+    console.log(`[webhook/voice]   dial action callback: ${dialActionUrl}`);
 
     // Status callback for the forwarded leg. Fires when the owner's leg ends so
     // an unanswered call (no-answer/busy/canceled) can be logged as a missed
@@ -749,20 +793,18 @@ router.post('/twilio/voice', (req, res) => {
     // the forwarded leg with its original STIR/SHAKEN attestation intact.
     console.log(`[webhook/voice]   dial callerId: (passthrough — original caller ${from})`);
 
-    // If the owner doesn't pick up within 20s, the <Dial> ends and TwiML execution
-    // falls through to the voicemail greeting + recording. Answered-call recording
-    // (record-from-answer-dual → /twilio/recording) is unchanged.
+    // When the <Dial> ends, Twilio posts the DialCallStatus to the action URL and
+    // continues with whatever TwiML it returns (verbs after </Dial> are never
+    // reached). /twilio/dial-action hangs up on an answered call and only plays
+    // the voicemail greeting + recording when the owner never picked up. Answered-
+    // call recording (record-from-answer-dual → /twilio/recording) is unchanged.
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${recordingNoticeUrl}</Play>
   <Pause length="2"/>
-  <Dial timeout="20" record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
+  <Dial timeout="20" action="${dialActionUrl}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${callbackUrl}" recordingStatusCallbackMethod="POST">
     <Number statusCallback="${dialStatusUrl}" statusCallbackEvent="completed" statusCallbackMethod="POST">${userPhone}</Number>
   </Dial>
-  <Play>${greetingUrl}</Play>
-  <Record maxLength="120" playBeep="true" recordingStatusCallback="${voicemailCallbackUrl}" recordingStatusCallbackMethod="POST" recordingStatusCallbackEvent="completed"/>
-  <Say voice="Polly.Joanna" language="en-US">Thank you. Goodbye.</Say>
-  <Hangup/>
 </Response>`;
 
     console.log(`[webhook/voice]   ✓ returning TwiML — dialing ${userPhone}`);
