@@ -39,6 +39,46 @@ async function sendPasswordResetEmail(to, resetUrl) {
   });
 }
 
+// Welcome email sent right after a new account is created at signup. Greets the
+// owner by first name and points them to the dashboard + setup call.
+async function sendWelcomeEmail({ to, firstName }) {
+  const greetingName = firstName ? escapeHtml(firstName) : 'there';
+
+  const html = `
+  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; color: #111827;">
+    <h1 style="font-size: 22px; font-weight: 600; margin: 0 0 20px;">You're in. Welcome to Stream.</h1>
+    <p style="font-size: 15px; line-height: 1.6; color: #374151; margin: 0 0 16px;">Hi ${greetingName},</p>
+    <p style="font-size: 15px; line-height: 1.6; color: #374151; margin: 0 0 16px;">
+      Your Stream account is all set up and ready to go.
+    </p>
+    <p style="font-size: 15px; line-height: 1.6; color: #374151; margin: 0 0 8px;">Here's what happens next:</p>
+    <ul style="font-size: 15px; line-height: 1.6; color: #374151; margin: 0 0 24px; padding-left: 20px;">
+      <li>Log in to your dashboard at joinstream.app</li>
+      <li>Schedule your setup call to activate your advanced booking and extraction features</li>
+      <li>Once your setup is complete, every customer call will be automatically captured and turned into an actionable lead</li>
+    </ul>
+    <a href="https://joinstream.app/dashboard" style="display: inline-block; background: #6366f1; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 500; padding: 12px 24px; border-radius: 8px;">
+      Go to Dashboard
+    </a>
+    <p style="font-size: 15px; line-height: 1.6; color: #374151; margin: 32px 0 0;">
+      If you have any questions before your setup call, reply to this email or reach out at info@joinstream.app.
+    </p>
+    <p style="font-size: 15px; line-height: 1.6; color: #374151; margin: 24px 0 0;">
+      Talk soon,<br />The Stream Team
+    </p>
+    <p style="font-size: 12px; line-height: 1.6; color: #9ca3af; margin: 32px 0 0; border-top: 1px solid #e5e7eb; padding-top: 16px;">
+      Stream by Three T's Capital LLC · info@joinstream.app · <a href="https://joinstream.app/unsubscribe" style="color: #9ca3af;">joinstream.app/unsubscribe</a>
+    </p>
+  </div>`;
+
+  return getResend().emails.send({
+    from: FROM_ADDRESS,
+    to,
+    subject: "Welcome to Stream — let's get you set up",
+    html,
+  });
+}
+
 // Escape user-supplied text before interpolating it into the contact emails so a
 // submission can't inject markup into the HTML body.
 function escapeHtml(str) {
@@ -96,4 +136,4 @@ async function sendContactConfirmation({ name, email }) {
   });
 }
 
-module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation };
+module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail };

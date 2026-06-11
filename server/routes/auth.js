@@ -8,6 +8,7 @@ const {
   sendPasswordResetForUser,
 } = require('../services/authService');
 const { requireAuth } = require('../middleware/auth');
+const { sendWelcomeEmail } = require('../services/emailService');
 
 // Mark the auth cookie Secure (HTTPS-only) in production; allow plain HTTP in dev.
 const isProd = process.env.NODE_ENV === 'production';
@@ -139,6 +140,14 @@ router.post('/register', async (req, res) => {
 
     const token = generateToken(user, business);
     setAuthCookie(res, token);
+
+    // Fire-and-forget the welcome email — a Resend failure must never block or
+    // fail account creation, so we don't await it and we swallow/log errors.
+    if (subscriptionStatus === 'active') {
+      sendWelcomeEmail({ to: normEmail, firstName: ownerFirst }).catch((mailErr) => {
+        console.error('POST /auth/register welcome email send error:', mailErr);
+      });
+    }
 
     res.status(201).json({ token, user: publicUser(user), business });
   } catch (err) {
