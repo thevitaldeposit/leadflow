@@ -128,33 +128,7 @@ export default function Layout({ children }) {
       <aside className="w-60 flex-shrink-0 bg-sidebar flex flex-col">
         {/* Logo */}
         <div className="h-14 flex items-center px-5 border-b border-white/10">
-          <div className="flex items-center gap-2.5">
-            <svg
-              width="28"
-              height="28"
-              viewBox="0 0 32 32"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <path
-                d="M30 16 L23 3.88 L9 3.88 L2 16 L9 28.12 L23 28.12 Z"
-                fill="#10b981"
-                stroke="#10b981"
-                strokeWidth="2.5"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M21 10.5 C21 8, 11 8, 11 12 C11 15, 21 17, 21 20 C21 24, 11 24, 11 21.5"
-                fill="none"
-                stroke="#ffffff"
-                strokeWidth="2.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span className="text-white font-extrabold text-xl tracking-tight">Stream</span>
-          </div>
+          <img src="/assets/stream-logo.png" alt="Stream" style={{ width: '150px' }} />
         </div>
 
         {/* Nav */}
