@@ -160,6 +160,14 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  // Public, pre-account: validates a signup promo code and returns the promotion
+  // code id + discount label to apply when (re)creating the subscription.
+  validatePromo: (code) =>
+    request('/billing/validate-promo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    }),
   getSubscriptionStatus: () => request('/billing/subscription-status'),
   createCheckoutSession: () => request('/billing/create-checkout-session', { method: 'POST' }),
   createPortalSession: () => request('/billing/create-portal-session', { method: 'POST' }),

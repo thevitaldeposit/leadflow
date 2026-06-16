@@ -237,6 +237,71 @@ function PaymentForm({ onComplete, onBack }) {
   );
 }
 
+// ── Step 3, no-payment variant ────────────────────────────────────────────────
+// A 100%-off promo zeroes the first invoice, so Stripe has nothing to charge and
+// there's no PaymentIntent to confirm. We swap the card form for this simple
+// confirm button, which registers the account directly via onComplete().
+function FreeCheckout({ onComplete, onBack }) {
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleConfirm = async () => {
+    if (processing) return;
+    setProcessing(true);
+    setError(null);
+    try {
+      await onComplete();
+      // onComplete advances to Step 4, unmounting this component.
+    } catch (err) {
+      setError(err.message || 'We hit a snag creating your account. Please contact support.');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg bg-green-50 px-3 py-2.5 text-sm text-green-700">
+        No payment due today — your promo code covers your subscription.
+      </div>
+
+      {error && (
+        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+      )}
+
+      <button
+        type="button"
+        onClick={handleConfirm}
+        disabled={processing}
+        className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+      >
+        {processing ? (
+          <>
+            <Loader2 size={16} className="animate-spin" /> Processing…
+          </>
+        ) : (
+          <>
+            Start My Subscription
+            <ArrowRight size={17} className="transition-transform group-hover:translate-x-0.5" />
+          </>
+        )}
+      </button>
+
+      <button
+        type="button"
+        onClick={onBack}
+        disabled={processing}
+        className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+      >
+        <ArrowLeft size={15} /> Back
+      </button>
+
+      <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+        <Lock size={12} /> Secured by Stripe · cancel anytime
+      </p>
+    </div>
+  );
+}
+
 // ── Step 1/2 validation ───────────────────────────────────────────────────────
 function validateAccount(form) {
   const errors = {};
@@ -260,9 +325,16 @@ function validateBusiness(form) {
 
 // Identity of the inputs a Stripe subscription is created from. When unchanged
 // between Step 2 visits we reuse the existing PaymentIntent instead of creating
-// a duplicate (incomplete) subscription.
-function paymentSignature(form) {
-  return [form.email.trim().toLowerCase(), form.firstName.trim(), form.lastName.trim(), form.businessName.trim()].join('|');
+// a duplicate (incomplete) subscription. An applied promo code is part of the
+// identity so editing earlier steps re-creates the subscription with it intact.
+function paymentSignature(form, promotionCode = '') {
+  return [
+    form.email.trim().toLowerCase(),
+    form.firstName.trim(),
+    form.lastName.trim(),
+    form.businessName.trim(),
+    promotionCode || '',
+  ].join('|');
 }
 
 export default function SignupPage() {
@@ -281,9 +353,15 @@ export default function SignupPage() {
     businessName: '',
   });
   const [errors, setErrors] = useState({});
-  const [payment, setPayment] = useState(null); // { clientSecret, customerId, subscriptionId, sig }
+  const [payment, setPayment] = useState(null); // { clientSecret | noPaymentRequired, customerId, subscriptionId, sig }
   const [preparing, setPreparing] = useState(false); // creating the Stripe subscription
   const [prepError, setPrepError] = useState(null);
+
+  // Promo code (Step 3, optional)
+  const [promoInput, setPromoInput] = useState('');
+  const [promo, setPromo] = useState(null); // { promotionCode, discount } once applied
+  const [promoApplying, setPromoApplying] = useState(false);
+  const [promoError, setPromoError] = useState(null);
 
   useEffect(() => {
     document.title = 'Get Started — Stream';
@@ -320,7 +398,7 @@ export default function SignupPage() {
       return;
     }
 
-    const sig = paymentSignature(form);
+    const sig = paymentSignature(form, promo?.promotionCode);
     if (payment && payment.sig === sig) {
       setStep(3);
       return;
@@ -333,6 +411,7 @@ export default function SignupPage() {
         email: form.email.trim(),
         name: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(),
         businessName: form.businessName.trim(),
+        promotionCode: promo?.promotionCode,
       });
       setPayment({ ...data, sig });
       setStep(3);
@@ -340,6 +419,37 @@ export default function SignupPage() {
       setPrepError(err.message || 'Could not start checkout. Please try again.');
     } finally {
       setPreparing(false);
+    }
+  };
+
+  // Step 3: validate a promo code, then re-create the subscription with it so the
+  // amount due (and the PaymentElement, or the no-payment path) reflects the
+  // discount. The promotion code id from validation is what Stripe needs.
+  const applyPromo = async () => {
+    const code = promoInput.trim();
+    if (!code || promoApplying) return;
+
+    setPromoApplying(true);
+    setPromoError(null);
+    try {
+      const result = await api.validatePromo(code);
+      if (!result || !result.valid) {
+        setPromoError('Invalid promo code');
+        return;
+      }
+
+      const data = await api.createSignupSubscription({
+        email: form.email.trim(),
+        name: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(),
+        businessName: form.businessName.trim(),
+        promotionCode: result.promotionCode,
+      });
+      setPayment({ ...data, sig: paymentSignature(form, result.promotionCode) });
+      setPromo({ promotionCode: result.promotionCode, discount: result.discount });
+    } catch (err) {
+      setPromoError(err.message || 'Could not apply promo code. Please try again.');
+    } finally {
+      setPromoApplying(false);
     }
   };
 
@@ -566,9 +676,50 @@ export default function SignupPage() {
                   <p className="whitespace-nowrap text-base font-bold text-slate-900">$149</p>
                 </div>
 
+                {/* Promo code — optional. Validating re-creates the subscription
+                    with the discount applied. */}
+                <div className="mt-4">
+                  <label htmlFor="promoCode" className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Promo Code
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="promoCode"
+                      type="text"
+                      value={promoInput}
+                      onChange={(e) => {
+                        setPromoInput(e.target.value);
+                        if (promoError) setPromoError(null);
+                      }}
+                      disabled={!!promo || promoApplying}
+                      placeholder="Enter promo code"
+                      className={`w-full rounded-lg border px-4 py-2.5 text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 ${
+                        promoError ? 'border-red-400' : 'border-slate-300'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={applyPromo}
+                      disabled={!!promo || promoApplying || !promoInput.trim()}
+                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {promoApplying ? <Loader2 size={15} className="animate-spin" /> : 'Apply'}
+                    </button>
+                  </div>
+                  {promo && (
+                    <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-green-600">
+                      <Check size={13} /> {promo.discount} applied
+                    </p>
+                  )}
+                  {promoError && <p className="mt-1.5 text-xs text-red-600">{promoError}</p>}
+                </div>
+
                 <div className="mt-6">
-                  {payment?.clientSecret ? (
+                  {payment?.noPaymentRequired ? (
+                    <FreeCheckout onComplete={finishSignup} onBack={() => setStep(2)} />
+                  ) : payment?.clientSecret ? (
                     <Elements
+                      key={payment.clientSecret}
                       stripe={stripePromise}
                       options={{ clientSecret: payment.clientSecret, appearance: STRIPE_APPEARANCE }}
                     >

@@ -54,6 +54,23 @@ function epochToISO(epoch) {
   return epoch ? new Date(epoch * 1000).toISOString() : null;
 }
 
+// Build a short, human-readable label for a coupon's discount, e.g. "100% off"
+// or "$50.00 off". Shown on the signup payment step when a promo code is applied.
+function describeDiscount(coupon) {
+  if (!coupon) return 'Discount applied';
+  if (coupon.percent_off) {
+    return `${coupon.percent_off}% off`;
+  }
+  if (coupon.amount_off) {
+    const amount = (coupon.amount_off / 100).toLocaleString('en-US', {
+      style: 'currency',
+      currency: (coupon.currency || 'usd').toUpperCase(),
+    });
+    return `${amount} off`;
+  }
+  return 'Discount applied';
+}
+
 // Ensure the business has a Stripe customer, creating + persisting one on first
 // use. Returns the customer id.
 async function ensureCustomer(business) {
@@ -81,7 +98,7 @@ router.post('/public/create-subscription', async (req, res) => {
     return res.status(503).json({ error: 'Billing price is not configured' });
   }
   try {
-    const { email, name, businessName } = req.body || {};
+    const { email, name, businessName, promotionCode } = req.body || {};
     if (!email) {
       return res.status(400).json({ error: 'email is required' });
     }
@@ -95,20 +112,36 @@ router.post('/public/create-subscription', async (req, res) => {
       },
     });
 
-    const subscription = await signupStripe.subscriptions.create({
+    const subParams = {
       customer: customer.id,
       items: [{ price: PRICE_ID, quantity: 1 }],
       payment_behavior: 'default_incomplete',
       payment_settings: { save_default_payment_method: 'on_subscription' },
       expand: ['latest_invoice.payment_intent'],
-    });
+    };
+    // Optional promo: the client sends a validated promotion code id (promo_…),
+    // resolved from the customer-facing code by POST /validate-promo.
+    if (promotionCode) {
+      subParams.promotion_code = String(promotionCode);
+    }
 
+    const subscription = await signupStripe.subscriptions.create(subParams);
+
+    const invoice = subscription.latest_invoice;
     const clientSecret =
-      subscription.latest_invoice &&
-      subscription.latest_invoice.payment_intent &&
-      subscription.latest_invoice.payment_intent.client_secret;
+      invoice && invoice.payment_intent && invoice.payment_intent.client_secret;
 
     if (!clientSecret) {
+      // A 100%-off promo zeroes the first invoice, so Stripe collects nothing and
+      // never creates a PaymentIntent. Tell the client to skip the card step and
+      // finish signup directly rather than erroring out.
+      if (invoice && invoice.amount_due === 0) {
+        return res.json({
+          noPaymentRequired: true,
+          customerId: customer.id,
+          subscriptionId: subscription.id,
+        });
+      }
       console.error('[stripe] No PaymentIntent client_secret on signup subscription', subscription.id);
       return res.status(500).json({ error: 'Could not initialize payment' });
     }
@@ -117,6 +150,45 @@ router.post('/public/create-subscription', async (req, res) => {
   } catch (err) {
     console.error('POST /billing/public/create-subscription error:', err);
     res.status(500).json({ error: 'Failed to start subscription' });
+  }
+});
+
+// POST /api/billing/validate-promo — UNAUTHENTICATED. Validates a customer-facing
+// promo code during signup (before the account exists). Resolves the code to its
+// Stripe promotion code id and a human-readable discount label so the payment
+// step can confirm validity, show the discount, and pass the id back to
+// /public/create-subscription to actually apply it.
+router.post('/validate-promo', async (req, res) => {
+  if (!signupStripe) {
+    return res.status(503).json({ error: 'Billing is not configured' });
+  }
+  try {
+    const { code } = req.body || {};
+    const trimmed = code ? String(code).trim() : '';
+    if (!trimmed) {
+      return res.status(400).json({ error: 'code is required' });
+    }
+
+    // Stripe matches the customer-facing code case-sensitively; restricting to
+    // active codes means expired/archived ones correctly read as invalid.
+    const { data } = await signupStripe.promotionCodes.list({
+      code: trimmed,
+      active: true,
+      limit: 1,
+    });
+    const promo = data && data[0];
+    if (!promo) {
+      return res.json({ valid: false });
+    }
+
+    res.json({
+      valid: true,
+      promotionCode: promo.id,
+      discount: describeDiscount(promo.coupon),
+    });
+  } catch (err) {
+    console.error('POST /billing/validate-promo error:', err);
+    res.status(500).json({ error: 'Failed to validate promo code' });
   }
 });
 
