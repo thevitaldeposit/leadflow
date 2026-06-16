@@ -206,6 +206,13 @@ function classifyForQueue(e, now, cfg) {
     return { inQueue: !!reason, expired: false, reason };
   }
 
+  // Dead-end leads — the AI flagged no follow-up needed (customer declined, not
+  // interested, going elsewhere). They stay in All Leads but never enter the
+  // Action Queue, even when a stale/ASAP signal would otherwise pull them in.
+  if (state.isDead) {
+    return { inQueue: false, expired: false, reason: null };
+  }
+
   if (!state.isOpportunity || !state.isActive) {
     return { inQueue: false, expired: false, reason: null };
   }

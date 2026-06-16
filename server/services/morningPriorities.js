@@ -17,6 +17,22 @@ function safeParse(json) {
   try { return JSON.parse(json); } catch { return {}; }
 }
 
+// Dead-end detection — mirrors verticalConfig.isDeadLead on the client. Leads
+// the AI flagged as needing no follow-up (customer declined / not interested /
+// going elsewhere) must never drive the morning push, even if they'd otherwise
+// read as stale.
+function isDeadLead(lead, vd) {
+  if (vd.requiresFollowUp === false) return true;
+  const followUp = vd.followUpDate || lead.follow_up_date || null;
+  const rec = String(vd.aiRecommendation || '').toLowerCase();
+  const deadLanguage = /no follow.?up|not interested|customer declined|\bdeclined\b|went with another|going elsewhere|no further action|won'?t proceed/.test(rec);
+  if (!followUp && deadLanguage) return true;
+  const outcome = String(lead.outcome || vd.outcome || '').toLowerCase();
+  const declinedOutcome = /not[_ ]?interested|declined|cancell?ed/.test(outcome);
+  if (vd.intentLevel === 'cold' && declinedOutcome) return true;
+  return false;
+}
+
 function endOfDay(d) {
   const c = new Date(d); c.setHours(23, 59, 59, 999); return c;
 }
@@ -86,7 +102,7 @@ function getActionState(lead, now) {
   if (vd.urgency === 'ASAP') priority += 150;
   priority += Math.min(100, ageMs / MS_HOUR);
 
-  return { vd, intent, followUpDueToday, stale, bucket, priority, isActive };
+  return { vd, intent, followUpDueToday, stale, bucket, priority, isActive, isDead: isDeadLead(lead, vd) };
 }
 
 function leadFullName(lead, vd) {
@@ -105,7 +121,7 @@ function computeMorningSummary(now = new Date(), businessId = getDefaultBusiness
 
   const enriched = leads
     .map(l => ({ lead: l, state: getActionState(l, now) }))
-    .filter(e => e.state.isActive);
+    .filter(e => e.state.isActive && !e.state.isDead);
 
   const priorityLeads = enriched
     .filter(e => ['follow_up_due', 'high_intent_new', 'stale', 'waiting'].includes(e.state.bucket))

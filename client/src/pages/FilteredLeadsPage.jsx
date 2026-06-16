@@ -15,7 +15,7 @@ const MODE_CONFIG = {
       endOfTomorrow.setDate(endOfTomorrow.getDate() + 1);
       endOfTomorrow.setHours(23, 59, 59, 999);
       return enriched.filter(e =>
-        e.state.isOpportunity && e.state.isActive && (
+        e.state.isOpportunity && e.state.isActive && !e.state.isDead && (
           (e.state.followUpDate && e.state.followUpDate <= endOfTomorrow) ||
           e.state.stale ||
           (e.state.intent === 'high' && !e.state.jobStatus)

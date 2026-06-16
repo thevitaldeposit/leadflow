@@ -61,7 +61,13 @@ const HOME_SERVICES_ACTION_RULE = `ACTION INTELLIGENCE: You must also produce si
 - followUpReason: one short sentence explaining why this follow-up timing was chosen (e.g. "Customer requested callback tomorrow morning").
 - aiRecommendation: one concise action sentence the owner can read at a glance (e.g. "Call back today — customer agreed to $545 for Monday delivery").
 - outcome: REQUIRED, never null. Use: "quote_requested" if customer asked for a price, "quote_sent" if a price was given on the call, "booked" if customer agreed to price AND date, "not_serviceable" if outside service area or wrong service. Default: "quote_requested".
-- estimatedRevenue: numeric dollars (no currency symbol) parsed from quotedPrice if a clear price was discussed, otherwise null. If quotedPrice is a range ("$300-$400"), use the midpoint.`;
+- estimatedRevenue: numeric dollars (no currency symbol) parsed from quotedPrice if a clear price was discussed, otherwise null. If quotedPrice is a range ("$300-$400"), use the midpoint.
+- requiresFollowUp: boolean. Default true. Set to FALSE only when it is explicitly clear the customer has no interest and there is nothing to follow up on:
+    • The customer explicitly declined or said they are not interested.
+    • The customer reacted negatively to the price and ended the call.
+    • The call ended with no interest expressed ("that's alright then, thank you", "never mind", "I'll pass", "not interested").
+    • The customer said they will handle it themselves or have found / gone with another provider.
+  Set to TRUE for every other lead — anything with any possibility of converting or following up. When in doubt, set true; only set false when the customer's lack of interest is explicit. When you set requiresFollowUp to false, also set intentLevel to "cold" and write aiRecommendation as a brief note such as "No follow-up needed — customer not interested.".`;
 
 const BOOKING_SIGNAL_RULE = `BOOKING DETECTION: After extracting all fields, evaluate whether a booking occurred by checking for these 5 signals:
 1. price_agreed — The customer explicitly accepted a quoted price (e.g. "sounds good", "that works", "ok", "I'll take it", "let's do it", "perfect", "deal").
@@ -140,6 +146,7 @@ ${BOOKING_SIGNAL_RULE}`,
   "followUpAnchorDate": string | null,
   "followUpReason": string | null,
   "aiRecommendation": string | null,
+  "requiresFollowUp": boolean,
   "outcome": "quote_requested" | "quote_sent" | "booked" | "not_serviceable",
   "estimatedRevenue": number | null,
   "bookingSignalsDetected": array of zero or more from ["price_agreed", "size_confirmed", "delivery_date_set", "location_given", "payment_intent"],
@@ -177,6 +184,7 @@ ${HOME_SERVICES_ACTION_RULE}`,
   "followUpAnchorDate": string | null,
   "followUpReason": string | null,
   "aiRecommendation": string | null,
+  "requiresFollowUp": boolean,
   "estimatedRevenue": number | null,
   "notes": string | null,
   "confidence": number (0-100),
@@ -513,6 +521,20 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
       // was received (extraction runs as the voicemail comes in).
       verticalSpecific.followUpDate = new Date(Date.now() + 60 * 60 * 1000).toISOString();
       verticalSpecific.followUpReason = 'Voicemail received — call back within the hour';
+    }
+
+    // Dead-end calls: the AI flagged that no follow-up is needed — the customer
+    // declined, isn't interested, or is going elsewhere. Never assign a
+    // follow-up date (it would resurface the lead in the Action Queue) and mark
+    // it cold + not interested. Limited to plain inquiries: a lead carrying
+    // booking or opportunity signals has real interest and is left untouched.
+    if (verticalSpecific.requiresFollowUp === false && verticalSpecific.job_status === 'inquiry') {
+      verticalSpecific.followUpDate = null;
+      verticalSpecific.followUpReason = 'Customer not interested — no follow-up needed';
+      verticalSpecific.intentLevel = 'cold';
+      if (!verticalSpecific.outcome || verticalSpecific.outcome === 'quote_requested') {
+        verticalSpecific.outcome = 'not_interested';
+      }
     }
   }
 

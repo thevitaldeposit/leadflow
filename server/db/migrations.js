@@ -462,6 +462,39 @@ function runMigrations() {
     console.log(`[migrations] Rebuilt inventory_pool with UNIQUE(business_id, size) — ${after}/${before} rows preserved`);
   }
 
+  // ── Action Queue cleanup: clear follow-up dates on dead-end leads ──────────
+  // Leads the AI flagged as dead ends — "no follow-up needed", "not interested",
+  // customer declined — should never carry a follow-up date, or they linger in
+  // the dashboard Action Queue. Clear the follow-up date (both the
+  // vertical_data.followUpDate that drives the queue and the flat column) and
+  // stamp requiresFollowUp=false so the queue's dead-lead filter catches them.
+  // They stay in All Leads for the record. Idempotent: only rows that still
+  // carry a follow-up date are rewritten, so re-runs are no-ops.
+  const DEAD_END_RE = /no follow.?up|not interested|customer declined|\bdeclined\b|went with another|going elsewhere|no further action|won'?t proceed/i;
+  const deadCandidates = db.prepare(
+    "SELECT id, vertical_data, follow_up_date FROM leads WHERE vertical = 'home_services' AND vertical_data IS NOT NULL"
+  ).all();
+  const clearDeadFollowUp = db.prepare(
+    'UPDATE leads SET vertical_data = ?, follow_up_date = NULL WHERE id = ?'
+  );
+  let deadCleaned = 0;
+  for (const row of deadCandidates) {
+    let vd;
+    try { vd = JSON.parse(row.vertical_data); } catch { continue; }
+    const hasFollowUp = vd.followUpDate != null || row.follow_up_date != null;
+    if (!hasFollowUp) continue;
+    const isDeadEnd = vd.requiresFollowUp === false || DEAD_END_RE.test(String(vd.aiRecommendation || ''));
+    if (!isDeadEnd) continue;
+    vd.followUpDate = null;
+    vd.requiresFollowUp = false;
+    if (!vd.followUpReason) vd.followUpReason = 'Customer not interested — no follow-up needed';
+    clearDeadFollowUp.run(JSON.stringify(vd), row.id);
+    deadCleaned++;
+  }
+  if (deadCleaned > 0) {
+    console.log(`[migrations] Cleared follow-up date on ${deadCleaned} dead-end home_services lead(s)`);
+  }
+
   console.log('Database migrations completed successfully.');
 }
 

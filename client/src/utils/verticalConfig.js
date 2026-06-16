@@ -66,6 +66,7 @@ export const HOME_SERVICES_OUTCOMES = [
   { value: 'booked', label: 'Booked' },
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
+  { value: 'not_interested', label: 'Not Interested' },
   { value: 'not_serviceable', label: 'Not Serviceable' },
 ];
 
@@ -292,6 +293,30 @@ export function parseFollowUpDate(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// Dead-end detection: the AI flagged the call as needing no follow-up — the
+// customer declined, isn't interested, or is going elsewhere. Such leads stay
+// in All Leads for the record but must never enter the Action Queue. Mirrors the
+// three signals the spec calls out so it also catches pre-existing leads that
+// predate the requiresFollowUp flag.
+export function isDeadLead(lead, vd = parseVerticalData(lead)) {
+  // 1. Explicit AI signal (new extractions + migrated leads).
+  if (vd.requiresFollowUp === false) return true;
+
+  const followUp = vd.followUpDate || lead?.follow_up_date || null;
+  const rec = String(vd.aiRecommendation || '').toLowerCase();
+  const deadLanguage = /no follow.?up|not interested|customer declined|\bdeclined\b|went with another|going elsewhere|no further action|won'?t proceed/.test(rec);
+
+  // 2. No follow-up date + a recommendation that says no follow-up is needed.
+  if (!followUp && deadLanguage) return true;
+
+  // 3. Cold intent paired with a declining outcome.
+  const outcome = String(lead?.outcome || vd.outcome || '').toLowerCase();
+  const declinedOutcome = /not[_ ]?interested|declined|cancell?ed/.test(outcome);
+  if (vd.intentLevel === 'cold' && declinedOutcome) return true;
+
+  return false;
+}
+
 // Returns an enrichment object for a lead that powers card + dashboard.
 // {
 //   intent: 'high' | 'warm' | 'cold',
@@ -308,6 +333,9 @@ export function parseFollowUpDate(value) {
 // }
 export function getLeadActionState(lead, now = new Date()) {
   const vd = parseVerticalData(lead);
+  // Dead-end leads (customer declined / not interested) stay in All Leads but
+  // are kept out of the Action Queue — see classifyForQueue.
+  const isDead = isDeadLead(lead, vd);
   const jobStatus = lead?.job_status || vd.job_status || null;
   const status = lead?.status || 'new';
   // Missed calls are NOT leads — they live only in the dashboard Action Queue
@@ -458,6 +486,7 @@ export function getLeadActionState(lead, now = new Date()) {
     isActive,
     isOpportunity,
     isOperational,
+    isDead,
     jobStatus,
   };
 }
