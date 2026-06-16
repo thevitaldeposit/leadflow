@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   AudioLines, ArrowRight, ArrowLeft, Check, Lock, Loader2,
@@ -131,9 +131,30 @@ function loadCalendlyWidget() {
 // etc.), degrades to a plain booking link so the user is never stranded on a
 // blank box. The container carries an explicit height/min-height so it can never
 // collapse to zero.
-function CalendlyEmbed({ name, email }) {
+function CalendlyEmbed({ name, email, onScheduled }) {
   const ref = useRef(null);
   const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'failed'
+
+  // Auto-advance once the user completes a booking. Calendly's inline widget
+  // posts a `calendly.event_scheduled` message to the parent window on success;
+  // we verify the origin is Calendly's before reacting, then wait ~1.5s so the
+  // widget's own confirmation registers before redirecting (same destination as
+  // "Skip for now"). The listener is torn down on unmount so it can't fire on a
+  // later step or page.
+  useEffect(() => {
+    if (!onScheduled) return undefined;
+    let redirectTimer;
+    const handleMessage = (event) => {
+      if (typeof event.origin !== 'string' || !event.origin.includes('calendly.com')) return;
+      if (!event.data || event.data.event !== 'calendly.event_scheduled') return;
+      redirectTimer = setTimeout(() => onScheduled(), 1500);
+    };
+    window.addEventListener('message', handleMessage);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      if (redirectTimer) clearTimeout(redirectTimer);
+    };
+  }, [onScheduled]);
 
   useEffect(() => {
     const node = ref.current;
@@ -430,6 +451,11 @@ export default function SignupPage() {
   const navigate = useNavigate();
   const { register } = useAuth();
   const stripePromise = useMemo(() => getStripe(), []);
+
+  // Destination after the setup-call step — used by both "Skip for now" and the
+  // auto-advance that fires when a booking completes. Memoized so passing it to
+  // CalendlyEmbed doesn't re-subscribe its message listener on every render.
+  const goToDashboard = useCallback(() => navigate('/dashboard'), [navigate]);
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
@@ -834,12 +860,16 @@ export default function SignupPage() {
                 </div>
 
                 <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
-                  <CalendlyEmbed name={`${form.firstName} ${form.lastName}`.trim()} email={form.email.trim()} />
+                  <CalendlyEmbed
+                    name={`${form.firstName} ${form.lastName}`.trim()}
+                    email={form.email.trim()}
+                    onScheduled={goToDashboard}
+                  />
                 </div>
 
                 <div className="mt-5 text-center">
                   <button
-                    onClick={() => navigate('/dashboard')}
+                    onClick={goToDashboard}
                     className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"
                   >
                     Skip for now <ArrowRight size={15} />
