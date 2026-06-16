@@ -11,6 +11,14 @@ import { useAuth } from '../context/AuthContext';
 import { setActiveVertical } from '../utils/verticalConfig';
 
 const CALENDLY_URL = 'https://calendly.com/threetscapital/30min';
+// Calendly's inline widget needs a real, explicit height: a min-height alone lets
+// the injected iframe's `height:100%` collapse to nothing (renders blank). We
+// reserve this much vertical space so the box can never collapse while loading.
+const CALENDLY_HEIGHT = 680;
+// If the widget script is blocked (ad/privacy blockers very commonly block
+// *.calendly.com) or never loads, surface a plain booking link by this deadline so
+// the user is never stranded on an empty box.
+const CALENDLY_FALLBACK_MS = 6000;
 const PRICE_LABEL = '$149/month';
 const TOTAL_STEPS = 4;
 
@@ -73,17 +81,18 @@ function Field({ label, error, children }) {
   );
 }
 
-// Calendly inline embed. Loads the widget assets once, then renders the
-// scheduling calendar into our container with the prospect's name + email
-// pre-filled. Clears the container on re-render so React StrictMode's double
-// effect invocation in dev can't stack two widgets.
-function CalendlyEmbed({ name, email }) {
-  const ref = useRef(null);
+// Loads Calendly's stylesheet + widget script exactly once for the whole app and
+// resolves when `window.Calendly` is ready (rejects if the script errors or is
+// blocked). Reusing the same tags across mounts keeps the inline widget from
+// fighting React's mount/unmount cycle as the user moves between signup steps —
+// the previous hand-rolled per-mount injection had no error/timeout handling, so
+// a blocked or slow script left the box permanently blank with no way to recover.
+let calendlyPromise = null;
+function loadCalendlyWidget() {
+  if (typeof window !== 'undefined' && window.Calendly) return Promise.resolve();
+  if (calendlyPromise) return calendlyPromise;
 
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return undefined;
-
+  calendlyPromise = new Promise((resolve, reject) => {
     const CSS_ID = 'calendly-widget-css';
     if (!document.getElementById(CSS_ID)) {
       const link = document.createElement('link');
@@ -93,44 +102,117 @@ function CalendlyEmbed({ name, email }) {
       document.head.appendChild(link);
     }
 
-    let cancelled = false;
-    const render = () => {
-      if (cancelled || !window.Calendly) return;
-      node.innerHTML = '';
-      window.Calendly.initInlineWidget({
-        url: `${CALENDLY_URL}?hide_gdpr_banner=1`,
-        parentElement: node,
-        prefill: { name: name || '', email: email || '' },
-      });
-    };
-
     const SCRIPT_ID = 'calendly-widget-js';
-    const existing = document.getElementById(SCRIPT_ID);
-    if (window.Calendly) {
-      render();
-    } else if (existing) {
-      existing.addEventListener('load', render, { once: true });
-    } else {
-      const script = document.createElement('script');
+    let script = document.getElementById(SCRIPT_ID);
+    if (!script) {
+      script = document.createElement('script');
       script.id = SCRIPT_ID;
       script.src = 'https://assets.calendly.com/assets/external/widget.js';
       script.async = true;
-      script.addEventListener('load', render, { once: true });
       document.body.appendChild(script);
     }
 
+    script.addEventListener('load', () => {
+      if (window.Calendly) resolve();
+      else reject(new Error('Calendly loaded but did not initialize'));
+    }, { once: true });
+    script.addEventListener('error', () => {
+      // Drop the cached promise so a later mount can retry from a clean slate.
+      calendlyPromise = null;
+      reject(new Error('Calendly widget script blocked or failed to load'));
+    }, { once: true });
+  });
+  return calendlyPromise;
+}
+
+// Calendly inline embed. Renders the scheduling calendar into our container with
+// the prospect's name + email pre-filled. Shows a loading state until the iframe
+// actually appears and, if the widget can't load (blocked script, slow network,
+// etc.), degrades to a plain booking link so the user is never stranded on a
+// blank box. The container carries an explicit height/min-height so it can never
+// collapse to zero.
+function CalendlyEmbed({ name, email }) {
+  const ref = useRef(null);
+  const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'failed'
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return undefined;
+
+    let cancelled = false;
+    let observer;
+
+    // Safety net: if the iframe never shows up, fall back to the plain link.
+    const fallbackTimer = setTimeout(() => {
+      if (!cancelled && !node.querySelector('iframe')) setStatus('failed');
+    }, CALENDLY_FALLBACK_MS);
+
+    loadCalendlyWidget()
+      .then(() => {
+        if (cancelled || !window.Calendly) return;
+        node.innerHTML = '';
+        window.Calendly.initInlineWidget({
+          url: `${CALENDLY_URL}?hide_gdpr_banner=1`,
+          parentElement: node,
+          prefill: { name: name || '', email: email || '' },
+        });
+
+        // Calendly appends the iframe asynchronously; clear the loading overlay as
+        // soon as it shows up (re-checks via a short-lived observer if not yet).
+        const markReady = () => { if (!cancelled) setStatus('ready'); };
+        if (node.querySelector('iframe')) {
+          markReady();
+        } else {
+          observer = new MutationObserver(() => {
+            if (node.querySelector('iframe')) {
+              markReady();
+              observer.disconnect();
+            }
+          });
+          observer.observe(node, { childList: true, subtree: true });
+        }
+      })
+      .catch(() => { if (!cancelled) setStatus('failed'); });
+
     return () => {
       cancelled = true;
+      clearTimeout(fallbackTimer);
+      if (observer) observer.disconnect();
       node.innerHTML = '';
     };
   }, [name, email]);
 
   return (
-    <div
-      ref={ref}
-      className="calendly-inline-widget w-full overflow-hidden rounded-xl"
-      style={{ minWidth: '320px', height: '660px' }}
-    />
+    <div className="relative w-full" style={{ minHeight: `${CALENDLY_HEIGHT}px` }}>
+      <div
+        ref={ref}
+        className="calendly-inline-widget w-full overflow-hidden rounded-xl"
+        style={{ minWidth: '320px', height: `${CALENDLY_HEIGHT}px`, minHeight: `${CALENDLY_HEIGHT}px` }}
+      />
+
+      {status === 'loading' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-xl bg-white">
+          <Loader2 size={22} className="animate-spin text-blue-600" />
+          <p className="text-sm text-slate-500">Loading scheduler…</p>
+        </div>
+      )}
+
+      {status === 'failed' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-6 text-center">
+          <p className="max-w-xs text-sm text-slate-600">
+            We couldn't load the scheduler here — it may be blocked by your browser.
+          </p>
+          <a
+            href={CALENDLY_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+          >
+            Open the booking page <ArrowRight size={15} />
+          </a>
+        </div>
+      )}
+    </div>
   );
 }
 
