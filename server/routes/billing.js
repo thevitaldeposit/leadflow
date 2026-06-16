@@ -26,6 +26,30 @@ const DASHBOARD_URL = 'https://joinstream.app/dashboard?subscribed=true';
 const SIGNUP_URL = 'https://joinstream.app/signup';
 const PORTAL_RETURN_URL = 'https://joinstream.app/billing';
 
+// Cancel a business's Stripe subscription so it stops being charged once the
+// account is deactivated or deleted. Shared by the admin deactivate flow and the
+// admin delete-account endpoint. No-ops cleanly when there is no subscription on
+// file (free / 100%-off test accounts) or when Stripe isn't configured, and
+// treats an already-gone subscription as a success rather than an error. Returns
+// a small { cancelled, reason?, subscriptionId? } summary for logging. Does NOT
+// delete the Stripe customer object — only cancels the recurring subscription.
+async function cancelSubscriptionForBusiness(business) {
+  const subId = business && business.stripe_subscription_id;
+  if (!subId) return { cancelled: false, reason: 'none found' };
+  if (!stripe) return { cancelled: false, reason: 'Stripe not configured' };
+  try {
+    await stripe.subscriptions.cancel(subId);
+    return { cancelled: true, subscriptionId: subId };
+  } catch (err) {
+    // A subscription that's already canceled/missing on Stripe's side shouldn't
+    // block deactivating or deleting the account.
+    if (err && (err.code === 'resource_missing' || err.statusCode === 404)) {
+      return { cancelled: false, reason: 'subscription not found in Stripe' };
+    }
+    throw err;
+  }
+}
+
 // Guard for the authed endpoints — Stripe must be configured to use them.
 function ensureStripe(res) {
   if (!stripe) {
@@ -369,4 +393,4 @@ function handleStripeWebhook(req, res) {
   }
 }
 
-module.exports = { router, handleStripeWebhook };
+module.exports = { router, handleStripeWebhook, cancelSubscriptionForBusiness };

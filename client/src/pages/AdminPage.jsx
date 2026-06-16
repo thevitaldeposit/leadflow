@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Shield, Radio, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Shield, Radio, Loader2, CheckCircle2, AlertCircle, Trash2, X } from 'lucide-react';
 import { api } from '../utils/api';
 
 function formatDate(dateStr) {
@@ -57,6 +57,7 @@ function ActionButton({ onClick, disabled, color = 'gray', children }) {
     blue: 'text-blue-700 border-blue-200 hover:bg-blue-50',
     yellow: 'text-yellow-700 border-yellow-200 hover:bg-yellow-50',
     gray: 'text-gray-600 border-gray-200 hover:bg-gray-50',
+    red: 'text-red-700 border-red-200 hover:bg-red-50',
   };
   return (
     <button
@@ -69,6 +70,84 @@ function ActionButton({ onClick, disabled, color = 'gray', children }) {
   );
 }
 
+// Confirmation modal for the destructive Delete Account action. The delete
+// button stays disabled until the admin types the exact business name (or the
+// word DELETE as a fallback for unnamed accounts), making an accidental
+// permanent delete effectively impossible.
+function DeleteAccountModal({ business, busy, onCancel, onConfirm }) {
+  const [confirmText, setConfirmText] = useState('');
+  const expected = (business.name || '').trim();
+  // Accept the business name when it has one; always accept DELETE as a fallback.
+  const ready = confirmText.trim() === 'DELETE' || (expected && confirmText.trim() === expected);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
+        <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-600">
+              <Trash2 size={16} />
+            </div>
+            <h3 className="text-base font-semibold text-gray-800">Delete account</h3>
+          </div>
+          <button onClick={onCancel} disabled={busy} className="text-gray-400 hover:text-gray-600 disabled:opacity-50">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-3 px-5 py-4 text-sm text-gray-600">
+          <p>
+            You're about to permanently delete{' '}
+            <span className="font-semibold text-gray-900">{business.name || 'this account'}</span>
+            {business.owner_email ? ` (${business.owner_email})` : ''}.
+          </p>
+          <p>
+            This <span className="font-semibold text-red-600">cannot be undone</span>. It cancels
+            the account's Stripe subscription and removes all of its data — leads, calls, timeline,
+            inventory, settings — along with its login. No other account is affected.
+          </p>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Type{' '}
+              <span className="font-mono font-semibold text-gray-700">
+                {expected || 'DELETE'}
+              </span>{' '}
+              to confirm
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              disabled={busy}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-red-400 focus:outline-none disabled:bg-gray-50"
+              placeholder={expected || 'DELETE'}
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-3">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!ready || busy}
+            className="inline-flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            {busy ? 'Deleting…' : 'Delete permanently'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [businesses, setBusinesses] = useState([]);
   const [signups, setSignups] = useState([]);
@@ -78,6 +157,8 @@ export default function AdminPage() {
   const [busyKey, setBusyKey] = useState(null); // `${id}:${action}` while a row action runs
   const [trialFor, setTrialFor] = useState(null); // business id whose trial input is open
   const [trialDays, setTrialDays] = useState('14');
+  const [deleteTarget, setDeleteTarget] = useState(null); // business pending deletion (opens modal)
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -121,6 +202,26 @@ export default function AdminPage() {
     }
   };
 
+  // Permanently delete the account in deleteTarget. The endpoint is transactional,
+  // so on failure nothing was removed — surface the error and keep the row.
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const result = await api.deleteBusiness(deleteTarget.id);
+      setDeleteTarget(null);
+      await reloadBusinesses();
+      const stripeNote = result.stripeSubscriptionCancelled
+        ? 'Stripe subscription cancelled'
+        : 'no Stripe subscription';
+      flash('success', `${result.businessName || 'Account'} deleted (${stripeNote})`);
+    } catch (err) {
+      flash('error', err.message || 'Delete failed — nothing was removed');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const submitTrial = async (id) => {
     const days = parseInt(trialDays, 10);
     if (!Number.isInteger(days) || days <= 0) {
@@ -148,6 +249,15 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-8 p-6">
+      {deleteTarget && (
+        <DeleteAccountModal
+          business={deleteTarget}
+          busy={deleting}
+          onCancel={() => !deleting && setDeleteTarget(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
@@ -315,6 +425,15 @@ export default function AdminPage() {
                         >
                           {busyKey === `${b.id}:reset` ? 'Sending…' : 'Reset Password'}
                         </ActionButton>
+                        {b.id !== 1 && (
+                          <ActionButton
+                            color="red"
+                            disabled={rowBusy}
+                            onClick={() => setDeleteTarget(b)}
+                          >
+                            Delete Account
+                          </ActionButton>
+                        )}
                       </div>
 
                       {/* Inline trial input */}

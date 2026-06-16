@@ -190,4 +190,8 @@ export const api = {
     request(`/admin/businesses/${id}/onboarding`, { method: 'PATCH' }),
   resetBusinessPassword: (id) =>
     request(`/admin/businesses/${id}/reset-password`, { method: 'POST' }),
+  // Permanently delete an account: cancels its Stripe subscription and removes
+  // all of its business_id-scoped data plus its business + user records. Blocked
+  // server-side for business_id = 1.
+  deleteBusiness: (id) => request(`/admin/businesses/${id}`, { method: 'DELETE' }),
 };
