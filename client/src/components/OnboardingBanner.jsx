@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { CalendarClock, ArrowRight, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { CALENDLY_URL } from '../utils/calendly';
 
 // Post-signup nudge shown at the top of the dashboard until the new customer's
 // setup call is done. Amber/informational (not alarming). It disappears once
 // dismissed (persisted per-business in localStorage) OR once the business's
 // onboarding_complete flag flips to true on the server. Valley Binz
 // (business_id = 1) never sees it.
-const CALENDLY_URL = 'https://calendly.com/threetscapital/30min';
 
 const dismissKey = (businessId) => `stream:onboardingBannerDismissed:${businessId}`;
 

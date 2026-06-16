@@ -9,8 +9,8 @@ import { api } from '../utils/api';
 import { getStripe } from '../utils/stripe';
 import { useAuth } from '../context/AuthContext';
 import { setActiveVertical } from '../utils/verticalConfig';
+import { CALENDLY_URL } from '../utils/calendly';
 
-const CALENDLY_URL = 'https://calendly.com/threetscapital/30min';
 // Calendly's inline widget needs a real, explicit height: a min-height alone lets
 // the injected iframe's `height:100%` collapse to nothing (renders blank). We
 // reserve this much vertical space so the box can never collapse while loading.
@@ -184,9 +184,16 @@ function CalendlyEmbed({ name, email }) {
 
   return (
     <div className="relative w-full" style={{ minHeight: `${CALENDLY_HEIGHT}px` }}>
+      {/* Deliberately NOT given Calendly's `calendly-inline-widget` class:
+          widget.js runs a one-time auto-init on load that scans for that class
+          and initializes each match from its `data-url`. With no data-url it
+          injects a blank, urlless iframe that races/overrides our own
+          initInlineWidget call below — an iframe appears (so we'd mark "ready")
+          but renders blank. A plain container guarantees only our init, with the
+          correct URL, ever populates it. */}
       <div
         ref={ref}
-        className="calendly-inline-widget w-full overflow-hidden rounded-xl"
+        className="w-full overflow-hidden rounded-xl"
         style={{ minWidth: '320px', height: `${CALENDLY_HEIGHT}px`, minHeight: `${CALENDLY_HEIGHT}px` }}
       />
 
