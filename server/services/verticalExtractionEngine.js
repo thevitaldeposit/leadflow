@@ -88,6 +88,17 @@ Because nothing could be agreed on a one-way voicemail:
 - Do NOT trigger any booking signals.
 - Still extract everything the caller volunteered: name, phone, dumpster size, debris type, delivery address, timeline/dates, and any pricing questions.`;
 
+// Business-relevance gate. Runs before any field extraction so a call with zero
+// business connection (wrong number, "call you back", purely personal) can be
+// auto-discarded instead of becoming a junk lead. Errs heavily toward true.
+const BUSINESS_RELEVANCE_RULE = `Before extracting any fields, determine if this call has any business relevance. Set a top-level field \`businessRelevant\` to true or false.
+
+Set \`businessRelevant: false\` ONLY if the entire conversation contains zero mention of any service, product, pricing, scheduling, location, project, or business topic. Examples of non-business calls: "yeah let me call you back got it", "wrong number sorry", "is this [name]?", purely personal conversation with no mention of any service or business need.
+
+Set \`businessRelevant: true\` if there is ANY mention of services, products, pricing, availability, scheduling, locations, projects, or anything related to the business. Even a single question like "do you service AC units?" or "how much do you charge?" is enough to be business relevant.
+
+When in doubt, set businessRelevant: true. Only set false when you are certain the call has zero business connection whatsoever.`;
+
 const HOME_SERVICES_SUB_VERTICAL_CONFIGS = {
   dumpster_rental: {
     promptAddition: `This is a call to a dumpster rental business. Extract: customer name, phone, email, delivery address, dumpster size requested, delivery date, pickup date, rental duration, type of debris or material (construction, household, yard waste, etc.), any access instructions, whether a permit was mentioned, any price discussed, payment method or payment status mentioned, and urgency. Urgency: ASAP if they say today/now/emergency OR want delivery today or tomorrow, This Week if this week, Next Week if next week, otherwise Flexible. A same-day or next-day ("tomorrow") delivery request is always ASAP and high intent — the owner needs to call back within a few hours.
@@ -106,6 +117,7 @@ ${HOME_SERVICES_ACTION_RULE}
 
 ${BOOKING_SIGNAL_RULE}`,
     outputSchema: `{
+  "businessRelevant": boolean,
   "customerName": string | null,
   "customerPhone": string | null,
   "customerEmail": string | null,
@@ -145,6 +157,7 @@ ${HOME_SERVICES_NAME_RULE}
 
 ${HOME_SERVICES_ACTION_RULE}`,
     outputSchema: `{
+  "businessRelevant": boolean,
   "customerName": string | null,
   "customerPhone": string | null,
   "customerEmail": string | null,
@@ -186,6 +199,9 @@ function buildSystemPrompt(vertical, subVertical, options = {}) {
   const { config } = resolveConfig(vertical, subVertical);
   const voicemailSection = options.voicemail ? `\n\n## VOICEMAIL\n${VOICEMAIL_RULE}` : '';
   return `You are a data extraction engine. You output ONLY valid JSON. Never output explanations, preamble, or markdown. Never start your response with words. Always start with { and end with }. If you cannot extract a value, use null.${voicemailSection}
+
+## BUSINESS RELEVANCE
+${BUSINESS_RELEVANCE_RULE}
 
 ## SPEAKER IDENTIFICATION
 In the transcript, Speaker 0 is always the business owner/employee. Speaker 1 and higher are customers. Extract lead information ONLY from customer speakers. You may extract the salesperson/employee name from Speaker 0 if mentioned, but never their personal phone, email, or address.
@@ -430,7 +446,7 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
   // Separate common fields (stored flat) from vertical-specific fields (stored as JSON).
   // customerName is preserved in verticalData so vertical UIs can show the full name
   // as one field even when extraction returns only first or only last via the split.
-  const { customerName, customerPhone, customerEmail, callSummary, confidence, ...verticalSpecific } = extracted;
+  const { customerName, customerPhone, customerEmail, callSummary, confidence, businessRelevant, ...verticalSpecific } = extracted;
   verticalSpecific.customerName = customerName || null;
 
   // Home Services: compute the absolute follow-up date from the AI signal so
@@ -546,6 +562,9 @@ async function extractFromTranscriptVertical(transcript, vertical = 'auto_dealer
     verticalData: verticalSpecific,
     confidence: confidence || 0,
     subVertical: resolvedSubVertical,
+    // Undefined when the model omitted the field — only an explicit `false`
+    // triggers the auto-discard downstream (the rule errs toward true).
+    businessRelevant,
   };
 }
 

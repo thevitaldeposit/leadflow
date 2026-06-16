@@ -310,14 +310,19 @@ export function getLeadActionState(lead, now = new Date()) {
   const vd = parseVerticalData(lead);
   const jobStatus = lead?.job_status || vd.job_status || null;
   const status = lead?.status || 'new';
+  // Missed calls are NOT leads — they live only in the dashboard Action Queue
+  // (which classifies them on its own). They must never read as an opportunity,
+  // an active lead, or operational work, or they'd leak into All Opportunities,
+  // Booked Jobs, estimate counts, and every other list/metric derived from here.
+  const isMissedCall = lead?.call_type === 'missed_call';
   // isActive: not terminal — show in dashboard priority buckets
-  const isActive = jobStatus
+  const isActive = isMissedCall ? false : (jobStatus
     ? !TERMINAL_JOB_STATUSES.has(jobStatus)
-    : !new Set(['booked', 'lost', 'spam']).has(status);
+    : !new Set(['booked', 'lost', 'spam']).has(status));
   // isOpportunity: pre-booked, in the sales funnel (not yet confirmed as a job)
-  const isOpportunity = jobStatus
+  const isOpportunity = isMissedCall ? false : (jobStatus
     ? !OPERATIONAL_JOB_STATUSES.has(jobStatus) && !TERMINAL_JOB_STATUSES.has(jobStatus)
-    : isActive;
+    : isActive);
 
   // Intent: prefer AI's call, fall back to urgency/emergency cues.
   let intent = INTENT_VALUES.includes(vd.intentLevel) ? vd.intentLevel : null;
@@ -374,7 +379,6 @@ export function getLeadActionState(lead, now = new Date()) {
   }
   // Missed calls (unanswered, no voicemail) read as a callback prompt naming the
   // caller — falling back to the phone number when no name is known yet.
-  const isMissedCall = lead?.call_type === 'missed_call';
   if (isMissedCall) {
     const mcName = vd.customerName
       || [lead?.customer_first_name, lead?.customer_last_name].filter(Boolean).join(' ')
@@ -434,7 +438,7 @@ export function getLeadActionState(lead, now = new Date()) {
     else if (nums && nums.length >= 2) estimatedRevenue = (Number(nums[0]) + Number(nums[1])) / 2;
   }
 
-  const isOperational = jobStatus ? OPERATIONAL_JOB_STATUSES.has(jobStatus) : false;
+  const isOperational = isMissedCall ? false : (jobStatus ? OPERATIONAL_JOB_STATUSES.has(jobStatus) : false);
 
   return {
     intent,

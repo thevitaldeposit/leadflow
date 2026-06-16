@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { User, Wrench, DollarSign, ClipboardList, CheckCircle2, Save } from 'lucide-react';
 import { api } from '../utils/api';
 import { getTerminology } from '../utils/verticalConfig';
@@ -70,6 +70,9 @@ function SectionCard({ title, icon: Icon, children }) {
 
 export default function ManualLeadForm() {
   const navigate = useNavigate();
+  // Navigation state carries an optional phone prefill + missedCallId when this
+  // form is opened from a missed call's "Create Lead" action in the Action Queue.
+  const navState = useLocation().state || {};
   // The manual form is a Home Services tool (dumpster rental schema). sub_vertical
   // drives the field wording via getTerminology, keeping the door open for other
   // verticals later.
@@ -80,7 +83,7 @@ export default function ManualLeadForm() {
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
-    phone: '',
+    phone: navState.phone || '',
     email: '',
     dumpsterSize: '',
     debrisType: '',
@@ -121,6 +124,12 @@ export default function ManualLeadForm() {
         subVertical,
         book,
       });
+      // Opened from a missed call → fold the placeholder away now that it's a
+      // real lead, so it leaves the Action Queue. Non-blocking: a failure here
+      // shouldn't stop the owner from reaching their new lead.
+      if (navState.missedCallId) {
+        try { await api.updateLead(navState.missedCallId, { discarded: 1 }); } catch { /* ignore */ }
+      }
       navigate(`/leads/${lead.id}`, { state: { fresh: true } });
     } catch (err) {
       setError(err.message || 'Failed to create lead');

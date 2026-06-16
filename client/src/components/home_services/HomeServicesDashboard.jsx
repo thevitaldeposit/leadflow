@@ -187,6 +187,18 @@ function isDismissedFlagged(lead) {
 function classifyForQueue(e, now, cfg) {
   const { lead, state, vd } = e;
 
+  // Missed calls aren't opportunities (getLeadActionState marks them inactive),
+  // but they DO belong in the Action Queue until the owner acts on them, then
+  // expire out after the grace window (default 24h). Handle them before the
+  // opportunity gate below, which they would otherwise fail.
+  if (lead.call_type === 'missed_call') {
+    const neverContacted = (state.jobStatus === 'inquiry' || state.jobStatus == null) && lead.status === 'new';
+    if (!neverContacted) return { inQueue: false, expired: false, reason: null };
+    const created = lead.created_at ? new Date(lead.created_at).getTime() : null;
+    const active = created == null ? true : now.getTime() <= created + cfg.missedCallExpiryH * MS_HOUR;
+    return { inQueue: active, expired: !active, reason: null };
+  }
+
   // Operational (booked/scheduled) jobs only surface for the missing
   // address/payment risk — which is critical and never expires.
   if (state.isOperational) {
@@ -229,15 +241,6 @@ function classifyForQueue(e, now, cfg) {
   if (isVoicemail && neverContacted) {
     const created = lead.created_at ? new Date(lead.created_at).getTime() : null;
     const active = created == null ? true : now.getTime() <= created + cfg.voicemailExpiryH * MS_HOUR;
-    reasons.push({ active });
-  }
-
-  // Missed calls (unanswered, no voicemail) stay in the queue until contacted,
-  // then expire out after their grace window (default 24h).
-  const isMissedCall = lead.call_type === 'missed_call';
-  if (isMissedCall && neverContacted) {
-    const created = lead.created_at ? new Date(lead.created_at).getTime() : null;
-    const active = created == null ? true : now.getTime() <= created + cfg.missedCallExpiryH * MS_HOUR;
     reasons.push({ active });
   }
 
@@ -512,7 +515,7 @@ function CallButton({ lead, name }) {
 
 // Compact Action Queue row. Shows intent/critical badge, name + phone, the
 // operational reason it's in the queue, a time indicator, and call + dismiss.
-function AttentionRow({ lead, state, tier, reason, onDismiss }) {
+function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick }) {
   const navigate = useNavigate();
   const isMissedCall = lead.call_type === 'missed_call';
   const name = getLeadName(lead);
@@ -536,7 +539,7 @@ function AttentionRow({ lead, state, tier, reason, onDismiss }) {
   return (
     <div
       className={`flex items-center gap-2.5 px-3 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors ${tierBorderClass(tier)}`}
-      onClick={() => navigate(`/leads/${lead.id}`)}
+      onClick={() => (isMissedCall ? onMissedCallClick(lead) : navigate(`/leads/${lead.id}`))}
     >
       {tier === 1 ? <CriticalBadge size="sm" /> : <IntentBadge value={state.intent} size="sm" />}
       <div className="flex-1 min-w-0">
@@ -568,13 +571,68 @@ function AttentionRow({ lead, state, tier, reason, onDismiss }) {
       )}
       <div className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
         {lead.phone && <CallButton lead={lead} name={name} />}
+        {/* Missed calls are dismissed via the decision modal's Discard, not the
+            quick-dismiss X, so the owner makes an explicit create/discard call. */}
+        {!isMissedCall && (
+          <button
+            onClick={handleDismissClick}
+            className="p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            title="Dismiss from Action Queue"
+            aria-label="Dismiss from Action Queue"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Decision modal opened from a missed-call row in the Action Queue. A missed
+// call has zero context, so the owner explicitly decides: turn it into a real
+// lead (opens the prefilled manual form) or discard it. There is no Lead Detail
+// page for a missed call — it isn't a lead until "Create Lead" is chosen.
+function MissedCallModal({ lead, onCreate, onDiscard, onClose }) {
+  const phone = lead.phone || lead.caller_number || 'Unknown number';
+  const elapsed = getElapsedLabel(lead.created_at);
+  const when = lead.created_at
+    ? new Date(lead.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2">
+          <MissedCallBadge />
+        </div>
+        <h3 className="text-lg font-bold text-gray-900 mt-3">Missed Call</h3>
+        <p className="text-sm text-gray-600 mt-1">
+          <span className="font-semibold">{phone}</span>
+          {when && <span className="text-gray-400"> · {when}{elapsed ? ` (${elapsed})` : ''}</span>}
+        </p>
+        <p className="text-sm text-gray-500 mt-3">
+          This caller didn't leave a voicemail, so there's no context yet. Create a lead to start
+          tracking them, or discard if it wasn't a customer.
+        </p>
+        <div className="flex flex-col gap-2 mt-5">
+          <button
+            onClick={() => onCreate(lead)}
+            className="w-full text-sm font-medium text-white bg-accent hover:opacity-90 px-4 py-2.5 rounded-xl transition-colors"
+          >
+            Create Lead
+          </button>
+          <button
+            onClick={() => onDiscard(lead)}
+            className="w-full text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2.5 rounded-xl transition-colors"
+          >
+            Discard
+          </button>
+        </div>
         <button
-          onClick={handleDismissClick}
-          className="p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-          title="Dismiss from Action Queue"
-          aria-label="Dismiss from Action Queue"
+          onClick={onClose}
+          className="w-full mt-2 text-xs text-gray-400 hover:text-gray-600 py-1 transition-colors"
         >
-          <X size={14} />
+          Cancel
         </button>
       </div>
     </div>
@@ -1081,9 +1139,11 @@ function QuickAvailabilityCheck() {
 // ─── main dashboard ────────────────────────────────────────────────────────────
 
 export default function HomeServicesDashboard() {
+  const navigate = useNavigate();
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bookingLead, setBookingLead] = useState(null);
+  const [missedCallModal, setMissedCallModal] = useState(null);
   const [settings, setSettings] = useState(getSettings);
   const greeting = getGreeting();
 
@@ -1098,8 +1158,12 @@ export default function HomeServicesDashboard() {
     }).catch(() => { /* fall back to localStorage defaults */ });
   }, []);
 
+  // includeMissed=true: the dashboard is the ONLY place missed calls surface
+  // (in the Action Queue). getLeadActionState keeps them out of every
+  // opportunity/operational metric, and classifyForQueue handles their queue
+  // membership explicitly.
   const load = useCallback(() => {
-    return api.getLeads({ vertical: 'home_services', sort: 'created_at', order: 'desc' })
+    return api.getLeads({ vertical: 'home_services', sort: 'created_at', order: 'desc', includeMissed: 'true' })
       .then(setLeads);
   }, []);
 
@@ -1154,6 +1218,32 @@ export default function HomeServicesDashboard() {
       console.error('Failed to dismiss lead', id, err);
     }
   }, [leads]);
+
+  // Missed-call decision modal actions. A missed call is not a lead until the
+  // owner explicitly acts on it here.
+  // Create Lead: open the manual form prefilled with the caller's number; the
+  // form discards this missed-call placeholder once the real lead is saved.
+  const handleMissedCallCreate = useCallback((lead) => {
+    setMissedCallModal(null);
+    navigate('/new/manual', {
+      state: { phone: lead.phone || lead.caller_number || '', missedCallId: lead.id },
+    });
+  }, [navigate]);
+
+  // Discard: permanently remove the missed call from the Action Queue and log it.
+  const handleMissedCallDiscard = useCallback(async (lead) => {
+    setMissedCallModal(null);
+    setLeads(prev => prev.filter(l => l.id !== lead.id)); // optimistic
+    const stamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const prefix = lead.internal_notes ? `${lead.internal_notes}\n` : '';
+    const internal_notes = `${prefix}Missed call discarded by owner [${stamp}]`;
+    try {
+      await api.updateLead(lead.id, { discarded: 1, internal_notes });
+    } catch (err) {
+      console.error('Failed to discard missed call', lead.id, err);
+      loadRef.current().catch(() => {}); // resync on failure
+    }
+  }, []);
 
   const handleBookedConfirm = useCallback(async ({ date, rentalDays, size }) => {
     if (!bookingLead) return;
@@ -1256,7 +1346,9 @@ export default function HomeServicesDashboard() {
     const revOf = (lead, state) => lead.estimated_revenue || state.estimatedRevenue || 0;
 
     const needsAttentionCount = needsAttention.length;
-    const newLeads7d = leads.filter(l => l.created_at && new Date(l.created_at) >= weekStart).length;
+    // Missed calls aren't leads — keep them out of the New Leads count even
+    // though they're fetched for the Action Queue.
+    const newLeads7d = leads.filter(l => l.call_type !== 'missed_call' && l.created_at && new Date(l.created_at) >= weekStart).length;
     const bookedThisWeek = leads.filter(l =>
       (l.job_status === 'booked' || l.status === 'booked') && l.updated_at && new Date(l.updated_at) >= weekStart
     ).length;
@@ -1324,7 +1416,12 @@ export default function HomeServicesDashboard() {
       expiringRef.current.add(lead.id);
       const prefix = lead.internal_notes ? `${lead.internal_notes}\n` : '';
       const internal_notes = `${prefix}Expired — no action taken [${stamp}]`;
-      api.updateLead(lead.id, { job_status: 'opportunity', internal_notes })
+      // Missed calls were never leads, so an expired one is discarded outright;
+      // a real opportunity is downgraded back into All Opportunities.
+      const patch = lead.call_type === 'missed_call'
+        ? { discarded: 1, internal_notes }
+        : { job_status: 'opportunity', internal_notes };
+      api.updateLead(lead.id, patch)
         .then((updated) => {
           setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
         })
@@ -1400,6 +1497,7 @@ export default function HomeServicesDashboard() {
                   tier={tier}
                   reason={bookedReason}
                   onDismiss={handleDismiss}
+                  onMissedCallClick={setMissedCallModal}
                 />
               ))}
             </div>
@@ -1432,6 +1530,16 @@ export default function HomeServicesDashboard() {
           lead={bookingLead}
           onConfirm={handleBookedConfirm}
           onClose={() => setBookingLead(null)}
+        />
+      )}
+
+      {/* Missed-call decision modal — Create Lead or Discard */}
+      {missedCallModal && (
+        <MissedCallModal
+          lead={missedCallModal}
+          onCreate={handleMissedCallCreate}
+          onDiscard={handleMissedCallDiscard}
+          onClose={() => setMissedCallModal(null)}
         />
       )}
     </div>

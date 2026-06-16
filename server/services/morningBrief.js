@@ -73,8 +73,9 @@ function buildSnapshot(businessId, todayStr, now = new Date()) {
     .prepare('SELECT name FROM businesses WHERE id = ?')
     .get(businessId);
 
+  // Missed calls aren't leads, so they never count toward the brief's metrics.
   const leads = db.prepare(
-    "SELECT * FROM leads WHERE vertical = 'home_services' AND business_id = ? AND (discarded = 0 OR discarded IS NULL)"
+    "SELECT * FROM leads WHERE vertical = 'home_services' AND business_id = ? AND (discarded = 0 OR discarded IS NULL) AND (call_type != 'missed_call' OR call_type IS NULL)"
   ).all(businessId);
 
   const enriched = leads.map((lead) => ({ lead, state: getActionState(lead, now) }));

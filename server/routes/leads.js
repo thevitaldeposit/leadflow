@@ -55,6 +55,14 @@ router.get('/', (req, res) => {
       query += ' AND (discarded = 0 OR discarded IS NULL)';
     }
 
+    // Missed calls are NOT leads — they only ever surface in the dashboard's
+    // Action Queue, which opts in with includeMissed=true. Every other list,
+    // count, and query (All Opportunities, Booked Jobs, lead lists, iOS) must
+    // never see them, so exclude call_type = 'missed_call' by default.
+    if (req.query.includeMissed !== 'true') {
+      query += " AND (call_type != 'missed_call' OR call_type IS NULL)";
+    }
+
     if (status) {
       query += ' AND status = ?';
       params.push(status);

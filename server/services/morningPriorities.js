@@ -98,8 +98,9 @@ function leadFullName(lead, vd) {
 // Returns { totals, top } where top is { name, summary } | null. Scoped to one
 // business so each tenant's morning push reflects only its own leads.
 function computeMorningSummary(now = new Date(), businessId = getDefaultBusinessId()) {
+  // Missed calls aren't leads, so they never count toward the morning push.
   const leads = db.prepare(
-    "SELECT * FROM leads WHERE vertical = 'home_services' AND business_id = ? AND (discarded = 0 OR discarded IS NULL)"
+    "SELECT * FROM leads WHERE vertical = 'home_services' AND business_id = ? AND (discarded = 0 OR discarded IS NULL) AND (call_type != 'missed_call' OR call_type IS NULL)"
   ).all(businessId);
 
   const enriched = leads

@@ -73,10 +73,17 @@ export default function Layout({ children }) {
         sub = [lead.voi_make, lead.voi_model].filter(Boolean).join(' ') || null;
       }
 
+      const isMissedCall = lead.call_type === 'missed_call';
       const isAutoBooked = lead.auto_booked === 1;
       const smsSent = !!lead.payment_sms_sent_at;
       let toastTitle;
-      if (isAutoBooked) {
+      if (isMissedCall) {
+        // A missed call isn't a lead — surface it as a missed call the owner can
+        // triage in the Action Queue, not as a captured lead.
+        const caller = name || lead.phone || lead.caller_number || 'unknown number';
+        toastTitle = `Missed call from ${caller}`;
+        sub = 'No voicemail — review in the Action Queue';
+      } else if (isAutoBooked) {
         const size = vd.dumpsterSize ? `${vd.dumpsterSize} dumpster` : 'dumpster';
         const date = lead.delivery_date ? `, delivery ${lead.delivery_date}` : '';
         toastTitle = smsSent

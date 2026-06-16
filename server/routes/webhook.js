@@ -252,7 +252,7 @@ async function processRecording(payload) {
 
     if (useVerticalEngine) {
       console.log(`[webhook] Extracting lead from recording ${RecordingSid} via vertical engine (${defaultVertical}${defaultSubVertical ? '/' + defaultSubVertical : ''})...`);
-      const { commonFields, verticalData, confidence, subVertical } = await extractFromTranscriptVertical(
+      const { commonFields, verticalData, confidence, subVertical, businessRelevant } = await extractFromTranscriptVertical(
         transcript,
         defaultVertical,
         defaultSubVertical,
@@ -352,6 +352,16 @@ async function processRecording(payload) {
       };
 
       let lead = insertLead(leadData);
+
+      // Business-relevance gate: the AI flags calls with zero business connection
+      // (wrong number, "call you back", purely personal) — auto-discard so they
+      // never become a lead. Only an explicit false discards; undefined is kept.
+      if (businessRelevant === false) {
+        db.prepare('UPDATE leads SET discarded = 1 WHERE id = ?').run(lead.id);
+        logActivity(lead.id, 'note', 'Auto-discarded — call had no business relevance');
+        console.log(`[webhook] Auto-discarded non-business call (lead ${lead.id})`);
+        return;
+      }
 
       // Vertical prompt sets confidence to 0 for personal/non-business calls
       if (!confidence) {
@@ -490,7 +500,7 @@ async function processVoicemail(payload) {
 
     if (useVerticalEngine) {
       console.log(`[webhook] Extracting voicemail ${RecordingSid} via vertical engine (${defaultVertical}${defaultSubVertical ? '/' + defaultSubVertical : ''})...`);
-      const { commonFields, verticalData, confidence, subVertical } = await extractFromTranscriptVertical(
+      const { commonFields, verticalData, confidence, subVertical, businessRelevant } = await extractFromTranscriptVertical(
         transcript,
         defaultVertical,
         defaultSubVertical,
@@ -585,6 +595,15 @@ async function processVoicemail(payload) {
       };
 
       const lead = insertLead(leadData);
+
+      // Business-relevance gate — same as answered calls. A voicemail with zero
+      // business connection is auto-discarded so it never becomes a lead.
+      if (businessRelevant === false) {
+        db.prepare('UPDATE leads SET discarded = 1 WHERE id = ?').run(lead.id);
+        logActivity(lead.id, 'note', 'Auto-discarded — voicemail had no business relevance');
+        console.log(`[webhook] Auto-discarded non-business voicemail (lead ${lead.id})`);
+        return;
+      }
 
       // Zero confidence = personal/non-business message — auto-discard like answered calls.
       if (!confidence) {

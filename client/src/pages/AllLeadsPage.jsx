@@ -23,7 +23,14 @@ export default function AllLeadsPage() {
   useEffect(() => {
     fetch('/api/leads/all')
       .then(r => r.json())
-      .then(data => { setLeads(data); setLoading(false); })
+      .then(data => {
+        // Discarded calls and missed calls are never leads — they must never
+        // appear in All Leads, so filter them out of the raw debug feed.
+        const visible = (Array.isArray(data) ? data : [])
+          .filter(l => !l.discarded && l.call_type !== 'missed_call');
+        setLeads(visible);
+        setLoading(false);
+      })
       .catch(err => { setError(err.message); setLoading(false); });
   }, []);
 
@@ -39,7 +46,7 @@ export default function AllLeadsPage() {
     <div className="p-6">
       <div className="mb-4 flex items-baseline gap-3">
         <h2 className="text-lg font-semibold text-gray-800">All Leads</h2>
-        <span className="text-sm text-gray-400">{leads.length} records — no filtering applied</span>
+        <span className="text-sm text-gray-400">{leads.length} record{leads.length !== 1 ? 's' : ''}</span>
       </div>
 
       {leads.length === 0 ? (
@@ -49,7 +56,7 @@ export default function AllLeadsPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['ID', 'Name', 'Phone', 'Vertical', 'Status', 'Job Status', 'Discarded', 'Created'].map(h => (
+                {['ID', 'Name', 'Phone', 'Vertical', 'Status', 'Job Status', 'Created'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
                     {h}
                   </th>
@@ -63,7 +70,7 @@ export default function AllLeadsPage() {
                 return (
                   <tr
                     key={lead.id}
-                    className={`cursor-pointer hover:bg-gray-50 transition-colors ${lead.discarded ? 'opacity-40' : ''}`}
+                    className="cursor-pointer hover:bg-gray-50 transition-colors"
                     onClick={() => navigate(`/leads/${lead.id}`)}
                   >
                     <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{lead.id}</td>
@@ -72,11 +79,6 @@ export default function AllLeadsPage() {
                     <td className="px-4 py-2.5 text-gray-500 text-xs">{vertLabel}</td>
                     <td className="px-4 py-2.5 text-gray-600">{lead.status || '—'}</td>
                     <td className="px-4 py-2.5 text-gray-600">{lead.job_status || '—'}</td>
-                    <td className="px-4 py-2.5">
-                      {lead.discarded ? (
-                        <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">discarded</span>
-                      ) : '—'}
-                    </td>
                     <td className="px-4 py-2.5 text-gray-400 text-xs whitespace-nowrap">
                       {timeAgo(lead.created_at)}
                     </td>
