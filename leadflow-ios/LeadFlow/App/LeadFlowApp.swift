@@ -87,6 +87,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // VoIP/CallKit incoming-call stack. PushKit MUST be initialized at launch
+        // so iOS delivers VoIP pushes and doesn't terminate the app for failing to
+        // report a call. register() mints a Voice token and registers once a VoIP
+        // token is available; it no-ops gracefully when Voice isn't configured yet.
+        VoIPPushManager.shared.initialize()
+        VoiceCallManager.shared.register()
+
         _ = CallObserver.shared
         RecordingManager.shared.retryPendingUploads()
         NotificationService.shared.clearBadge()
@@ -121,5 +128,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func applicationDidBecomeActive(_ application: UIApplication) {
         NotificationService.shared.clearBadge()
         RecordingManager.shared.retryPendingUploads()
+        // Refresh the Voice registration on foreground (throttled internally).
+        VoiceCallManager.shared.register()
     }
 }

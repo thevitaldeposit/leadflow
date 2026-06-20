@@ -5,3 +5,9 @@ server/uploads/
 server/db/leadflow.db
 server/db/*.db-shm
 server/db/*.db-wal
+
+# Xcode / iOS (commit shared data like Package.resolved; never user state)
+**/xcuserdata/
+*.xcuserstate
+leadflow-ios/build/
+DerivedData/

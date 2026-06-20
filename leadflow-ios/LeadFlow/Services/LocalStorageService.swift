@@ -12,6 +12,8 @@ enum SettingsKey {
     static let recordingEnabled = "recordingEnabled"
     static let notificationsEnabled = "notificationsEnabled"
     static let deviceToken = "deviceToken"
+    static let voipToken = "voipToken"
+    static let voiceIdentity = "voiceIdentity"
 }
 
 // MARK: - Pending Upload
@@ -86,6 +88,18 @@ final class LocalStorageService {
     var deviceToken: String? {
         get { defaults.string(forKey: SettingsKey.deviceToken) }
         set { defaults.set(newValue, forKey: SettingsKey.deviceToken) }
+    }
+
+    // Twilio Voice: the PushKit VoIP push token (hex) and the client identity the
+    // device registered under. Stored so device registration can include them.
+    var voipToken: String? {
+        get { defaults.string(forKey: SettingsKey.voipToken) }
+        set { defaults.set(newValue, forKey: SettingsKey.voipToken) }
+    }
+
+    var voiceIdentity: String? {
+        get { defaults.string(forKey: SettingsKey.voiceIdentity) }
+        set { defaults.set(newValue, forKey: SettingsKey.voiceIdentity) }
     }
 
     // MARK: Pending Upload Queue

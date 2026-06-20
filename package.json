@@ -27,7 +27,8 @@
     "openai": "^6.39.0",
     "resend": "^6.12.4",
     "socket.io": "^4.8.3",
-    "stripe": "^22.2.0"
+    "stripe": "^22.2.0",
+    "twilio": "^6.0.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

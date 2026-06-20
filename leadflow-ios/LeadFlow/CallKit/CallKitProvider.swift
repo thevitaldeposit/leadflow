@@ -1,0 +1,109 @@
+// CallKitProvider.swift
+// LeadFlow
+//
+// Thin wrapper around CXProvider / CXCallController for the native incoming-call
+// UI. Reports incoming calls to CallKit and routes the user's answer/end actions
+// back to VoiceCallManager. Holds no Twilio types — it only speaks CallKit.
+
+import Foundation
+import CallKit
+import AVFoundation
+
+final class CallKitProvider: NSObject {
+
+    static let shared = CallKitProvider()
+
+    let provider: CXProvider
+    let callController = CXCallController()
+
+    private override init() {
+        let configuration = CXProviderConfiguration()
+        configuration.maximumCallGroups = 1
+        configuration.maximumCallsPerCallGroup = 1
+        configuration.supportsVideo = false
+        configuration.supportedHandleTypes = [.phoneNumber, .generic]
+        provider = CXProvider(configuration: configuration)
+        super.init()
+        provider.setDelegate(self, queue: nil) // nil → callbacks on the main queue
+    }
+
+    // MARK: Incoming
+
+    /// Present the native incoming-call screen. `handle` is the caller's real
+    /// phone number when available (shown as the caller ID).
+    func reportIncomingCall(uuid: UUID, handle: String, completion: ((Error?) -> Void)? = nil) {
+        let update = CXCallUpdate()
+        update.remoteHandle = makeHandle(handle)
+        update.hasVideo = false
+        update.supportsDTMF = true
+        update.supportsHolding = false
+        update.supportsGrouping = false
+        update.supportsUngrouping = false
+
+        provider.reportNewIncomingCall(with: uuid, update: update) { error in
+            if let error = error {
+                NSLog("[callkit] reportNewIncomingCall failed: \(error.localizedDescription)")
+            }
+            completion?(error)
+        }
+    }
+
+    /// End a call from our side (e.g. caller cancelled) via a CallKit transaction.
+    func endCall(uuid: UUID) {
+        let transaction = CXTransaction(action: CXEndCallAction(call: uuid))
+        callController.request(transaction) { error in
+            if let error = error {
+                NSLog("[callkit] endCall request failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Report (system-side) that a call has ended — used for remote/failed
+    /// disconnects and for the invalid-push safety net.
+    func reportCallEnded(uuid: UUID?, reason: CXCallEndedReason) {
+        guard let uuid = uuid else { return }
+        provider.reportCall(with: uuid, endedAt: Date(), reason: reason)
+    }
+
+    // Use a .phoneNumber handle for real numbers (lets CallKit match contacts /
+    // show a recognizable caller ID); fall back to .generic otherwise.
+    private func makeHandle(_ value: String) -> CXHandle {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return CXHandle(type: .generic, value: "Unknown") }
+        let looksNumeric = trimmed.first == "+" || trimmed.allSatisfy { $0.isNumber || $0 == "+" }
+        return looksNumeric ? CXHandle(type: .phoneNumber, value: trimmed)
+                            : CXHandle(type: .generic, value: trimmed)
+    }
+}
+
+// MARK: - CXProviderDelegate
+
+extension CallKitProvider: CXProviderDelegate {
+
+    func providerDidReset(_ provider: CXProvider) {
+        NSLog("[callkit] providerDidReset")
+        VoiceCallManager.shared.providerReset()
+    }
+
+    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        VoiceCallManager.shared.audioSessionActivated()
+    }
+
+    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        VoiceCallManager.shared.audioSessionDeactivated()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+        VoiceCallManager.shared.performAnswer(uuid: action.callUUID) { _ in }
+        action.fulfill()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        VoiceCallManager.shared.performEnd(uuid: action.callUUID)
+        action.fulfill()
+    }
+
+    func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
+        NSLog("[callkit] timed out performing action")
+    }
+}

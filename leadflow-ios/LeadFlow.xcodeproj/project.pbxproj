@@ -27,6 +27,10 @@
 		9D000000000000000000012 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000012 /* CallKit.framework */; };
 		9D000000000000000000013 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000013 /* AVFoundation.framework */; };
 		9D000000000000000000014 /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000014 /* UserNotifications.framework */; };
+		9D000000000000000000015 /* VoiceCallManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000018 /* VoiceCallManager.swift */; };
+		9D000000000000000000016 /* CallKitProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000019 /* CallKitProvider.swift */; };
+		9D000000000000000000017 /* VoIPPushManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001A /* VoIPPushManager.swift */; };
+		9D000000000000000000018 /* TwilioVoice in Frameworks */ = {isa = PBXBuildFile; productRef = 9F000000000000000000002 /* TwilioVoice */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -53,6 +57,9 @@
 		9C000000000000000000015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9C000000000000000000016 /* LeadFlow.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LeadFlow.entitlements; sourceTree = "<group>"; };
 		9C000000000000000000017 /* LeadFlow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LeadFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9C000000000000000000018 /* VoiceCallManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallManager.swift; sourceTree = "<group>"; };
+		9C000000000000000000019 /* CallKitProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitProvider.swift; sourceTree = "<group>"; };
+		9C00000000000000000001A /* VoIPPushManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoIPPushManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,6 +70,7 @@
 				9D000000000000000000012 /* CallKit.framework in Frameworks */,
 				9D000000000000000000013 /* AVFoundation.framework in Frameworks */,
 				9D000000000000000000014 /* UserNotifications.framework in Frameworks */,
+				9D000000000000000000018 /* TwilioVoice in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -107,6 +115,9 @@
 			children = (
 				9C000000000000000000003 /* CallObserver.swift */,
 				9C000000000000000000004 /* RecordingManager.swift */,
+				9C000000000000000000018 /* VoiceCallManager.swift */,
+				9C000000000000000000019 /* CallKitProvider.swift */,
+				9C00000000000000000001A /* VoIPPushManager.swift */,
 			);
 			path = CallKit;
 			sourceTree = "<group>";
@@ -201,6 +212,9 @@
 			);
 			dependencies = (
 			);
+			packageProductDependencies = (
+				9F000000000000000000002 /* TwilioVoice */,
+			);
 			name = LeadFlow;
 			productName = LeadFlow;
 			productReference = 9C000000000000000000017 /* LeadFlow.app */;
@@ -230,6 +244,9 @@
 				Base,
 			);
 			mainGroup = 9A000000000000000000002 /* MainGroup */;
+			packageReferences = (
+				9F000000000000000000001 /* XCRemoteSwiftPackageReference "twilio-voice-ios" */,
+			);
 			productRefGroup = 9B00000000000000000000C /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -271,6 +288,9 @@
 				9D00000000000000000000D /* LeadReviewView.swift in Sources */,
 				9D00000000000000000000E /* SettingsView.swift in Sources */,
 				9D00000000000000000000F /* Lead.swift in Sources */,
+				9D000000000000000000015 /* VoiceCallManager.swift in Sources */,
+				9D000000000000000000016 /* CallKitProvider.swift in Sources */,
+				9D000000000000000000017 /* VoIPPushManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -464,6 +484,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		9F000000000000000000001 /* XCRemoteSwiftPackageReference "twilio-voice-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/twilio/twilio-voice-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9F000000000000000000002 /* TwilioVoice */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9F000000000000000000001 /* XCRemoteSwiftPackageReference "twilio-voice-ios" */;
+			productName = TwilioVoice;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = 9A000000000000000000001 /* Project object */;

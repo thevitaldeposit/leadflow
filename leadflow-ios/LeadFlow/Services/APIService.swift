@@ -113,21 +113,73 @@ final class APIService: ObservableObject {
 
     // MARK: Device Registration
 
+    /// Registers this device's APNs token (called from the APNs callback). Routes
+    /// through syncDeviceRegistration so any Voice fields already on hand are sent
+    /// in the same device row.
     func registerDevice(token: String) async throws {
+        LocalStorageService.shared.deviceToken = token
+        try await syncDeviceRegistration()
+    }
+
+    /// Posts the consolidated device registration (APNs token plus, when present,
+    /// the VoIP push token + Voice identity) from local storage. Keyed on the
+    /// APNs token, which the backend requires; if it isn't available yet this is a
+    /// no-op and the next APNs registration carries the voice fields.
+    func syncDeviceRegistration() async throws {
         let storage = LocalStorageService.shared
+        guard let apns = storage.deviceToken, !apns.isEmpty else { return }
         let endpoint = try url("/api/devices/register")
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: Any] = [
-            "deviceToken": token,
+        var body: [String: Any] = [
+            "deviceToken": apns,
             "userName": storage.userName,
             "businessName": storage.businessName,
             "vertical": storage.selectedVertical.rawValue,
         ]
+        if let voip = storage.voipToken, !voip.isEmpty { body["voipToken"] = voip }
+        if let identity = storage.voiceIdentity, !identity.isEmpty { body["identity"] = identity }
+
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (_, _) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data)
+    }
+
+    /// Best-effort de-registration of this device (used on logout).
+    func unregisterDevice() async {
+        guard let apns = LocalStorageService.shared.deviceToken, !apns.isEmpty else { return }
+        guard let endpoint = try? url("/api/devices/unregister") else { return }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["deviceToken": apns])
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
+    // MARK: Voice (Twilio access token)
+
+    struct VoiceTokenResponse: Decodable {
+        let token: String
+        let identity: String
+        let ttl: Int?
+    }
+
+    /// Mints a short-lived Twilio Voice access token for this user from the
+    /// backend. Throws on 503 when Voice isn't configured yet — VoiceCallManager
+    /// treats that as "skip" so the app keeps working.
+    func fetchVoiceToken() async throws -> VoiceTokenResponse {
+        let endpoint = try url("/api/voice/token")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // When per-user JWT auth lands on iOS, attach the Authorization header
+        // here so the token is scoped to the signed-in user, not the default
+        // business.
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data)
+        return try JSONDecoder().decode(VoiceTokenResponse.self, from: data)
     }
 
     // MARK: Health Check

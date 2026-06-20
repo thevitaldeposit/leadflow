@@ -140,6 +140,23 @@ function runMigrations() {
     )
   `);
 
+  // Twilio Voice (incoming call) columns on devices. Additive — same
+  // attempt-and-swallow-duplicate pattern as NEW_COLUMNS. voip_token holds the
+  // PushKit VoIP push token (distinct from the APNs alert token in
+  // device_token); voice_identity is the Twilio Voice client identity the device
+  // registered under, so a business's inbound TwiML can later dial those clients.
+  const DEVICE_COLUMNS = [
+    'ALTER TABLE devices ADD COLUMN voip_token TEXT',
+    'ALTER TABLE devices ADD COLUMN voice_identity TEXT',
+  ];
+  for (const stmt of DEVICE_COLUMNS) {
+    try {
+      db.exec(stmt);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  }
+
   // Caller ID stashed by /twilio/voice for later lookup in /twilio/recording,
   // which doesn't reliably include the From field.
   db.exec(`
