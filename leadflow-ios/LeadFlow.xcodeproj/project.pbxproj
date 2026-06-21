@@ -23,7 +23,6 @@
 		9D00000000000000000000E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000000E /* SettingsView.swift */; };
 		9D00000000000000000000F /* Lead.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000000F /* Lead.swift */; };
 		9D000000000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000010 /* Assets.xcassets */; };
-		/* 9D000000000000000000011 disclosure.m4a — add this file reference once disclosure.m4a is generated (see Resources/disclosure.m4a.txt) */
 		9D000000000000000000012 /* CallKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000012 /* CallKit.framework */; };
 		9D000000000000000000013 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000013 /* AVFoundation.framework */; };
 		9D000000000000000000014 /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000014 /* UserNotifications.framework */; };
@@ -50,7 +49,6 @@
 		9C00000000000000000000E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		9C00000000000000000000F /* Lead.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lead.swift; sourceTree = "<group>"; };
 		9C000000000000000000010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		/* 9C000000000000000000011 disclosure.m4a — add once generated */
 		9C000000000000000000012 /* CallKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CallKit.framework; path = System/Library/Frameworks/CallKit.framework; sourceTree = SDKROOT; };
 		9C000000000000000000013 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		9C000000000000000000014 /* UserNotifications.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UserNotifications.framework; path = System/Library/Frameworks/UserNotifications.framework; sourceTree = SDKROOT; };
@@ -77,6 +75,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		9A000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				9B000000000000000000001 /* LeadFlow */,
+				9B00000000000000000000C /* Products */,
+				9B00000000000000000000D /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
 		9B000000000000000000001 /* LeadFlow */ = {
 			isa = PBXGroup;
 			children = (
@@ -165,7 +172,6 @@
 		9B00000000000000000000B /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				/* disclosure.m4a — add once generated per Resources/disclosure.m4a.txt */
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -188,15 +194,6 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		9A000000000000000000002 /* MainGroup */ = {
-			isa = PBXGroup;
-			children = (
-				9B000000000000000000001 /* LeadFlow */,
-				9B00000000000000000000C /* Products */,
-				9B00000000000000000000D /* Frameworks */,
-			);
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -212,10 +209,10 @@
 			);
 			dependencies = (
 			);
+			name = LeadFlow;
 			packageProductDependencies = (
 				9F000000000000000000002 /* TwilioVoice */,
 			);
-			name = LeadFlow;
 			productName = LeadFlow;
 			productReference = 9C000000000000000000017 /* LeadFlow.app */;
 			productType = "com.apple.product-type.application";
@@ -243,7 +240,7 @@
 				en,
 				Base,
 			);
-			mainGroup = 9A000000000000000000002 /* MainGroup */;
+			mainGroup = 9A000000000000000000002;
 			packageReferences = (
 				9F000000000000000000001 /* XCRemoteSwiftPackageReference "twilio-voice-ios" */,
 			);
@@ -262,7 +259,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				9D000000000000000000010 /* Assets.xcassets in Resources */,
-				/* add disclosure.m4a here once generated */
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -305,7 +301,7 @@
 				CODE_SIGN_ENTITLEMENTS = LeadFlow/LeadFlow.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = X3Q7Q3J7D9;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LeadFlow/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -330,7 +326,7 @@
 				CODE_SIGN_ENTITLEMENTS = LeadFlow/LeadFlow.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = X3Q7Q3J7D9;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LeadFlow/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -503,7 +499,6 @@
 			productName = TwilioVoice;
 		};
 /* End XCSwiftPackageProductDependency section */
-
 	};
 	rootObject = 9A000000000000000000001 /* Project object */;
 }

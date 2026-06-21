@@ -47,6 +47,17 @@ router.post('/register', (req, res) => {
       `).run(token, userName || null, businessName || null, vertical || null, businessId, voip, voiceIdentity);
     }
 
+    // Diagnostic: confirm whether THIS registration carried the Voice fields the
+    // inbound-call TwiML needs (getActiveAppClientIdentity requires both a
+    // voice_identity AND a voip_token on the row). APNs-only registrations omit
+    // them (COALESCE keeps any prior value). Never log the full VoIP token.
+    if (voip || voiceIdentity) {
+      const voipPrefix = voip ? `${voip.slice(0, 10)}… (len ${voip.length})` : 'unchanged';
+      console.log(`[devices] voice registration ${existing ? 'updated' : 'created'} for business_${businessId}: identity=${voiceIdentity || 'unchanged'} voip_token=${voipPrefix}`);
+    } else {
+      console.log(`[devices] APNs-only registration for business_${businessId} (no voip_token/identity in this request — voice fields left untouched)`);
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error('POST /devices/register error:', err);

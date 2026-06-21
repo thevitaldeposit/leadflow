@@ -71,6 +71,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
         let changed = token != voipToken
         voipToken = token
         LocalStorageService.shared.voipToken = token.map { String(format: "%02x", $0) }.joined()
+        NSLog("[voice] updateVoipToken (changed=\(changed)) → triggering registration")
         Task { await refreshRegistration(force: changed) }
     }
 
@@ -82,12 +83,18 @@ final class VoiceCallManager: NSObject, ObservableObject {
     private func refreshRegistration(force: Bool) async {
         guard let token = voipToken else {
             // No VoIP token yet; updateVoipToken(_:) will drive registration once
-            // PushKit issues one.
+            // PushKit issues one. On a fresh launch this is expected — the token
+            // arrives moments later via PKPushRegistry.didUpdate.
+            NSLog("[voice] refreshRegistration skipped — no VoIP token yet (waiting on PushKit didUpdate)")
             return
         }
         if !force, let last = lastRegisteredAt, Date().timeIntervalSince(last) < 600 {
+            NSLog("[voice] refreshRegistration skipped — registered \(Int(Date().timeIntervalSince(last)))s ago (throttled, <600s)")
             return // registered recently; nothing to do
         }
+
+        let tokenHex = token.map { String(format: "%02x", $0) }.joined()
+        NSLog("[voice] refreshRegistration (force=\(force)) — minting access token; voipToken=\(VoIPPushManager.short(tokenHex)) (len \(token.count) bytes)")
 
         // Mint a fresh Twilio access token from our backend. If Voice isn't
         // configured yet the endpoint returns 503 and this throws — we log and
@@ -97,22 +104,30 @@ final class VoiceCallManager: NSObject, ObservableObject {
         do {
             voice = try await APIService.shared.fetchVoiceToken()
         } catch {
-            NSLog("[voice] Access-token fetch failed (Voice may not be configured yet): \(error.localizedDescription)")
+            NSLog("[voice] ✗ Access-token fetch failed (Voice may not be configured — backend returns 503 until the 4 Twilio Voice SIDs are set): \(error.localizedDescription)")
             return
         }
 
         cachedAccessToken = voice.token
         identity = voice.identity
         LocalStorageService.shared.voiceIdentity = voice.identity
+        NSLog("[voice] access token minted — identity=\(voice.identity) ttl=\(voice.ttl ?? -1)s; calling TwilioVoiceSDK.register…")
 
         // Tell Twilio to route incoming VoIP pushes for this identity to this token.
         do {
             try await TwilioVoiceSDK.register(accessToken: voice.token, deviceToken: token)
-            NSLog("[voice] Registered for VoIP push as \(voice.identity).")
+            // NOTE: success here only means Twilio ACCEPTED the registration. It does
+            // NOT prove a push can be delivered — that additionally requires the
+            // Push Credential's APNs environment (sandbox/production) to match this
+            // build. Watch for the "[voip-push] ⬇︎ didReceiveIncomingPush" line on a
+            // real test call to confirm end-to-end delivery.
+            NSLog("[voice] ✓ Registered for VoIP push as \(voice.identity).")
+            // Only arm the 10-min throttle on SUCCESS, so a failed registration is
+            // retried on the next launch/foreground instead of being suppressed.
+            lastRegisteredAt = Date()
         } catch {
-            NSLog("[voice] Twilio VoIP registration error: \(error.localizedDescription)")
+            NSLog("[voice] ✗ Twilio VoIP registration error: \(error.localizedDescription)")
         }
-        lastRegisteredAt = Date()
 
         // Mirror the registration to our backend so the device row carries the
         // VoIP token + identity (used later by inbound TwiML to dial this client).
@@ -150,6 +165,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
     /// and immediately end it to honor the OS contract.
     func handleIncomingPush(payload: PKPushPayload, completion: @escaping () -> Void) {
         let handled = TwilioVoiceSDK.handleNotification(payload.dictionaryPayload, delegate: self, delegateQueue: nil)
+        NSLog("[voice] handleIncomingPush → TwilioVoiceSDK.handleNotification handled=\(handled)")
         if !handled {
             NSLog("[voice] Received a non-Twilio VoIP push; reporting and ending a placeholder call.")
             let uuid = UUID()
@@ -229,6 +245,7 @@ extension VoiceCallManager: NotificationDelegate {
         // Surface the caller's real phone number (server-side caller-ID
         // passthrough already populates `from`); strip any "client:" prefix.
         let from = (callInvite.from ?? "Unknown").replacingOccurrences(of: "client:", with: "")
+        NSLog("[voice] ✓ callInviteReceived from=\(from) callSid=\(callInvite.callSid) — reporting to CallKit")
         incomingCallerNumber = from
         incomingCallUUID = callInvite.uuid
         activeCallInvites[callInvite.uuid.uuidString] = callInvite
