@@ -6,19 +6,62 @@ import UserNotifications
 struct LeadFlowApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var notificationService = NotificationService.shared
-    private let storage = LocalStorageService.shared
+    @StateObject private var auth = AuthManager.shared
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(notificationService)
+                .environmentObject(auth)
+                .task { await auth.bootstrap() }
         }
     }
 }
 
-// MARK: - Root View (Onboarding vs. Main)
+// MARK: - Root View (Auth gate)
 
+// Outermost gate: validate a stored token at launch, then route to the login
+// screen or the authenticated app. Onboarding/permissions live behind auth in
+// AuthedRootView, so a signed-out user always sees login first.
 struct RootView: View {
+    @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var notificationService: NotificationService
+
+    var body: some View {
+        switch auth.state {
+        case .loading:
+            LaunchView()
+        case .unauthenticated:
+            LoginView()
+        case .authenticated:
+            AuthedRootView()
+                .environmentObject(notificationService)
+        }
+    }
+}
+
+// MARK: - Launch splash (brief, while a stored token is validated)
+
+struct LaunchView: View {
+    var body: some View {
+        ZStack {
+            Color(red: 0.039, green: 0.055, blue: 0.106).ignoresSafeArea()
+            VStack(spacing: 18) {
+                Image("StreamLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 48)
+                ProgressView()
+                    .tint(.white.opacity(0.6))
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Authenticated Root (Onboarding vs. Main)
+
+struct AuthedRootView: View {
     @EnvironmentObject private var notificationService: NotificationService
     @State private var hasCompletedOnboarding = LocalStorageService.shared.hasCompletedOnboarding
     @State private var onboardingStep = 0

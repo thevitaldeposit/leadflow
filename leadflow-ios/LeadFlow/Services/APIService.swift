@@ -15,6 +15,62 @@ final class APIService: ObservableObject {
         return url
     }
 
+    // MARK: Authenticated request layer
+
+    /// Attaches `Authorization: Bearer <jwt>` when a token is stored. Every
+    /// request in this service runs through here (directly or via
+    /// `authorizedRequest`), so once the user logs in, all backend calls are
+    /// scoped to their business by the JWT. When signed out there's no header and
+    /// the soft (attachBusiness) endpoints behave exactly as before.
+    private func authorize(_ request: inout URLRequest) {
+        if let token = KeychainService.shared.token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    /// Builds a request for `path` with the bearer token already attached.
+    private func authorizedRequest(_ path: String, method: String = "GET") throws -> URLRequest {
+        var request = URLRequest(url: try url(path))
+        request.httpMethod = method
+        authorize(&request)
+        return request
+    }
+
+    /// JSON decoder for the auth endpoints. `.convertFromSnakeCase` maps the
+    /// backend's snake_case business columns (subscription_status, …) to our
+    /// camelCase models; already-camelCase keys (businessId) pass through.
+    private func authDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return decoder
+    }
+
+    // MARK: Auth
+
+    /// POST /api/auth/login — verify credentials and return { token, user, business }.
+    /// A 401 here means bad credentials (not an expired session), so it does NOT
+    /// trigger the global sign-out path.
+    func login(email: String, password: String) async throws -> AuthResponse {
+        let endpoint = try url("/api/auth/login")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "password": password])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data, signalAuthFailure: false)
+        return try authDecoder().decode(AuthResponse.self, from: data)
+    }
+
+    /// GET /api/auth/me — the current user + business for the stored token. A 401
+    /// here means the token is invalid/expired and flows through to a sign-out.
+    func fetchMe() async throws -> AuthResponse {
+        let request = try authorizedRequest("/api/auth/me")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data)
+        return try authDecoder().decode(AuthResponse.self, from: data)
+    }
+
     // MARK: Upload Recording
 
     func uploadRecording(
@@ -30,6 +86,7 @@ final class APIService: ObservableObject {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 120
+        authorize(&request)
 
         let boundary = "Boundary-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -76,7 +133,9 @@ final class APIService: ObservableObject {
             components.queryItems = [URLQueryItem(name: "discarded", value: "include")]
         }
         guard let url = components.url else { throw APIError.invalidURL }
-        let (data, response) = try await URLSession.shared.data(from: url)
+        var request = URLRequest(url: url)
+        authorize(&request)
+        let (data, response) = try await URLSession.shared.data(for: request)
         try validateResponse(response, data: data)
         return try JSONDecoder().decode([Lead].self, from: data)
     }
@@ -95,14 +154,16 @@ final class APIService: ObservableObject {
             URLQueryItem(name: "order", value: "desc"),
         ]
         guard let url = components.url else { throw APIError.invalidURL }
-        let (data, response) = try await URLSession.shared.data(from: url)
+        var request = URLRequest(url: url)
+        authorize(&request)
+        let (data, response) = try await URLSession.shared.data(for: request)
         try validateResponse(response, data: data)
         return try JSONDecoder().decode([Lead].self, from: data)
     }
 
     func fetchLead(id: Int) async throws -> Lead {
-        let endpoint = try url("/api/leads/\(id)")
-        let (data, response) = try await URLSession.shared.data(from: endpoint)
+        let request = try authorizedRequest("/api/leads/\(id)")
+        let (data, response) = try await URLSession.shared.data(for: request)
         try validateResponse(response, data: data)
         return try JSONDecoder().decode(Lead.self, from: data)
     }
@@ -113,6 +174,7 @@ final class APIService: ObservableObject {
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: fields)
+        authorize(&request)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         try validateResponse(response, data: data)
@@ -151,6 +213,7 @@ final class APIService: ObservableObject {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authorize(&request)
 
         var body: [String: Any] = [
             "deviceToken": apns,
@@ -174,6 +237,7 @@ final class APIService: ObservableObject {
         request.httpMethod = "DELETE"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["deviceToken": apns])
+        authorize(&request)
         _ = try? await URLSession.shared.data(for: request)
     }
 
@@ -193,9 +257,11 @@ final class APIService: ObservableObject {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // When per-user JWT auth lands on iOS, attach the Authorization header
-        // here so the token is scoped to the signed-in user, not the default
-        // business.
+        // Scope the Voice token to the signed-in user when logged in. The backend's
+        // /api/voice/token is soft-auth (attachBusiness): with the bearer header it
+        // mints the identity for the user's business; without it (signed out) it
+        // falls back to the default business, exactly as before.
+        authorize(&request)
         let (data, response) = try await URLSession.shared.data(for: request)
         try validateResponse(response, data: data)
         return try JSONDecoder().decode(VoiceTokenResponse.self, from: data)
@@ -217,9 +283,16 @@ final class APIService: ObservableObject {
 
     // MARK: Private
 
-    private func validateResponse(_ response: URLResponse, data: Data) throws {
+    private func validateResponse(_ response: URLResponse, data: Data, signalAuthFailure: Bool = true) throws {
         guard let http = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
+        }
+        // A 401 on an authenticated call means the stored token is missing/expired.
+        // Broadcast it so AuthManager clears the session and returns to login. The
+        // login call opts out (signalAuthFailure: false): its 401 means "wrong
+        // credentials", not "session expired".
+        if http.statusCode == 401 && signalAuthFailure {
+            NotificationCenter.default.post(name: .authUnauthorized, object: nil)
         }
         guard 200..<300 ~= http.statusCode else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String

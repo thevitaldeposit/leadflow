@@ -31,6 +31,9 @@
 		9D000000000000000000017 /* VoIPPushManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001A /* VoIPPushManager.swift */; };
 		9D000000000000000000019 /* HomeDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001B /* HomeDashboardView.swift */; };
 		9D000000000000000000018 /* TwilioVoice in Frameworks */ = {isa = PBXBuildFile; productRef = 9F000000000000000000002 /* TwilioVoice */; };
+		9D00000000000000000001A /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001C /* KeychainService.swift */; };
+		9D00000000000000000001B /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001D /* AuthManager.swift */; };
+		9D00000000000000000001C /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001E /* LoginView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +63,9 @@
 		9C000000000000000000019 /* CallKitProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitProvider.swift; sourceTree = "<group>"; };
 		9C00000000000000000001A /* VoIPPushManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoIPPushManager.swift; sourceTree = "<group>"; };
 		9C00000000000000000001B /* HomeDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDashboardView.swift; sourceTree = "<group>"; };
+		9C00000000000000000001C /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		9C00000000000000000001D /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
+		9C00000000000000000001E /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -137,6 +143,8 @@
 				9C000000000000000000005 /* APIService.swift */,
 				9C000000000000000000006 /* NotificationService.swift */,
 				9C000000000000000000007 /* LocalStorageService.swift */,
+				9C00000000000000000001C /* KeychainService.swift */,
+				9C00000000000000000001D /* AuthManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -145,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				9B000000000000000000007 /* Onboarding */,
+				9C00000000000000000001E /* LoginView.swift */,
 				9C00000000000000000001B /* HomeDashboardView.swift */,
 				9C00000000000000000000B /* DashboardView.swift */,
 				9C00000000000000000000C /* LeadCardView.swift */,
@@ -291,6 +300,9 @@
 				9D000000000000000000015 /* VoiceCallManager.swift in Sources */,
 				9D000000000000000000016 /* CallKitProvider.swift in Sources */,
 				9D000000000000000000017 /* VoIPPushManager.swift in Sources */,
+				9D00000000000000000001A /* KeychainService.swift in Sources */,
+				9D00000000000000000001B /* AuthManager.swift in Sources */,
+				9D00000000000000000001C /* LoginView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

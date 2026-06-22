@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject private var auth: AuthManager
     @State private var backendURL = LocalStorageService.shared.backendURL
     @State private var userName = LocalStorageService.shared.userName
     @State private var businessName = LocalStorageService.shared.businessName
@@ -9,6 +10,7 @@ struct SettingsView: View {
     @State private var healthStatus: String?
     @State private var isCheckingHealth = false
     @State private var pendingCount = 0
+    @State private var isSigningOut = false
 
     private let storage = LocalStorageService.shared
     private let vertical = LocalStorageService.shared.selectedVertical
@@ -17,6 +19,10 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Account") {
+                    if let user = auth.user {
+                        LabeledContent("Signed in as", value: user.email)
+                        LabeledContent("Role", value: user.parsedRole.rawValue.capitalized)
+                    }
                     LabeledContent("Business Type", value: vertical.displayName)
                     HStack {
                         Text("Name")
@@ -92,9 +98,31 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity)
                         .foregroundColor(.blue)
                 }
+
+                Section {
+                    Button(role: .destructive, action: signOut) {
+                        HStack {
+                            Spacer()
+                            if isSigningOut {
+                                ProgressView().progressViewStyle(.circular)
+                            }
+                            Text(isSigningOut ? "Signing out…" : "Sign Out")
+                            Spacer()
+                        }
+                    }
+                    .disabled(isSigningOut)
+                }
             }
             .navigationTitle("Settings")
             .onAppear { pendingCount = storage.pendingUploads.count }
+        }
+    }
+
+    private func signOut() {
+        isSigningOut = true
+        Task {
+            await auth.logout()
+            // AuthManager flips state → RootView swaps back to the login screen.
         }
     }
 

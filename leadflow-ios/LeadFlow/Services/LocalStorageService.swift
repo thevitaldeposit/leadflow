@@ -14,6 +14,7 @@ enum SettingsKey {
     static let deviceToken = "deviceToken"
     static let voipToken = "voipToken"
     static let voiceIdentity = "voiceIdentity"
+    static let authSession = "authSession"
 }
 
 // MARK: - Pending Upload
@@ -100,6 +101,21 @@ final class LocalStorageService {
     var voiceIdentity: String? {
         get { defaults.string(forKey: SettingsKey.voiceIdentity) }
         set { defaults.set(newValue, forKey: SettingsKey.voiceIdentity) }
+    }
+
+    // Cached, non-sensitive session identity (logged-in user + business), so a
+    // relaunch can show the right account/role immediately while /api/auth/me
+    // refreshes in the background. The JWT itself is NOT stored here — it lives in
+    // the Keychain (see KeychainService). Cleared on logout / 401.
+    var authSessionData: Data? {
+        get { defaults.data(forKey: SettingsKey.authSession) }
+        set {
+            if let newValue {
+                defaults.set(newValue, forKey: SettingsKey.authSession)
+            } else {
+                defaults.removeObject(forKey: SettingsKey.authSession)
+            }
+        }
     }
 
     // MARK: Pending Upload Queue
