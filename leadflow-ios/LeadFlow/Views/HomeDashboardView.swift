@@ -7,9 +7,9 @@ import SwiftUI
 // and Today's Schedule are derived entirely client-side, porting the exact
 // membership/ranking/date-filter logic from client/src/utils/verticalConfig.js
 // and client/src/components/home_services/HomeServicesDashboard.jsx so the mobile
-// queue matches the web's. The Availability Tracker's endpoints require auth the
-// app doesn't send yet (no JWT), so that section renders a sign-in placeholder
-// until token auth lands — see the card at the bottom.
+// queue matches the web's. The Availability section pulls live per-size inventory
+// from GET /api/dumpsters (requireAuth), scoped to the signed-in business by the
+// JWT the app now sends — mirroring the web InventoryPage overview.
 
 // MARK: - Theme (dark navy, per the mockup)
 
@@ -541,12 +541,26 @@ fileprivate struct ScheduleItem: Identifiable {
 fileprivate final class HomeDashboardViewModel: ObservableObject {
     @Published var actionItems: [ActionItem] = []
     @Published var schedule: [ScheduleItem] = []
+    @Published var inventory: [InventoryPool] = []
     @Published var isLoading = false
     @Published var hasLoaded = false
+    @Published var inventoryLoaded = false
     @Published var errorMessage: String?
+    @Published var inventoryError: String?
 
     func refresh() async {
         isLoading = true
+        // Leads (Action Queue + Today's Schedule) and inventory (Availability) come
+        // from independent endpoints — load them concurrently and let each fail on
+        // its own so one outage doesn't blank the other.
+        async let leadsLoad: Void = loadLeads()
+        async let inventoryLoad: Void = loadInventory()
+        _ = await (leadsLoad, inventoryLoad)
+        isLoading = false
+        hasLoaded = true
+    }
+
+    private func loadLeads() async {
         do {
             let leads = try await APIService.shared.fetchHomeServicesLeads()
             compute(leads)
@@ -554,8 +568,16 @@ fileprivate final class HomeDashboardViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
-        isLoading = false
-        hasLoaded = true
+    }
+
+    private func loadInventory() async {
+        do {
+            inventory = try await APIService.shared.fetchInventory()
+            inventoryError = nil
+        } catch {
+            inventoryError = error.localizedDescription
+        }
+        inventoryLoaded = true
     }
 
     private func compute(_ leads: [Lead]) {
@@ -649,7 +671,9 @@ struct HomeDashboardView: View {
                         header
                         ActionQueueCard(items: vm.actionItems, loading: vm.isLoading && !vm.hasLoaded, error: vm.errorMessage, onTap: openLead)
                         TodaysScheduleCard(items: vm.schedule, loading: vm.isLoading && !vm.hasLoaded, onTap: openLead)
-                        AvailabilityCard()
+                        AvailabilityCard(pools: vm.inventory,
+                                         loading: vm.isLoading && !vm.inventoryLoaded,
+                                         error: vm.inventoryError)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -878,31 +902,81 @@ fileprivate struct ScheduleRow: View {
     }
 }
 
-// Availability Tracker — third section. Its data lives behind auth-gated endpoints
-// (GET /api/schedule/availability, GET /api/dumpsters) the app can't call without
-// a JWT, so it renders an intentional sign-in placeholder rather than mock data.
+// Availability — third section. Live per-size inventory from GET /api/dumpsters
+// (requireAuth, scoped to the signed-in business by the JWT). Mirrors the web
+// InventoryPage overview: each size shows units available (owned − in service)
+// against the owned total, with a tag for any units pulled for service.
 fileprivate struct AvailabilityCard: View {
+    let pools: [InventoryPool]
+    let loading: Bool
+    let error: String?
+
+    private var totalOwned: Int { pools.reduce(0) { $0 + $1.quantity } }
+    private var totalAvailable: Int { pools.reduce(0) { $0 + $1.available } }
+
     var body: some View {
         DashCard {
             CardHeaderRow(icon: "shippingbox.fill", iconColor: Theme.accent, title: "Availability") {
-                EmptyView()
+                if !pools.isEmpty {
+                    Text("\(totalAvailable) of \(totalOwned) ready")
+                        .font(.caption).foregroundColor(Theme.mutedText)
+                }
             }
-            VStack(spacing: 10) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 22))
-                    .foregroundColor(Theme.mutedText)
-                Text("Sign-in required")
-                    .font(.subheadline).fontWeight(.semibold)
-                    .foregroundColor(Theme.secondaryText)
-                Text("Live dumpster availability appears here once account sign-in is added to the app.")
-                    .font(.caption)
-                    .foregroundColor(Theme.mutedText)
-                    .multilineTextAlignment(.center)
+            if loading {
+                LoadingRow()
+            } else if let error = error, pools.isEmpty {
+                EmptyMessage(text: "Couldn't load availability — pull to refresh.\n\(error)", systemImage: "wifi.exclamationmark")
+            } else if pools.isEmpty {
+                EmptyMessage(text: "No inventory yet. Add dumpster sizes on the web dashboard to track availability here.", systemImage: "shippingbox")
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(pools.enumerated()), id: \.element.id) { index, pool in
+                        if index > 0 { RowDivider() }
+                        AvailabilityRow(pool: pool)
+                    }
+                }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 22)
         }
+    }
+}
+
+fileprivate struct AvailabilityRow: View {
+    let pool: InventoryPool
+
+    // Green when there's comfortable stock, amber at the last unit, red when none
+    // are free — a quick at-a-glance read of each size's health.
+    private var availColor: Color {
+        if pool.available <= 0 { return Theme.danger }
+        if pool.available == 1 { return Theme.warm }
+        return Theme.high
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            TagPill(text: formatSize(pool.size) ?? pool.size, color: Theme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text("\(pool.available)")
+                        .font(.subheadline).fontWeight(.bold)
+                        .foregroundColor(availColor)
+                    Text("of \(pool.quantity) available")
+                        .font(.subheadline)
+                        .foregroundColor(Theme.secondaryText)
+                }
+                if let notes = nonEmpty(pool.notes) {
+                    Text(notes)
+                        .font(.caption2).foregroundColor(Theme.mutedText)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            if pool.unitsInService > 0 {
+                MiniTag(text: "\(pool.unitsInService) IN SERVICE", color: Theme.warm)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
     }
 }
 

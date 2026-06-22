@@ -192,6 +192,19 @@ final class APIService: ObservableObject {
         return try await updateLead(id: id, fields: fields)
     }
 
+    // MARK: Inventory (availability)
+
+    /// GET /api/dumpsters — the business's per-size inventory pools. This endpoint
+    /// is `requireAuth`, so it only returns data once the user is logged in; the
+    /// authenticated layer attaches the bearer token and the backend scopes the
+    /// pools to the JWT's business. Powers the home dashboard Availability card.
+    func fetchInventory() async throws -> [InventoryPool] {
+        let request = try authorizedRequest("/api/dumpsters")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data)
+        return try JSONDecoder().decode([InventoryPool].self, from: data)
+    }
+
     // MARK: Device Registration
 
     /// Registers this device's APNs token (called from the APNs callback). Routes

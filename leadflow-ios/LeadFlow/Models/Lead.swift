@@ -113,6 +113,34 @@ struct Lead: Codable, Identifiable {
     var isDiscarded: Bool { discarded == 1 }
 }
 
+// MARK: - Inventory Pool Model
+
+// One per-size inventory pool, as returned by GET /api/dumpsters (requireAuth,
+// scoped to the business by the JWT). Mirrors the web InventoryPage: each row is
+// a size with an owned quantity and a count of units pulled for service.
+// quantity/units_in_service are stored as optionals so a null column decodes to
+// 0 rather than throwing (the backend reads them as `value || 0` too).
+struct InventoryPool: Codable, Identifiable {
+    let id: Int
+    let size: String
+    let notes: String?
+    private let quantityRaw: Int?
+    private let unitsInServiceRaw: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, size, notes
+        case quantityRaw = "quantity"
+        case unitsInServiceRaw = "units_in_service"
+    }
+
+    var quantity: Int { quantityRaw ?? 0 }
+    var unitsInService: Int { unitsInServiceRaw ?? 0 }
+
+    /// Units ready to rent, excluding those pulled for service — exactly the
+    /// "Available" column the web inventory overview shows (owned − in service).
+    var available: Int { max(0, quantity - unitsInService) }
+}
+
 enum ConfidenceTier {
     case high, medium, low
 
