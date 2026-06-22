@@ -205,6 +205,25 @@ final class APIService: ObservableObject {
         return try JSONDecoder().decode([InventoryPool].self, from: data)
     }
 
+    /// GET /api/schedule/availability — forward-looking, date-specific availability
+    /// for a delivery window. This is the exact endpoint the web dashboard's "Quick
+    /// Availability Check" calls (same params: delivery_date=YYYY-MM-DD &
+    /// rental_duration=<days>). requireAuth, so the bearer token scopes the result
+    /// to the signed-in business. Returns per-size owned/available counts.
+    func checkAvailability(deliveryDate: String, rentalDuration: Int) async throws -> AvailabilityResponse {
+        var components = URLComponents(string: baseURL + "/api/schedule/availability")!
+        components.queryItems = [
+            URLQueryItem(name: "delivery_date", value: deliveryDate),
+            URLQueryItem(name: "rental_duration", value: String(rentalDuration)),
+        ]
+        guard let url = components.url else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        authorize(&request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data)
+        return try JSONDecoder().decode(AvailabilityResponse.self, from: data)
+    }
+
     // MARK: Device Registration
 
     /// Registers this device's APNs token (called from the APNs callback). Routes

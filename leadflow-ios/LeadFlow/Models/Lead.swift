@@ -141,6 +141,42 @@ struct InventoryPool: Codable, Identifiable {
     var available: Int { max(0, quantity - unitsInService) }
 }
 
+// Forward-looking availability for a delivery window, returned by
+// GET /api/schedule/availability — the endpoint the web dashboard's "Quick
+// Availability Check" calls. The backend already emits camelCase keys
+// (deliveryDate, bySizes, availableCount, …), so a plain JSONDecoder maps them.
+struct AvailabilityResponse: Decodable {
+    let deliveryDate: String
+    let pickupDate: String
+    let rentalDuration: Int
+    let bySizes: [SizeAvailability]
+}
+
+struct SizeAvailability: Decodable, Identifiable {
+    let size: String
+    let ownedCount: Int
+    let unitsInService: Int
+    let bookedCount: Int
+    let availableCount: Int
+
+    var id: String { size }
+
+    enum CodingKeys: String, CodingKey {
+        case size, ownedCount, unitsInService, bookedCount, availableCount
+    }
+
+    // Defensive against a null/missing count (mirrors InventoryPool's tolerance):
+    // size is required, the counts default to 0.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        size = try c.decode(String.self, forKey: .size)
+        ownedCount = (try? c.decodeIfPresent(Int.self, forKey: .ownedCount)) ?? 0
+        unitsInService = (try? c.decodeIfPresent(Int.self, forKey: .unitsInService)) ?? 0
+        bookedCount = (try? c.decodeIfPresent(Int.self, forKey: .bookedCount)) ?? 0
+        availableCount = (try? c.decodeIfPresent(Int.self, forKey: .availableCount)) ?? 0
+    }
+}
+
 enum ConfidenceTier {
     case high, medium, low
 

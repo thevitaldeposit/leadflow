@@ -1,15 +1,18 @@
 import SwiftUI
 
 // Mobile home dashboard. Mirrors the web Home Services dashboard's three
-// data-backed sections — Action Queue, Today's Schedule, Availability Tracker —
+// data-backed sections — Action Queue, Today's Schedule, Availability checker —
 // in the same order, pulling the same live data from the same API endpoint
 // (GET /api/leads?vertical=home_services&includeMissed=true). The Action Queue
 // and Today's Schedule are derived entirely client-side, porting the exact
 // membership/ranking/date-filter logic from client/src/utils/verticalConfig.js
 // and client/src/components/home_services/HomeServicesDashboard.jsx so the mobile
-// queue matches the web's. The Availability section pulls live per-size inventory
-// from GET /api/dumpsters (requireAuth), scoped to the signed-in business by the
-// JWT the app now sends — mirroring the web InventoryPage overview.
+// queue matches the web's. The Availability section replicates the web dashboard's
+// "Quick Availability Check": a forward-looking, date-specific availability tool
+// (size + delivery date + rental duration) that calls GET /api/schedule/availability
+// (requireAuth, scoped to the signed-in business by the JWT) — the same endpoint and
+// contract as HomeServicesDashboard.jsx's QuickAvailabilityCheck. Its size options
+// are loaded from the business's pools (GET /api/dumpsters).
 
 // MARK: - Theme (dark navy, per the mockup)
 
@@ -671,7 +674,7 @@ struct HomeDashboardView: View {
                         header
                         ActionQueueCard(items: vm.actionItems, loading: vm.isLoading && !vm.hasLoaded, error: vm.errorMessage, onTap: openLead)
                         TodaysScheduleCard(items: vm.schedule, loading: vm.isLoading && !vm.hasLoaded, onTap: openLead)
-                        AvailabilityCard(pools: vm.inventory,
+                        AvailabilityCard(sizes: vm.inventory.map(\.size).filter { !$0.isEmpty },
                                          loading: vm.isLoading && !vm.inventoryLoaded,
                                          error: vm.inventoryError)
                     }
@@ -902,81 +905,237 @@ fileprivate struct ScheduleRow: View {
     }
 }
 
-// Availability — third section. Live per-size inventory from GET /api/dumpsters
-// (requireAuth, scoped to the signed-in business by the JWT). Mirrors the web
-// InventoryPage overview: each size shows units available (owned − in service)
-// against the owned total, with a tag for any units pulled for service.
+// Availability — third section. Replicates the web dashboard's "Quick Availability
+// Check": a forward-looking, date-specific availability checker (NOT a static
+// inventory snapshot). The size dropdown is populated from the business's pools
+// (GET /api/dumpsters); tapping "Check Availability" calls the same endpoint the web
+// tool uses — GET /api/schedule/availability?delivery_date=…&rental_duration=…
+// (requireAuth, scoped to the signed-in business by the JWT) — and renders the same
+// result string the web shows ("1 of 2 available for 20 yard on Jun 23").
 fileprivate struct AvailabilityCard: View {
-    let pools: [InventoryPool]
-    let loading: Bool
-    let error: String?
+    let sizes: [String]      // size options, from the business's inventory pools
+    let loading: Bool        // size-list (inventory) still loading
+    let error: String?       // size-list (inventory) load error
 
-    private var totalOwned: Int { pools.reduce(0) { $0 + $1.quantity } }
-    private var totalAvailable: Int { pools.reduce(0) { $0 + $1.available } }
+    @State private var size: String = ""
+    @State private var date: Date = Date()
+    @State private var duration: String = ""
+    @State private var checking = false
+    @State private var result: CheckResult?
+    @FocusState private var durationFocused: Bool
+
+    // Mirrors the web checker's four result states.
+    fileprivate enum CheckResult {
+        case incomplete
+        case available(available: Int, owned: Int, size: String, dateLabel: String)
+        case unavailable(size: String)
+        case failed
+    }
 
     var body: some View {
         DashCard {
-            CardHeaderRow(icon: "shippingbox.fill", iconColor: Theme.accent, title: "Availability") {
-                if !pools.isEmpty {
-                    Text("\(totalAvailable) of \(totalOwned) ready")
-                        .font(.caption).foregroundColor(Theme.mutedText)
-                }
+            CardHeaderRow(icon: "calendar.badge.clock", iconColor: Theme.accent, title: "Quick Availability Check") {
+                EmptyView()
             }
-            if loading {
+            if loading && sizes.isEmpty {
                 LoadingRow()
-            } else if let error = error, pools.isEmpty {
-                EmptyMessage(text: "Couldn't load availability — pull to refresh.\n\(error)", systemImage: "wifi.exclamationmark")
-            } else if pools.isEmpty {
-                EmptyMessage(text: "No inventory yet. Add dumpster sizes on the web dashboard to track availability here.", systemImage: "shippingbox")
+            } else if let error = error, sizes.isEmpty {
+                EmptyMessage(text: "Couldn't load inventory — pull to refresh.\n\(error)", systemImage: "wifi.exclamationmark")
+            } else if sizes.isEmpty {
+                EmptyMessage(text: "No inventory yet. Add dumpster sizes on the web dashboard to check availability here.", systemImage: "shippingbox")
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(pools.enumerated()), id: \.element.id) { index, pool in
-                        if index > 0 { RowDivider() }
-                        AvailabilityRow(pool: pool)
+                VStack(alignment: .leading, spacing: 13) {
+                    Text("Check dumpster availability in seconds")
+                        .font(.caption).foregroundColor(Theme.secondaryText)
+                    sizeField
+                    dateField
+                    durationField
+                    checkButton
+                    resultView
+                }
+                .padding(14)
+            }
+        }
+    }
+
+    // MARK: Inputs
+
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.caption2).fontWeight(.semibold)
+            .foregroundColor(Theme.mutedText)
+    }
+
+    private var fieldBackground: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Theme.cardElevated)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
+    }
+
+    private var sizeField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            fieldLabel("Dumpster Size")
+            Menu {
+                ForEach(sizes, id: \.self) { s in
+                    Button { size = s } label: {
+                        if s == size { Label(s, systemImage: "checkmark") } else { Text(s) }
                     }
+                }
+            } label: {
+                HStack {
+                    Text(size.isEmpty ? "Select size…" : size)
+                        .foregroundColor(size.isEmpty ? Theme.mutedText : Theme.primaryText)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2).foregroundColor(Theme.secondaryText)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .background(fieldBackground)
+            }
+        }
+    }
+
+    private var dateField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            fieldLabel("Delivery Date")
+            HStack {
+                DatePicker("", selection: $date, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+                    .tint(Theme.accent)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(fieldBackground)
+        }
+    }
+
+    private var durationField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            fieldLabel("Rental Duration (days)")
+            TextField("", text: $duration, prompt: Text("e.g. 7").foregroundColor(Theme.mutedText))
+                .keyboardType(.numberPad)
+                .focused($durationFocused)
+                .foregroundColor(Theme.primaryText)
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .background(fieldBackground)
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { durationFocused = false }
+                    }
+                }
+        }
+    }
+
+    private var checkButton: some View {
+        Button(action: runCheck) {
+            HStack(spacing: 8) {
+                if checking {
+                    ProgressView().tint(.white).scaleEffect(0.85)
+                }
+                Text(checking ? "Checking…" : "Check Availability")
+                    .font(.subheadline).fontWeight(.semibold)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.accent.opacity(checking ? 0.6 : 1)))
+        }
+        .buttonStyle(.plain)
+        .disabled(checking)
+        .padding(.top, 1)
+    }
+
+    @ViewBuilder private var resultView: some View {
+        if let result = result {
+            switch result {
+            case .incomplete:
+                Text("Please fill in all fields")
+                    .font(.subheadline).foregroundColor(Theme.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case let .available(available, owned, sz, dateLabel):
+                Text("\(available) of \(owned) available for \(sz) on \(dateLabel)")
+                    .font(.subheadline).fontWeight(.semibold).foregroundColor(Theme.high)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.high.opacity(0.13)))
+            case let .unavailable(sz):
+                Text("No \(sz) available for selected dates")
+                    .font(.subheadline).fontWeight(.semibold).foregroundColor(Theme.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.danger.opacity(0.13)))
+            case .failed:
+                Text("Could not check availability — please try again.")
+                    .font(.subheadline).foregroundColor(Theme.warm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    // MARK: Check
+
+    // Validate (size + positive-integer duration; the date picker is always set),
+    // call the same /schedule/availability endpoint the web uses, then match the
+    // selected size in the response by exact name first, falling back to leading
+    // number ("20 yard" ~ "20yd") — exactly the web's `s.size === size ||
+    // sizeMatches(...)`. available when the matched size has availableCount > 0.
+    private func runCheck() {
+        durationFocused = false
+        let trimmed = duration.trimmingCharacters(in: .whitespaces)
+        guard !size.isEmpty, let days = Int(trimmed), days >= 1 else {
+            result = .incomplete
+            return
+        }
+        let deliveryISO = DateHelp.localDayString(date)
+        let selectedSize = size
+        checking = true
+        result = nil
+        Task {
+            do {
+                let resp = try await APIService.shared.checkAvailability(deliveryDate: deliveryISO, rentalDuration: days)
+                let match = resp.bySizes.first { $0.size == selectedSize }
+                    ?? resp.bySizes.first { availabilitySizeMatches($0.size, selectedSize) }
+                await MainActor.run {
+                    if let m = match, m.availableCount > 0 {
+                        result = .available(available: m.availableCount, owned: m.ownedCount,
+                                            size: selectedSize, dateLabel: formatDeliveryDateLabel(deliveryISO))
+                    } else {
+                        result = .unavailable(size: selectedSize)
+                    }
+                    checking = false
+                }
+            } catch {
+                await MainActor.run {
+                    result = .failed
+                    checking = false
                 }
             }
         }
     }
 }
 
-fileprivate struct AvailabilityRow: View {
-    let pool: InventoryPool
+// Web-parity helpers for the availability checker.
 
-    // Green when there's comfortable stock, amber at the last unit, red when none
-    // are free — a quick at-a-glance read of each size's health.
-    private var availColor: Color {
-        if pool.available <= 0 { return Theme.danger }
-        if pool.available == 1 { return Theme.warm }
-        return Theme.high
-    }
+// Port of the web's sizeMatches: equal if both strings' first digit-runs match
+// ("20 yard" ~ "20yd"). Used as the fallback after an exact size-name match.
+fileprivate func availabilitySizeMatches(_ a: String, _ b: String) -> Bool {
+    guard let na = a.firstDigitRun, let nb = b.firstDigitRun else { return false }
+    return na == nb
+}
 
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            TagPill(text: formatSize(pool.size) ?? pool.size, color: Theme.accent)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Text("\(pool.available)")
-                        .font(.subheadline).fontWeight(.bold)
-                        .foregroundColor(availColor)
-                    Text("of \(pool.quantity) available")
-                        .font(.subheadline)
-                        .foregroundColor(Theme.secondaryText)
-                }
-                if let notes = nonEmpty(pool.notes) {
-                    Text(notes)
-                        .font(.caption2).foregroundColor(Theme.mutedText)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 4)
-            if pool.unitsInService > 0 {
-                MiniTag(text: "\(pool.unitsInService) IN SERVICE", color: Theme.warm)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
+// Port of the web's formatDeliveryDate: "Jun 23" from a YYYY-MM-DD string.
+fileprivate func formatDeliveryDateLabel(_ ymd: String) -> String {
+    guard let d = DateHelp.parseLocalDate(ymd) else { return ymd }
+    let f = DateFormatter(); f.dateFormat = "MMM d"
+    return f.string(from: d)
+}
+
+fileprivate extension String {
+    var firstDigitRun: String? {
+        guard let r = range(of: "\\d+", options: .regularExpression) else { return nil }
+        return String(self[r])
     }
 }
 
