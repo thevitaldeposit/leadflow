@@ -29,6 +29,7 @@
 		9D000000000000000000015 /* VoiceCallManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000018 /* VoiceCallManager.swift */; };
 		9D000000000000000000016 /* CallKitProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C000000000000000000019 /* CallKitProvider.swift */; };
 		9D000000000000000000017 /* VoIPPushManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001A /* VoIPPushManager.swift */; };
+		9D000000000000000000019 /* HomeDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001B /* HomeDashboardView.swift */; };
 		9D000000000000000000018 /* TwilioVoice in Frameworks */ = {isa = PBXBuildFile; productRef = 9F000000000000000000002 /* TwilioVoice */; };
 /* End PBXBuildFile section */
 
@@ -58,6 +59,7 @@
 		9C000000000000000000018 /* VoiceCallManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallManager.swift; sourceTree = "<group>"; };
 		9C000000000000000000019 /* CallKitProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitProvider.swift; sourceTree = "<group>"; };
 		9C00000000000000000001A /* VoIPPushManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoIPPushManager.swift; sourceTree = "<group>"; };
+		9C00000000000000000001B /* HomeDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDashboardView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -143,6 +145,7 @@
 			isa = PBXGroup;
 			children = (
 				9B000000000000000000007 /* Onboarding */,
+				9C00000000000000000001B /* HomeDashboardView.swift */,
 				9C00000000000000000000B /* DashboardView.swift */,
 				9C00000000000000000000C /* LeadCardView.swift */,
 				9C00000000000000000000D /* LeadReviewView.swift */,
@@ -280,6 +283,7 @@
 				9D000000000000000000009 /* UserInfoView.swift in Sources */,
 				9D00000000000000000000A /* PermissionsView.swift in Sources */,
 				9D00000000000000000000B /* DashboardView.swift in Sources */,
+				9D000000000000000000019 /* HomeDashboardView.swift in Sources */,
 				9D00000000000000000000C /* LeadCardView.swift in Sources */,
 				9D00000000000000000000D /* LeadReviewView.swift in Sources */,
 				9D00000000000000000000E /* SettingsView.swift in Sources */,

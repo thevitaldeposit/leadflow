@@ -24,6 +24,21 @@ struct Lead: Codable, Identifiable {
     var rawTranscript: String?
     var extractionType: String?
 
+    // Home Services flat columns (returned by GET /api/leads via SELECT *). All
+    // optional & additive, so absent columns simply decode to nil. These power the
+    // dashboard's Action Queue + Today's Schedule (mirrors the web dashboard).
+    var jobStatus: String?
+    var subVertical: String?
+    var callType: String?
+    var outcome: String?
+    var deliveryDate: String?
+    var pickupDate: String?
+    var scheduledTime: String?
+    var followUpDate: String?
+    var paidAt: String?
+    var internalNotes: String?
+    var estimatedRevenue: Double?
+
     enum CodingKeys: String, CodingKey {
         case id
         case status
@@ -45,7 +60,24 @@ struct Lead: Codable, Identifiable {
         case email
         case rawTranscript = "raw_transcript"
         case extractionType = "extraction_type"
+        case jobStatus = "job_status"
+        case subVertical = "sub_vertical"
+        case callType = "call_type"
+        case outcome
+        case deliveryDate = "delivery_date"
+        case pickupDate = "pickup_date"
+        case scheduledTime = "scheduled_time"
+        case followUpDate = "follow_up_date"
+        case paidAt = "paid_at"
+        case internalNotes = "internal_notes"
+        case estimatedRevenue = "estimated_revenue"
     }
+
+    // Convenience accessors for vertical_data fields (parsed lazily from the JSON
+    // blob). Kept here so the dashboard logic reads like the web's parseVerticalData.
+    func vdString(_ key: String) -> String? { verticalData[key]?.stringValue }
+    func vdBool(_ key: String) -> Bool? { verticalData[key]?.boolValue }
+    func vdDouble(_ key: String) -> Double? { verticalData[key]?.doubleValue }
 
     var verticalData: [String: AnyCodable] {
         guard let raw = verticalDataRaw,
@@ -113,6 +145,15 @@ struct AnyCodable: Codable {
         case let b as Bool: return b
         case let s as String: return s.lowercased() == "true"
         case let n as Int: return n != 0
+        default: return nil
+        }
+    }
+
+    var doubleValue: Double? {
+        switch value {
+        case let d as Double: return d
+        case let i as Int: return Double(i)
+        case let s as String: return Double(s)
         default: return nil
         }
     }

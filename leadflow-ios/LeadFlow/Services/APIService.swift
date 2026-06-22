@@ -81,6 +81,25 @@ final class APIService: ObservableObject {
         return try JSONDecoder().decode([Lead].self, from: data)
     }
 
+    /// Fetches the home-services leads that power the dashboard. Mirrors the web
+    /// dashboard's single call: GET /api/leads?vertical=home_services&includeMissed=true.
+    /// includeMissed=true surfaces missed-call placeholders (Action Queue only); the
+    /// dashboard logic keeps them out of every other metric. Tokenless-friendly —
+    /// resolves to the default business (Valley Binz) via the backend's attachBusiness.
+    func fetchHomeServicesLeads() async throws -> [Lead] {
+        var components = URLComponents(string: baseURL + "/api/leads")!
+        components.queryItems = [
+            URLQueryItem(name: "vertical", value: "home_services"),
+            URLQueryItem(name: "includeMissed", value: "true"),
+            URLQueryItem(name: "sort", value: "created_at"),
+            URLQueryItem(name: "order", value: "desc"),
+        ]
+        guard let url = components.url else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try validateResponse(response, data: data)
+        return try JSONDecoder().decode([Lead].self, from: data)
+    }
+
     func fetchLead(id: Int) async throws -> Lead {
         let endpoint = try url("/api/leads/\(id)")
         let (data, response) = try await URLSession.shared.data(from: endpoint)

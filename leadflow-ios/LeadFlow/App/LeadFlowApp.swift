@@ -71,6 +71,8 @@ struct MainTabView: View {
 
     var body: some View {
         TabView {
+            HomeDashboardView()
+                .tabItem { Label("Home", systemImage: "house.fill") }
             DashboardView()
                 .tabItem { Label("Leads", systemImage: "list.bullet.rectangle.portrait") }
                 .environmentObject(notificationService)
