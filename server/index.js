@@ -30,6 +30,8 @@ const contactRouter = require('./routes/contact');
 const dashboardRouter = require('./routes/dashboard');
 const { router: billingRouter, handleStripeWebhook } = require('./routes/billing');
 const adminRouter = require('./routes/admin');
+const customersRouter = require('./routes/customers');
+const pricingRouter = require('./routes/pricing');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -122,6 +124,8 @@ app.get('/api/dashboard/stats', requireAuth, (req, res) => {
 });
 
 app.use('/api/leads', leadsRouter);
+app.use('/api/customers', customersRouter);
+app.use('/api/pricing', pricingRouter);
 app.use('/api/dumpsters', dumpsterRouter);
 app.use('/api/schedule', scheduleRouter);
 app.use('/api/extract', extractRouter);

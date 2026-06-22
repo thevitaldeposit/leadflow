@@ -70,6 +70,63 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // Customers — the unified person-level record (consolidates leads/opportunities)
+  getCustomers: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/customers${qs ? `?${qs}` : ''}`);
+  },
+  getCustomer: (id) => request(`/customers/${id}`),
+  createCustomer: (body) =>
+    request('/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateCustomer: (id, body) =>
+    request(`/customers/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteCustomer: (id) => request(`/customers/${id}`, { method: 'DELETE' }),
+  getCustomerPricing: (id) => request(`/customers/${id}/pricing`),
+  // Upsert (or clear, with custom_price = null) one per-customer rate override.
+  setCustomerPricing: (id, body) =>
+    request(`/customers/${id}/pricing`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  // Pricing config — the business default price list + discount groups
+  getPricing: () => request('/pricing'),
+  createPriceItem: (body) =>
+    request('/pricing/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updatePriceItem: (id, body) =>
+    request(`/pricing/items/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deletePriceItem: (id) => request(`/pricing/items/${id}`, { method: 'DELETE' }),
+  createDiscountGroup: (body) =>
+    request('/pricing/groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateDiscountGroup: (id, body) =>
+    request(`/pricing/groups/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteDiscountGroup: (id) => request(`/pricing/groups/${id}`, { method: 'DELETE' }),
+
   // Extraction
   extractTranscript: (transcript) =>
     request('/extract/transcript', {

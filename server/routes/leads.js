@@ -6,6 +6,7 @@ const { initiateClickToCall } = require('../services/callService');
 const { logActivity, getActivityForLead } = require('../services/activityLog');
 const { emitToBusiness } = require('../socket');
 const { attachBusiness, requireAuth } = require('../middleware/auth');
+const { reconcileCustomersForBusiness, recomputeCustomerStatus } = require('../services/customerService');
 
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
 // request to the caller's business when a token is present, else to Valley Binz.
@@ -217,9 +218,12 @@ router.put('/:id', (req, res) => {
 
     const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
 
-    // Log a status_change touchpoint whenever job_status actually changes.
+    // Log a status_change touchpoint whenever job_status actually changes, and
+    // refresh the linked customer's derived lifecycle status so the Customers
+    // section reflects the new stage (no-op if the lead isn't linked yet).
     if (updates.job_status !== undefined && updated.job_status !== existing.job_status) {
       logActivity(updated.id, 'status_change', `Status changed to ${updated.job_status}`);
+      if (updated.customer_id) recomputeCustomerStatus(updated.customer_id);
     }
 
     // Trigger payment SMS when a job transitions to booked for the first time
@@ -419,6 +423,10 @@ router.post('/manual', requireAuth, (req, res) => {
     const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(Number(result.lastInsertRowid));
 
     logActivity(lead.id, 'note_added', 'Lead manually created by owner');
+
+    // Attach the new lead to a customer record (find-or-create by phone) right
+    // away so it surfaces under the right person in the Customers section.
+    try { reconcileCustomersForBusiness(businessId); } catch (e) { console.error('[leads/manual] reconcile error:', e.message); }
 
     // Booked directly → same payment SMS path the PUT booking transition uses,
     // unless the owner already marked it paid.

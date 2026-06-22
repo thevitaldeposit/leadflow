@@ -95,6 +95,33 @@ export const HOME_SERVICES_SUB_VERTICALS = [
   { id: 'hvac', label: 'HVAC' },
 ];
 
+// ── Customer lifecycle ────────────────────────────────────────────────────────
+// A customer is one person (deduped by phone on the server). Their status is the
+// most valuable stage across all of their jobs — derived server-side, but
+// override-able. The ladder runs coldest → most valuable; 'inactive' is the
+// no-live-work terminal state.
+export const CUSTOMER_STATUSES = [
+  { value: 'lead', label: 'Lead' },
+  { value: 'opportunity', label: 'Opportunity' },
+  { value: 'booked', label: 'Booked' },
+  { value: 'customer', label: 'Customer' },
+  { value: 'repeat', label: 'Repeat' },
+  { value: 'inactive', label: 'Inactive' },
+];
+
+export const CUSTOMER_STATUS_STYLES = {
+  lead: 'bg-blue-100 text-blue-700 border-blue-200',
+  opportunity: 'bg-amber-100 text-amber-700 border-amber-200',
+  booked: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  customer: 'bg-violet-100 text-violet-700 border-violet-200',
+  repeat: 'bg-teal-100 text-teal-700 border-teal-200',
+  inactive: 'bg-gray-100 text-gray-500 border-gray-200',
+};
+
+export function getCustomerStatusLabel(value) {
+  return CUSTOMER_STATUSES.find(s => s.value === value)?.label || value || 'Lead';
+}
+
 // Field packs render the "Industry Details" section of the lead detail view.
 // Field types:
 //   - text       single-line editable string

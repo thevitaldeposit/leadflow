@@ -4,6 +4,9 @@ import DashboardPage from './pages/DashboardPage';
 import NewLeadPage from './pages/NewLeadPage';
 import LeadDetailPage from './pages/LeadDetailPage';
 import LeadListPage from './pages/LeadListPage';
+import CustomersListPage from './pages/CustomersListPage';
+import CustomerDetailPage from './pages/CustomerDetailPage';
+import PricingPage from './pages/PricingPage';
 import SettingsPage from './pages/SettingsPage';
 import BillingPage from './pages/BillingPage';
 import InventoryPage from './pages/InventoryPage';
@@ -73,6 +76,9 @@ function AppRoutes() {
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/new" element={<Navigate to="/new/transcript" replace />} />
                 <Route path="/new/:type" element={<NewLeadPage />} />
+                <Route path="/customers" element={<CustomersListPage />} />
+                <Route path="/customers/:id" element={<CustomerDetailPage />} />
+                <Route path="/pricing" element={<PricingPage />} />
                 <Route path="/leads" element={<LeadListPage />} />
                 <Route path="/leads/:id" element={<LeadDetailPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

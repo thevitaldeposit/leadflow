@@ -7,12 +7,10 @@ import {
   Image,
   Mic,
   PencilLine,
-  List,
-  CalendarCheck2,
+  Users,
   Calendar,
   Package,
-  CheckSquare,
-  Database,
+  DollarSign,
   Shield,
   CreditCard,
   LogOut,
@@ -25,6 +23,8 @@ import { useAuth } from '../context/AuthContext';
 
 const PAGE_TITLES = {
   '/': 'Dashboard',
+  '/customers': 'Customers',
+  '/pricing': 'Pricing',
   '/action-queue': 'Action Queue',
   '/opportunities': 'All Opportunities',
   '/booked': 'Booked Jobs',
@@ -120,7 +120,7 @@ export default function Layout({ children }) {
   }, []);
 
   const isHomeServices = location.pathname === '/' ||
-    ['/action-queue', '/opportunities', '/booked', '/schedule', '/inventory', '/completed'].some(p => location.pathname.startsWith(p));
+    ['/customers', '/pricing', '/action-queue', '/opportunities', '/booked', '/schedule', '/inventory', '/completed'].some(p => location.pathname.startsWith(p));
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -150,14 +150,9 @@ export default function Layout({ children }) {
             <p className="px-4 text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1">Home Services</p>
           </div>
 
-          <NavLink to="/opportunities" className={linkClass}>
-            <List size={18} />
-            All Opportunities
-          </NavLink>
-
-          <NavLink to="/booked" className={linkClass}>
-            <CalendarCheck2 size={18} />
-            Booked Jobs
+          <NavLink to="/customers" className={linkClass}>
+            <Users size={18} />
+            Customers
           </NavLink>
 
           <NavLink to="/schedule" className={linkClass}>
@@ -170,9 +165,9 @@ export default function Layout({ children }) {
             Inventory
           </NavLink>
 
-          <NavLink to="/completed" className={linkClass}>
-            <CheckSquare size={18} />
-            Completed
+          <NavLink to="/pricing" className={linkClass}>
+            <DollarSign size={18} />
+            Pricing
           </NavLink>
 
           <div className="pt-2 pb-1">
@@ -210,11 +205,6 @@ export default function Layout({ children }) {
               </div>
             )}
           </div>
-
-          <NavLink to="/all-leads" className={linkClass}>
-            <Database size={18} />
-            All Leads
-          </NavLink>
 
           {/* Admin panel — only the Stream/Valley Binz account (business 1). */}
           {business?.id === 1 && (

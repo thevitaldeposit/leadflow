@@ -1,0 +1,245 @@
+const express = require('express');
+const router = express.Router();
+const db = require('../db/database');
+const { requireAuth } = require('../middleware/auth');
+const {
+  CUSTOMER_STATUSES,
+  normalizePhone,
+  reconcileCustomersForBusiness,
+  recomputeCustomerStatus,
+  listCustomers,
+  getCustomerDetail,
+  displayNameOf,
+} = require('../services/customerService');
+const { resolveEffectivePricing } = require('../services/pricingService');
+
+// Customers is a web-dashboard (and, later, authenticated iOS) surface. Unlike
+// the shared /api/leads routes, it must never fall back to the default business,
+// so it uses the hard auth guard rather than attachBusiness.
+router.use(requireAuth);
+
+// GET /api/customers — list with rollup aggregates. Reconciles first so any
+// leads inserted by the call pipeline since the last read are attached.
+router.get('/', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    reconcileCustomersForBusiness(businessId);
+    const { status, search } = req.query;
+    res.json(listCustomers(businessId, { status, search }));
+  } catch (err) {
+    console.error('GET /customers error:', err);
+    res.status(500).json({ error: 'Failed to retrieve customers' });
+  }
+});
+
+// GET /api/customers/:id — full profile: contact, addresses, job history,
+// activity timeline, totals, and resolved per-client pricing.
+router.get('/:id', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    reconcileCustomersForBusiness(businessId);
+    const detail = getCustomerDetail(businessId, req.params.id);
+    if (!detail) return res.status(404).json({ error: 'Customer not found' });
+
+    const customerRow = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?')
+      .get(req.params.id, businessId);
+    detail.pricing = resolveEffectivePricing(businessId, customerRow);
+    res.json(detail);
+  } catch (err) {
+    console.error('GET /customers/:id error:', err);
+    res.status(500).json({ error: 'Failed to retrieve customer' });
+  }
+});
+
+// POST /api/customers — manually create a customer record (not tied to a call).
+router.post('/', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const b = req.body || {};
+    const str = (v) => (typeof v === 'string' ? v.trim() : (v == null ? '' : String(v).trim()));
+
+    const firstName = str(b.firstName || b.first_name);
+    const lastName = str(b.lastName || b.last_name);
+    const company = str(b.company);
+    const phone = str(b.phone);
+    const email = str(b.email);
+    const address = str(b.address);
+    const displayName = str(b.displayName || b.display_name) || [firstName, lastName].filter(Boolean).join(' ') || company;
+
+    if (!firstName && !company && !phone) {
+      return res.status(400).json({ error: 'A name, company, or phone is required' });
+    }
+
+    const np = normalizePhone(phone);
+    if (np) {
+      const existing = db.prepare('SELECT id FROM customers WHERE business_id = ? AND normalized_phone = ?').get(businessId, np);
+      if (existing) {
+        return res.status(409).json({ error: 'A customer with this phone already exists', existingId: existing.id });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const status = CUSTOMER_STATUSES.includes(b.status) ? b.status : 'lead';
+    const overridden = CUSTOMER_STATUSES.includes(b.status) ? 1 : 0;
+    const info = db.prepare(`
+      INSERT INTO customers
+        (business_id, first_name, last_name, display_name, company, phone, normalized_phone, email, address, status, status_overridden, notes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      businessId, firstName || null, lastName || null, displayName || null, company || null,
+      phone || null, np, email || null, address || null, status, overridden, str(b.notes) || null, now, now
+    );
+
+    const created = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(info.lastInsertRowid));
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('POST /customers error:', err);
+    res.status(500).json({ error: 'Failed to create customer' });
+  }
+});
+
+// PUT /api/customers/:id — edit profile, contract terms, discount group, notes,
+// and lifecycle status. Setting `status` pins it (status_overridden); setting
+// status to 'auto' releases it back to the derived value.
+router.put('/:id', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const existing = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!existing) return res.status(404).json({ error: 'Customer not found' });
+
+    const b = req.body || {};
+    const updates = {};
+    const map = {
+      first_name: 'first_name', firstName: 'first_name',
+      last_name: 'last_name', lastName: 'last_name',
+      display_name: 'display_name', displayName: 'display_name',
+      company: 'company', email: 'email', address: 'address',
+      notes: 'notes', contract_terms: 'contract_terms', contractTerms: 'contract_terms',
+    };
+    for (const [key, col] of Object.entries(map)) {
+      if (b[key] !== undefined) updates[col] = b[key] === '' ? null : b[key];
+    }
+
+    // Phone change must keep the dedupe key in sync.
+    if (b.phone !== undefined) {
+      const phone = b.phone === '' ? null : String(b.phone).trim();
+      updates.phone = phone;
+      updates.normalized_phone = normalizePhone(phone);
+    }
+
+    // Discount group: validate it belongs to this business, or clear it.
+    if (b.discount_group_id !== undefined || b.discountGroupId !== undefined) {
+      const raw = b.discount_group_id !== undefined ? b.discount_group_id : b.discountGroupId;
+      if (raw == null || raw === '' || raw === 0) {
+        updates.discount_group_id = null;
+      } else {
+        const grp = db.prepare('SELECT id FROM discount_groups WHERE id = ? AND business_id = ?').get(raw, businessId);
+        if (!grp) return res.status(400).json({ error: 'Invalid discount group' });
+        updates.discount_group_id = grp.id;
+      }
+    }
+
+    // Status: 'auto' releases the manual override and recomputes from jobs.
+    let recompute = false;
+    if (b.status !== undefined) {
+      if (b.status === 'auto') {
+        updates.status_overridden = 0;
+        recompute = true;
+      } else if (CUSTOMER_STATUSES.includes(b.status)) {
+        updates.status = b.status;
+        updates.status_overridden = 1;
+      } else {
+        return res.status(400).json({ error: 'Invalid status' });
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      updates.updated_at = new Date().toISOString();
+      const set = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
+      db.prepare(`UPDATE customers SET ${set} WHERE id = ? AND business_id = ?`)
+        .run(...Object.values(updates), req.params.id, businessId);
+    }
+    if (recompute) recomputeCustomerStatus(Number(req.params.id));
+
+    const updated = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    res.json(updated);
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE')) {
+      return res.status(409).json({ error: 'Another customer already has this phone number' });
+    }
+    console.error('PUT /customers/:id error:', err);
+    res.status(500).json({ error: 'Failed to update customer' });
+  }
+});
+
+// DELETE /api/customers/:id — remove the customer record. Its leads/calls are
+// preserved (leads.customer_id is set to NULL by the FK) and will re-link on the
+// next reconcile, so call history is never lost.
+router.delete('/:id', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const existing = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!existing) return res.status(404).json({ error: 'Customer not found' });
+    db.prepare('DELETE FROM customers WHERE id = ? AND business_id = ?').run(req.params.id, businessId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /customers/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete customer' });
+  }
+});
+
+// GET /api/customers/:id/pricing — resolved effective pricing for this customer.
+router.get('/:id/pricing', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+    res.json(resolveEffectivePricing(businessId, customer));
+  } catch (err) {
+    console.error('GET /customers/:id/pricing error:', err);
+    res.status(500).json({ error: 'Failed to retrieve pricing' });
+  }
+});
+
+// PUT /api/customers/:id/pricing — upsert a per-customer rate override for one
+// service. A null/blank custom_price removes the override (falls back to the
+// group/default price).
+router.put('/:id/pricing', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+    const b = req.body || {};
+    const serviceKey = (b.service_key || b.serviceKey || '').toString().trim();
+    if (!serviceKey) return res.status(400).json({ error: 'service_key is required' });
+
+    const raw = b.custom_price !== undefined ? b.custom_price : b.customPrice;
+    const now = new Date().toISOString();
+
+    if (raw === null || raw === '' || raw === undefined) {
+      db.prepare('DELETE FROM customer_pricing WHERE customer_id = ? AND service_key = ?').run(customer.id, serviceKey);
+    } else {
+      const price = Number(raw);
+      if (Number.isNaN(price) || price < 0) return res.status(400).json({ error: 'Invalid price' });
+      const label = (b.label || '').toString().trim() || null;
+      const unit = (b.unit || '').toString().trim() || null;
+      const existing = db.prepare('SELECT id FROM customer_pricing WHERE customer_id = ? AND service_key = ?').get(customer.id, serviceKey);
+      if (existing) {
+        db.prepare('UPDATE customer_pricing SET custom_price = ?, label = ?, unit = ?, updated_at = ? WHERE id = ?')
+          .run(price, label, unit, now, existing.id);
+      } else {
+        db.prepare('INSERT INTO customer_pricing (business_id, customer_id, service_key, label, unit, custom_price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(businessId, customer.id, serviceKey, label, unit, price, now, now);
+      }
+    }
+
+    const full = db.prepare('SELECT * FROM customers WHERE id = ?').get(customer.id);
+    res.json(resolveEffectivePricing(businessId, full));
+  } catch (err) {
+    console.error('PUT /customers/:id/pricing error:', err);
+    res.status(500).json({ error: 'Failed to update pricing' });
+  }
+});
+
+module.exports = router;

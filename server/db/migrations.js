@@ -512,6 +512,132 @@ function runMigrations() {
     console.log(`[migrations] Cleared follow-up date on ${deadCleaned} dead-end home_services lead(s)`);
   }
 
+  // ── Customers: unified person-level record ─────────────────────────────────
+  // The system has no customers/opportunities tables — `leads` is the only
+  // entity, and "Opportunities"/"Booked"/"Completed" are just filtered views over
+  // it. Each call inserts a NEW lead row, so the same person calling twice yields
+  // two leads. This block adds a durable person-level record (one row per person
+  // per business, deduped by normalized phone) to consolidate those per-call
+  // leads into a single customer with a lifecycle status, profile, notes, and a
+  // per-client pricing layer.
+  //
+  // leads stay exactly as they are (the Twilio pipeline that inserts them is
+  // untouched). Each lead links to its customer via the new leads.customer_id;
+  // customerService.reconcileCustomersForBusiness() keeps new pipeline-inserted
+  // leads linked at read time, so no INSERT path — including the off-limits
+  // webhook — has to change. Tables are created first so the leads.customer_id
+  // foreign key and the backfill below have something to reference.
+
+  // One row per customer (person) per business. normalized_phone (digits only,
+  // US-normalized) is the dedupe key; multiple NULLs are allowed (SQLite treats
+  // them as distinct), so anonymous/no-phone leads each get their own record
+  // rather than collapsing into one. status is derived from the customer's jobs
+  // but can be overridden by the owner (status_overridden = 1 freezes it).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      first_name TEXT,
+      last_name TEXT,
+      display_name TEXT,
+      company TEXT,
+      phone TEXT,
+      normalized_phone TEXT,
+      email TEXT,
+      address TEXT,
+      status TEXT DEFAULT 'lead',
+      status_overridden INTEGER DEFAULT 0,
+      discount_group_id INTEGER,
+      contract_terms TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_business_phone ON customers(business_id, normalized_phone)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_customers_business ON customers(business_id)');
+
+  // Per-client pricing layer (all business_id-scoped, ready for quotes/invoices
+  // to consume later — invoicing itself is out of scope here):
+  //   price_list_items  — the business's default/retail price list, keyed by a
+  //                        free-form service_key (e.g. a dumpster size "20yd").
+  //   discount_groups   — named groups (Contractor, Commercial) with a percent
+  //                        discount + optional default net terms.
+  //   customer_pricing  — per-customer rate overrides that win over the default.
+  // A customer references a discount_group via customers.discount_group_id and
+  // carries free-text contract_terms that auto-apply to its quotes.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS price_list_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      service_key TEXT NOT NULL,
+      label TEXT,
+      unit TEXT,
+      unit_price REAL,
+      sort_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_price_list_business_key ON price_list_items(business_id, service_key)');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS discount_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      name TEXT NOT NULL,
+      discount_percent REAL NOT NULL DEFAULT 0,
+      default_net_terms TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_discount_groups_business ON discount_groups(business_id)');
+
+  // customer_pricing rows are removed with their customer (ON DELETE CASCADE).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS customer_pricing (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      service_key TEXT NOT NULL,
+      label TEXT,
+      unit TEXT,
+      custom_price REAL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_pricing_unique ON customer_pricing(customer_id, service_key)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_customer_pricing_business ON customer_pricing(business_id)');
+
+  // Link column on leads. Additive — same attempt-and-swallow-duplicate pattern.
+  // ON DELETE SET NULL so deleting a customer never deletes its call records; the
+  // orphaned leads simply get re-linked (or re-create the customer) on the next
+  // reconcile pass.
+  try {
+    db.exec('ALTER TABLE leads ADD COLUMN customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL');
+  } catch (e) {
+    if (!e.message.includes('duplicate column name')) throw e;
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_leads_customer ON leads(customer_id)');
+
+  // Backfill: group every existing lead into a customer record by normalized
+  // phone and set leads.customer_id. Idempotent — reconcile only touches leads
+  // that aren't linked yet — so re-running migrations never duplicates customers.
+  // Delegated to customerService so the migration backfill and the runtime
+  // reconcile share one implementation. Required lazily, after the tables exist.
+  try {
+    const { backfillAllCustomers } = require('../services/customerService');
+    const linked = backfillAllCustomers();
+    if (linked > 0) {
+      console.log(`[migrations] Linked ${linked} lead(s) to customer records`);
+    }
+  } catch (e) {
+    console.error('[migrations] Customer backfill failed (non-fatal):', e.message);
+  }
+
   console.log('Database migrations completed successfully.');
 }
 
