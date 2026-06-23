@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { api } from '../utils/api';
+import { getConnectedStripe } from '../utils/stripe';
 
 // ── PUBLIC, tokenized invoice page ─────────────────────────────────────────────
 // Opened by the customer from an email/SMS link with NO login. Renders the line
@@ -192,20 +194,148 @@ function SignSection({ token, invoice, onSigned }) {
   );
 }
 
-// Disabled payment placeholder — the integration point for the later payment task.
-function PaymentPlaceholder({ invoice }) {
+// Stripe Elements appearance — tuned to this page's accent.
+const PAY_APPEARANCE = { theme: 'stripe', variables: { colorPrimary: '#4f46e5', borderRadius: '10px' } };
+
+// The card form, mounted inside <Elements> (bound to the business's CONNECTED
+// account). On a successful confirm it flips the invoice to paid via the confirm
+// endpoint (the Connect webhook is the async backstop) and hands the updated
+// invoice back up. Card data is collected by Stripe and never touches our server.
+function CardForm({ token, amountLabel, onPaid, onCancel }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!stripe || !elements || processing) return;
+    setProcessing(true);
+    setError(null);
+    const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      // Card payments resolve inline with redirect:'if_required'; the return_url is
+      // only used by redirect-based methods and never actually navigates for cards.
+      confirmParams: { return_url: window.location.href },
+      redirect: 'if_required',
+    });
+
+    if (confirmError) {
+      setError(confirmError.message || 'Payment failed. Please check your details and try again.');
+      setProcessing(false);
+      return;
+    }
+
+    if (paymentIntent && (paymentIntent.status === 'succeeded' || paymentIntent.status === 'processing')) {
+      try {
+        const updated = await api.confirmInvoicePayment(token, paymentIntent.id);
+        onPaid(updated);
+      } catch {
+        // The webhook will still reconcile it — surface a soft message rather than
+        // implying the charge failed.
+        setError('Your payment went through. It may take a moment to update here.');
+        setProcessing(false);
+      }
+      return;
+    }
+
+    setError('Payment could not be completed. Please try again.');
+    setProcessing(false);
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <PaymentElement options={{ layout: 'tabs' }} />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <button
+        type="submit"
+        disabled={!stripe || processing}
+        className="w-full py-3.5 rounded-xl text-base font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+      >
+        {processing ? 'Processing…' : `Pay ${amountLabel}`}
+      </button>
+      <button type="button" onClick={onCancel} disabled={processing} className="w-full text-sm text-gray-500 hover:text-gray-700">
+        Cancel
+      </button>
+    </form>
+  );
+}
+
+// Payment section. Three states: already paid (receipt), payments not enabled by
+// the business (informational, no Pay button — preserves the original behavior),
+// or pay-by-card (start → mount Elements on the connected account → confirm).
+function PaymentSection({ token, invoice, onPaid }) {
+  const [pi, setPi] = useState(null); // { clientSecret, connectedAccountId, publishableKey, paymentIntentId }
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const start = async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      const res = await api.createInvoicePayment(token);
+      if (res && res.alreadyPaid) { onPaid(); return; }
+      if (res && res.clientSecret && res.connectedAccountId) setPi(res);
+      else setError('Could not start payment. Please try again.');
+    } catch (e) {
+      setError(e.message || 'Could not start payment. Please try again.');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  // Stripe.js bound to the connected account (memoized so re-renders don't reload).
+  const stripePromise = useMemo(
+    () => (pi ? getConnectedStripe(pi.connectedAccountId, pi.publishableKey) : null),
+    [pi]
+  );
+
+  if (invoice.paid_at) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-5 sm:p-6">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg flex-shrink-0">✓</div>
+          <div>
+            <p className="font-semibold text-emerald-900">Payment received</p>
+            <p className="text-sm text-gray-500">{money(invoice.amount_paid || invoice.total, invoice.currency)} paid · {fmtDateTime(invoice.paid_at)}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!invoice.payment_enabled) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-5 sm:p-6">
+        <h2 className="text-base font-bold text-gray-900">Payment</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          {invoice.business?.phone ? 'Contact the business to arrange payment.' : 'The business will share payment options with you.'}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white rounded-2xl shadow-sm p-5 sm:p-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-gray-900">Payment</h2>
-        <span className="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Coming soon</span>
-      </div>
-      <p className="text-sm text-gray-500 mt-1 mb-4">
-        Online payment isn't available yet. {invoice.business?.phone ? 'Contact the business to arrange payment.' : 'The business will share payment options with you.'}
-      </p>
-      <button type="button" disabled className="w-full py-3.5 rounded-xl text-base font-bold bg-gray-200 text-gray-400 cursor-not-allowed">
-        Pay {money(invoice.total, invoice.currency)} online (coming soon)
-      </button>
+      <h2 className="text-base font-bold text-gray-900">Pay this invoice</h2>
+      <p className="text-sm text-gray-500 mt-1 mb-4">Pay securely by card. Powered by Stripe.</p>
+      {pi && stripePromise ? (
+        <Elements stripe={stripePromise} options={{ clientSecret: pi.clientSecret, appearance: PAY_APPEARANCE }}>
+          <CardForm token={token} amountLabel={money(invoice.total, invoice.currency)} onPaid={onPaid} onCancel={() => setPi(null)} />
+        </Elements>
+      ) : (
+        <>
+          {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+          <button
+            type="button"
+            onClick={start}
+            disabled={starting}
+            className="w-full py-3.5 rounded-xl text-base font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+          >
+            {starting ? 'Starting…' : `Pay ${money(invoice.total, invoice.currency)} by card`}
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -249,6 +379,13 @@ export default function PublicInvoicePage() {
   const isSigned = !!inv.signed_at;
   const isPaid = !!inv.paid_at;
   const biz = inv.business || {};
+
+  // After a successful payment: use the updated invoice the confirm endpoint
+  // returns, or re-fetch if we only learned it was already paid.
+  const handlePaid = async (updated) => {
+    if (updated) { setInvoice(updated); return; }
+    try { setInvoice(await api.getPublicInvoice(token)); } catch { /* keep current */ }
+  };
 
   return (
     // The global CSS locks html/body scroll (so the authed dashboard's <main> is
@@ -380,8 +517,8 @@ export default function PublicInvoicePage() {
           <SignSection token={token} invoice={inv} onSigned={setInvoice} />
         )}
 
-        {/* Payment placeholder (disabled) */}
-        <PaymentPlaceholder invoice={inv} />
+        {/* Payment — pay-by-card when the business has Connect enabled */}
+        <PaymentSection token={token} invoice={inv} onPaid={handlePaid} />
 
         <div className="text-center pt-2">
           {biz.phone && <p className="text-sm text-gray-500">Questions? Call <a href={`tel:${biz.phone}`} className="text-indigo-600">{biz.phone}</a></p>}

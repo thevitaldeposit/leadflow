@@ -181,6 +181,18 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  // Pay-on-invoice (Stripe Connect direct charge). createInvoicePayment returns
+  // { clientSecret, connectedAccountId, ... } to mount Stripe Elements, or
+  // { alreadyPaid:true }. confirmInvoicePayment flips the invoice to paid right
+  // after a successful confirm (the webhook is the async backstop).
+  createInvoicePayment: (token) =>
+    request(`/public/invoices/${token}/create-payment-intent`, { method: 'POST' }),
+  confirmInvoicePayment: (token, paymentIntentId) =>
+    request(`/public/invoices/${token}/confirm-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentIntentId }),
+    }),
 
   // Extraction
   extractTranscript: (transcript) =>
@@ -283,6 +295,11 @@ export const api = {
   getSubscriptionStatus: () => request('/billing/subscription-status'),
   createCheckoutSession: () => request('/billing/create-checkout-session', { method: 'POST' }),
   createPortalSession: () => request('/billing/create-portal-session', { method: 'POST' }),
+
+  // Stripe Connect — the business's OWN payments account for collecting invoice
+  // payments. Completely separate from the platform subscription above.
+  getConnectStatus: () => request('/connect/status'),
+  startConnectOnboarding: () => request('/connect/onboard', { method: 'POST' }),
 
   // Admin panel — all endpoints are restricted to business_id = 1 (403 otherwise).
   getAdminBusinesses: () => request('/admin/businesses'),

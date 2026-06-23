@@ -447,6 +447,49 @@ function markPaid(businessId, id, body = {}) {
   return { invoice: getInvoice(businessId, id) };
 }
 
+// ── Online payment (Stripe Connect direct charge) ───────────────────────────────
+// These are the real integration points behind the public Pay action. Card data
+// never reaches us — Stripe Elements collects it and the charge lands on the
+// business's connected account (see services/connectService.js). We only correlate
+// the PaymentIntent to the invoice and flip it to paid when payment succeeds.
+
+// Remember which PaymentIntent is collecting this invoice, so the Connect webhook
+// (and the confirm fallback) can find this exact invoice from the intent.
+function attachPaymentIntent(businessId, id, paymentIntentId) {
+  db.prepare('UPDATE invoices SET stripe_payment_intent_id = ?, updated_at = ? WHERE id = ? AND business_id = ?')
+    .run(paymentIntentId, nowIso(), id, businessId);
+}
+
+// Look an invoice up by its PaymentIntent id within a tenant (defense-in-depth:
+// the webhook already resolves the tenant from the connected account id).
+function findByPaymentIntent(businessId, paymentIntentId) {
+  if (!paymentIntentId) return null;
+  return db.prepare('SELECT * FROM invoices WHERE stripe_payment_intent_id = ? AND business_id = ?')
+    .get(paymentIntentId, businessId);
+}
+
+// Flip an invoice to paid from a successful online payment. IDEMPOTENT — both the
+// webhook and the client-side confirm fallback can call this; whichever lands
+// first wins and the second is a no-op. Returns { invoice, alreadyPaid }.
+function recordOnlinePayment(businessId, id, { amountPaid, reference, paymentIntentId } = {}) {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ? AND business_id = ?').get(id, businessId);
+  if (!inv) return { error: 'not_found' };
+  if (inv.status === 'paid' || inv.paid_at) {
+    return { invoice: getInvoice(businessId, id), alreadyPaid: true };
+  }
+  const at = nowIso();
+  const paid = amountPaid != null ? round2(amountPaid) : inv.total;
+  db.prepare(`
+    UPDATE invoices
+    SET status = 'paid', paid_at = ?, amount_paid = ?, payment_method = 'stripe',
+        payment_reference = ?,
+        stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id),
+        updated_at = ?
+    WHERE id = ?
+  `).run(at, paid, reference ? String(reference) : (paymentIntentId || null), paymentIntentId || null, at, id);
+  return { invoice: getInvoice(businessId, id), alreadyPaid: false };
+}
+
 // ── Public (tokenized, no auth) ────────────────────────────────────────────────
 function getInvoiceByToken(token) {
   if (!token) return null;
@@ -493,8 +536,9 @@ function signInvoice(token, { signerName, signatureData, signatureType, ip, user
 }
 
 // Shape an invoice for the PUBLIC page — strips internal evidence (IP/UA) and
-// scoping fields, and flags that online payment isn't available yet.
-function toPublic(invoice, business) {
+// scoping fields. `payment` is the business's online-payment state, resolved by
+// the caller from the Connect layer: { enabled, connectedAccountId, publishableKey }.
+function toPublic(invoice, business, payment = {}) {
   if (!invoice) return null;
   return {
     invoice_number: invoice.invoice_number,
@@ -531,8 +575,13 @@ function toPublic(invoice, business) {
       phone: business?.phone || null,
       email: business?.email || null,
     },
-    // Placeholder: online payment collection plugs in here in a later task.
-    payment_enabled: false,
+    // Online payment (Stripe Connect direct charge). Enabled only when the
+    // business has finished Connect onboarding and the invoice still owes a
+    // balance. The connected account id is safe to expose — the client needs it
+    // to initialize Stripe.js for a direct charge (Stripe-Account header).
+    payment_enabled: !!payment.enabled,
+    connect_account_id: payment.enabled ? (payment.connectedAccountId || null) : null,
+    publishable_key: payment.enabled ? (payment.publishableKey || null) : null,
   };
 }
 
@@ -565,6 +614,9 @@ module.exports = {
   deleteInvoice,
   markSent,
   markPaid,
+  attachPaymentIntent,
+  findByPaymentIntent,
+  recordOnlinePayment,
   getInvoiceByToken,
   recordView,
   signInvoice,

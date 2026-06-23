@@ -29,6 +29,7 @@ const signupsRouter = require('./routes/signups');
 const contactRouter = require('./routes/contact');
 const dashboardRouter = require('./routes/dashboard');
 const { router: billingRouter, handleStripeWebhook } = require('./routes/billing');
+const { router: connectRouter, handleConnectWebhook } = require('./routes/connect');
 const adminRouter = require('./routes/admin');
 const customersRouter = require('./routes/customers');
 const pricingRouter = require('./routes/pricing');
@@ -48,7 +49,10 @@ app.use(cors());
 
 // Stripe webhook must read the exact raw request body to verify the signature,
 // so it is registered with express.raw() BEFORE express.json() parses bodies.
+// Two SEPARATE endpoints + secrets: the platform SUBSCRIPTION webhook and the
+// CONNECT (per-business customer payments) webhook. They never share a handler.
 app.post('/api/webhook/stripe', express.raw({ type: 'application/json' }), handleStripeWebhook);
+app.post('/api/webhook/stripe/connect', express.raw({ type: 'application/json' }), handleConnectWebhook);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -145,6 +149,7 @@ app.use('/api/signups', signupsRouter);
 app.use('/api/contact', contactRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/billing', billingRouter);
+app.use('/api/connect', connectRouter);
 app.use('/api/admin', adminRouter);
 // Public payment page — must be before the SPA catch-all
 app.use('/pay', paymentRouter);

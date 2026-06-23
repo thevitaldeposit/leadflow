@@ -1,7 +1,129 @@
 import { useState, useEffect } from 'react';
-import { Settings, Key, Database, Zap, Building2, User, DollarSign, MessageSquare, Clock, Inbox, Lock } from 'lucide-react';
+import { Settings, Key, Database, Zap, Building2, User, DollarSign, MessageSquare, Clock, Inbox, Lock, CreditCard, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { getSettings, saveSettings } from '../utils/settings';
 import { api } from '../utils/api';
+
+// ── Online Payments (Stripe Connect Express) ───────────────────────────────────
+// Lets the business connect its OWN Stripe account so customers can pay invoices
+// online (a direct charge on the connected account). Self-contained: loads its own
+// status, runs Stripe-hosted onboarding, and handles the return/refresh redirects.
+function OnlinePaymentsCard() {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      setStatus(await api.getConnectStatus());
+    } catch (e) {
+      setError(e.message || 'Could not load payment status.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onboard = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { url } = await api.startConnectOnboarding();
+      if (url) window.location.href = url;
+      else { setError('Could not start onboarding. Please try again.'); setBusy(false); }
+    } catch (e) {
+      setError(e.message || 'Could not start onboarding.');
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    // Stripe returns the owner here after hosted onboarding with ?connect=return
+    // (finished/backed out) or ?connect=refresh (link expired — get a fresh one).
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get('connect');
+    if (flag) {
+      params.delete('connect');
+      const qs = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    }
+    if (flag === 'refresh') { onboard(); return; }
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const s = status || {};
+  const state = s.status || (loading ? 'loading' : 'not_connected');
+
+  // Visual treatment + copy per state.
+  const VIEW = {
+    ready: { tone: 'emerald', icon: CheckCircle2, badge: 'Enabled', title: 'Payments enabled',
+      body: 'Customers can now pay your invoices online by card. Funds are deposited to your connected Stripe account.' },
+    pending: { tone: 'amber', icon: Loader2, badge: 'Verifying', title: 'Verification in progress',
+      body: 'Stripe is reviewing your details. Payments turn on automatically once approved — this usually takes a few minutes.' },
+    restricted: { tone: 'red', icon: AlertCircle, badge: 'Action needed', title: 'More information needed',
+      body: 'Stripe needs more information before you can accept payments. Finish setup to enable payments.' },
+    incomplete: { tone: 'amber', icon: AlertCircle, badge: 'Incomplete', title: 'Finish connecting',
+      body: 'You started connecting payments but didn’t finish. Pick up where you left off to start accepting card payments.' },
+    not_connected: { tone: 'gray', icon: CreditCard, badge: null, title: 'Accept payments on invoices',
+      body: 'Connect your Stripe account to let customers pay invoices online by card. You collect payments directly — Stream takes no cut.' },
+  };
+  const view = VIEW[state] || VIEW.not_connected;
+  const toneText = { emerald: 'text-emerald-600', amber: 'text-amber-600', red: 'text-red-600', gray: 'text-gray-400' }[view.tone];
+  const toneBadge = {
+    emerald: 'bg-emerald-100 text-emerald-800', amber: 'bg-amber-100 text-amber-800',
+    red: 'bg-red-100 text-red-800', gray: 'bg-gray-100 text-gray-600',
+  }[view.tone];
+
+  const showPrimary = ['not_connected', 'incomplete', 'restricted'].includes(state);
+  const primaryLabel = state === 'not_connected' ? 'Connect with Stripe' : 'Finish setup';
+  const Icon = view.icon;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <CreditCard size={18} className="text-indigo-600" />
+          <h2 className="text-base font-semibold text-gray-800">Online Payments</h2>
+        </div>
+        {!loading && view.badge && (
+          <span className={`text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${toneBadge}`}>{view.badge}</span>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-gray-400 py-2">
+          <Loader2 size={16} className="animate-spin" /> Checking payment status…
+        </div>
+      ) : (
+        <div className="flex items-start gap-3">
+          <Icon size={20} className={`${toneText} flex-shrink-0 mt-0.5 ${state === 'pending' ? 'animate-spin' : ''}`} />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-gray-800">{view.title}</p>
+            <p className="text-sm text-gray-500 mt-0.5">{view.body}</p>
+
+            <div className="flex items-center gap-3 mt-4">
+              {showPrimary && (
+                <button
+                  onClick={onboard}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {busy ? <><Loader2 size={15} className="animate-spin" /> Redirecting…</> : primaryLabel}
+                </button>
+              )}
+              {state !== 'not_connected' && (
+                <button onClick={refresh} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh status</button>
+              )}
+            </div>
+
+            {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState(getSettings);
@@ -139,6 +261,9 @@ export default function SettingsPage() {
         </div>
         <p className="text-xs text-gray-400 mt-4">Changes are saved automatically to this device and synced to the server.</p>
       </div>
+
+      {/* Online Payments (Stripe Connect) — accept card payments on invoices */}
+      <OnlinePaymentsCard />
 
       {/* Payment Settings */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">

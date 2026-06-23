@@ -15,6 +15,19 @@ export function getStripe() {
   return _stripe;
 }
 
+// Stripe.js bound to a CONNECTED account, for paying an invoice as a direct charge
+// (the connected account is the merchant of record). The publishable key is still
+// the platform's; the {stripeAccount} option scopes Elements + confirmation to the
+// connected account. Memoized per account so re-renders don't reload Stripe.js.
+const _connected = {};
+export function getConnectedStripe(accountId, publishableKey) {
+  if (!accountId) return getStripe();
+  if (!_connected[accountId]) {
+    _connected[accountId] = loadStripe(publishableKey || PUBLISHABLE_KEY, { stripeAccount: accountId });
+  }
+  return _connected[accountId];
+}
+
 // Create a Checkout Session on the server, then send the browser to Stripe.
 // Prefers Stripe.js (uses the publishable key); falls back to the session URL so
 // checkout still works if Stripe.js can't load.

@@ -376,6 +376,32 @@ function runMigrations() {
     }
   }
 
+  // Stripe Connect (Express) columns on businesses — the per-business payments
+  // layer that lets a customer pay an invoice on the business's OWN connected
+  // account. This is entirely separate from the $149/mo platform SUBSCRIPTION
+  // billing above (stripe_customer_id / stripe_subscription_id): different Stripe
+  // objects, different code paths (services/connectService.js), different webhook.
+  // Additive — same attempt-and-swallow-duplicate pattern.
+  //   stripe_connect_account_id  the Express connected account id (acct_…)
+  //   connect_charges_enabled    1 once the account can accept charges (gates Pay)
+  //   connect_details_submitted  1 once onboarding info was submitted (→ "pending")
+  //   connect_payouts_enabled    1 once Stripe will pay out to the bank
+  // The three booleans mirror the Stripe Account object and are refreshed from the
+  // account.updated webhook and the live status sync.
+  const CONNECT_COLUMNS = [
+    'ALTER TABLE businesses ADD COLUMN stripe_connect_account_id TEXT',
+    'ALTER TABLE businesses ADD COLUMN connect_charges_enabled INTEGER DEFAULT 0',
+    'ALTER TABLE businesses ADD COLUMN connect_details_submitted INTEGER DEFAULT 0',
+    'ALTER TABLE businesses ADD COLUMN connect_payouts_enabled INTEGER DEFAULT 0',
+  ];
+  for (const stmt of CONNECT_COLUMNS) {
+    try {
+      db.exec(stmt);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  }
+
   // Attach business_id to every pre-existing table. SQLite has no
   // "ADD COLUMN IF NOT EXISTS", so we reuse the NEW_COLUMNS pattern above:
   // attempt the ALTER and swallow only the "duplicate column name" error, which
@@ -686,10 +712,20 @@ function runMigrations() {
       paid_at TEXT,
       payment_method TEXT,
       payment_reference TEXT,
+      stripe_payment_intent_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  // Online payment (Stripe Connect direct charge) correlation id. Stored when the
+  // customer starts a card payment so the Connect webhook / confirm endpoint can
+  // find this exact invoice from a PaymentIntent and flip it to paid idempotently.
+  // Additive ALTER for DBs created before online payments existed.
+  try {
+    db.exec('ALTER TABLE invoices ADD COLUMN stripe_payment_intent_id TEXT');
+  } catch (e) {
+    if (!e.message.includes('duplicate column name')) throw e;
+  }
   db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_business ON invoices(business_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_lead ON invoices(lead_id)');
