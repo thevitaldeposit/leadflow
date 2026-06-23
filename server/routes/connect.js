@@ -66,8 +66,17 @@ router.post('/onboard', requireAuth, async (req, res) => {
 // ── Connect webhook ────────────────────────────────────────────────────────────
 // Mounted in index.js with express.raw() BEFORE express.json() (signature needs
 // the raw body), at a DIFFERENT path than the subscription webhook and verified
-// with a DIFFERENT secret (STRIPE_CONNECT_WEBHOOK_SECRET). Register this endpoint
-// in the Stripe Dashboard with "Listen to events on Connected accounts".
+// with a DIFFERENT secret (STRIPE_CONNECT_WEBHOOK_SECRET).
+//
+// DASHBOARD: register ONE destination with scope = "Connected accounts" (these are
+// v1 snapshot events from connected accounts; v1 connected-account events route to
+// this scope — the v2 "thin" account events on the "Your account" scope are NOT
+// used here). Events to enable:
+//   account.updated               onboarding finished / restricted → enable/disable
+//   payment_intent.succeeded      invoice paid
+//   payment_intent.payment_failed (optional) log only
+//   charge.refunded               (recommended) reflect a refund on the invoice
+//   charge.dispute.created        (optional) surface a dispute on the timeline
 
 // Mark an invoice paid from a succeeded PaymentIntent (shared by the webhook and
 // the public confirm fallback). Idempotent via invoiceService.recordOnlinePayment.
@@ -108,6 +117,48 @@ function applyPaidIntent(accountId, paymentIntent) {
   return result.invoice;
 }
 
+// Reflect a refund the business issued on its connected account. We move no money
+// (the connected account does); we only record the refunded amount so the invoice
+// stops reading as plainly "paid". Resolves the invoice from the charge's
+// PaymentIntent. Idempotent via invoiceService.recordRefund.
+function applyRefund(accountId, charge) {
+  const business = connectService.getBusinessByConnectAccount(accountId);
+  if (!business) { console.warn('[connect] refund for unknown connected account', accountId); return null; }
+  const piId = charge.payment_intent;
+  const invoice = piId ? invoiceService.findByPaymentIntent(business.id, piId) : null;
+  if (!invoice) { console.warn('[connect] refund had no matching invoice', charge.id); return null; }
+
+  const cents = typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0;
+  const result = invoiceService.recordRefund(business.id, invoice.id, { amountRefunded: cents / 100 });
+  if (result.error || !result.changed) return result.invoice || null;
+
+  if (result.invoice.lead_id) {
+    const label = result.fullyRefunded ? 'refunded' : 'partially refunded';
+    logActivity(result.invoice.lead_id, 'invoice_refunded', `Invoice ${result.invoice.invoice_number} ${label} ($${(cents / 100).toFixed(2)})`);
+  }
+  emitToBusiness(business.id, 'invoice_updated', { id: result.invoice.id, refunded: true });
+  console.log(`[connect] invoice ${result.invoice.invoice_number} (business ${business.id}) refunded $${(cents / 100).toFixed(2)} via ${charge.id}`);
+  return result.invoice;
+}
+
+// Surface a dispute/chargeback on the owner's timeline. VISIBILITY ONLY — for
+// direct charges the connected account is the merchant of record and resolves
+// disputes in its own Express Dashboard (and bears liability), so Stream changes
+// no invoice state.
+function applyDispute(accountId, dispute) {
+  const business = connectService.getBusinessByConnectAccount(accountId);
+  if (!business) { console.warn('[connect] dispute for unknown connected account', accountId); return null; }
+  const piId = dispute.payment_intent;
+  const invoice = piId ? invoiceService.findByPaymentIntent(business.id, piId) : null;
+  if (invoice && invoice.lead_id) {
+    const amt = typeof dispute.amount === 'number' ? (dispute.amount / 100).toFixed(2) : '?';
+    logActivity(invoice.lead_id, 'invoice_disputed', `Invoice ${invoice.invoice_number} payment disputed ($${amt}) — resolve in your Stripe Express dashboard`);
+  }
+  if (invoice) emitToBusiness(business.id, 'invoice_updated', { id: invoice.id, disputed: true });
+  console.log(`[connect] dispute ${dispute.id} on ${accountId} (invoice ${invoice ? invoice.invoice_number : 'unknown'})`);
+  return invoice;
+}
+
 function handleConnectWebhook(req, res) {
   if (!connectService.isConfigured()) {
     return res.status(503).send('Payments are not configured');
@@ -143,6 +194,14 @@ function handleConnectWebhook(req, res) {
         // retry. Logged for visibility only.
         const pi = event.data.object;
         console.log(`[connect] payment_intent.payment_failed ${pi.id} on ${accountId}`);
+        break;
+      }
+      case 'charge.refunded': {
+        applyRefund(accountId, event.data.object);
+        break;
+      }
+      case 'charge.dispute.created': {
+        applyDispute(accountId, event.data.object);
         break;
       }
       default:

@@ -15,8 +15,19 @@ const db = require('../db/database');
 //   NO platform application fee · Stripe/seller handle liability + disputes.
 // Because the platform's controller defaults are configured in the Dashboard,
 // creating an account with `type: 'express'` inherits them — we don't override.
+//
+// API VERSION: pinned to a known-good version (same as billing's signup client)
+// so our outbound calls return STABLE shapes regardless of the account's evolving
+// default version (Connect/Accounts is mid-migration to v2). We deliberately use
+// the v1 Accounts/PaymentIntent API + v1 (snapshot) webhook events — v1 events for
+// connected accounts route to the "Connected accounts" webhook scope and carry the
+// full object in `event.data.object`, which this module's handlers read. (The v2
+// "thin" account events route to the "Your account" scope and are NOT used here.)
+const CONNECT_API_VERSION = '2024-06-20';
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
+const stripe = STRIPE_SECRET_KEY
+  ? require('stripe')(STRIPE_SECRET_KEY, { apiVersion: CONNECT_API_VERSION })
+  : null;
 
 // Publishable key for the client. The web client already ships a hardcoded
 // publishable key (client/src/utils/stripe.js), so this is optional — returned
@@ -285,6 +296,7 @@ function applyAccountUpdate(accountId, account) {
 }
 
 module.exports = {
+  CONNECT_API_VERSION,
   isConfigured,
   loadBusiness,
   getBusinessByConnectAccount,

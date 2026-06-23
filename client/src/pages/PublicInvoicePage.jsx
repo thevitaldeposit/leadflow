@@ -291,13 +291,19 @@ function PaymentSection({ token, invoice, onPaid }) {
   );
 
   if (invoice.paid_at) {
+    const refunded = Number(invoice.amount_refunded) > 0;
     return (
       <div className="bg-white rounded-2xl shadow-sm p-5 sm:p-6">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg flex-shrink-0">✓</div>
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${refunded ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+            {refunded ? '↩' : '✓'}
+          </div>
           <div>
-            <p className="font-semibold text-emerald-900">Payment received</p>
-            <p className="text-sm text-gray-500">{money(invoice.amount_paid || invoice.total, invoice.currency)} paid · {fmtDateTime(invoice.paid_at)}</p>
+            <p className={`font-semibold ${refunded ? 'text-amber-900' : 'text-emerald-900'}`}>{refunded ? 'Refunded' : 'Payment received'}</p>
+            <p className="text-sm text-gray-500">
+              {money(invoice.amount_paid || invoice.total, invoice.currency)} paid · {fmtDateTime(invoice.paid_at)}
+              {refunded && <> · {money(invoice.amount_refunded, invoice.currency)} refunded</>}
+            </p>
           </div>
         </div>
       </div>
@@ -378,6 +384,7 @@ export default function PublicInvoicePage() {
   const inv = invoice;
   const isSigned = !!inv.signed_at;
   const isPaid = !!inv.paid_at;
+  const isRefunded = Number(inv.amount_refunded) > 0;
   const biz = inv.business || {};
 
   // After a successful payment: use the updated invoice the confirm endpoint
@@ -402,7 +409,9 @@ export default function PublicInvoicePage() {
             <p className="text-sm text-white/60 mt-0.5">Invoice {inv.invoice_number}</p>
           </div>
           <div className="text-right">
-            {isPaid ? (
+            {isRefunded ? (
+              <span className="inline-block text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full bg-amber-500/20 text-amber-200">Refunded</span>
+            ) : isPaid ? (
               <span className="inline-block text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300">Paid</span>
             ) : isSigned ? (
               <span className="inline-block text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full bg-violet-500/20 text-violet-200">Signed</span>

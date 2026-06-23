@@ -113,7 +113,8 @@ export default function InvoiceDetailPage() {
     inv.sent_at && { icon: Send, label: 'Sent', at: inv.sent_at },
     inv.viewed_at && { icon: Eye, label: 'Viewed by customer', at: inv.viewed_at },
     inv.signed_at && { icon: PenLine, label: `Signed by ${inv.signer_name}`, at: inv.signed_at },
-    inv.paid_at && { icon: DollarSign, label: 'Marked paid', at: inv.paid_at },
+    inv.paid_at && { icon: DollarSign, label: inv.payment_method === 'stripe' ? 'Paid online' : 'Marked paid', at: inv.paid_at },
+    inv.refunded_at && { icon: DollarSign, label: `Refunded${Number(inv.amount_refunded) ? ` ${money(inv.amount_refunded, inv.currency)}` : ''}`, at: inv.refunded_at },
   ].filter(Boolean);
 
   return (
@@ -127,6 +128,9 @@ export default function InvoiceDetailPage() {
             <div className="flex items-center gap-2.5">
               <h1 className="text-xl font-bold text-gray-900">{inv.invoice_number}</h1>
               <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${statusStyle}`}>{getInvoiceStatusLabel(inv.status)}</span>
+              {Number(inv.amount_refunded) > 0 && (
+                <span className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Refunded</span>
+              )}
             </div>
             <p className="text-sm text-gray-500 mt-1">
               {inv.customer_id ? <Link to={`/customers/${inv.customer_id}`} className="text-accent hover:underline">{inv.bill_to_name || 'Customer'}</Link> : (inv.bill_to_name || '—')}

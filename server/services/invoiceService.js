@@ -490,6 +490,26 @@ function recordOnlinePayment(businessId, id, { amountPaid, reference, paymentInt
   return { invoice: getInvoice(businessId, id), alreadyPaid: false };
 }
 
+// Reflect a refund the business issued on its connected account (via the
+// charge.refunded webhook). We don't move money — the connected account does — we
+// only record the refunded amount so the invoice stops reading as simply "paid".
+// `amountRefunded` is the CUMULATIVE refunded total (cents → dollars done by the
+// caller). Idempotent: only advances when the refunded total grows.
+function recordRefund(businessId, id, { amountRefunded } = {}) {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ? AND business_id = ?').get(id, businessId);
+  if (!inv) return { error: 'not_found' };
+  const amt = round2(amountRefunded != null ? amountRefunded : (inv.amount_paid || inv.total));
+  if ((inv.amount_refunded || 0) >= amt && inv.refunded_at) {
+    return { invoice: getInvoice(businessId, id), changed: false };
+  }
+  const at = nowIso();
+  db.prepare(
+    'UPDATE invoices SET amount_refunded = ?, refunded_at = COALESCE(refunded_at, ?), updated_at = ? WHERE id = ?'
+  ).run(amt, at, at, id);
+  const fullyRefunded = amt >= round2(inv.amount_paid || inv.total);
+  return { invoice: getInvoice(businessId, id), changed: true, fullyRefunded };
+}
+
 // ── Public (tokenized, no auth) ────────────────────────────────────────────────
 function getInvoiceByToken(token) {
   if (!token) return null;
@@ -570,6 +590,8 @@ function toPublic(invoice, business, payment = {}) {
     signature_type: invoice.signature_type,
     signature_data: invoice.signature_data,
     paid_at: invoice.paid_at,
+    amount_refunded: invoice.amount_refunded || 0,
+    refunded_at: invoice.refunded_at || null,
     business: {
       name: business?.name || 'Our Business',
       phone: business?.phone || null,
@@ -617,6 +639,7 @@ module.exports = {
   attachPaymentIntent,
   findByPaymentIntent,
   recordOnlinePayment,
+  recordRefund,
   getInvoiceByToken,
   recordView,
   signInvoice,

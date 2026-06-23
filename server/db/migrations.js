@@ -713,18 +713,29 @@ function runMigrations() {
       payment_method TEXT,
       payment_reference TEXT,
       stripe_payment_intent_id TEXT,
+      amount_refunded REAL DEFAULT 0,
+      refunded_at TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
-  // Online payment (Stripe Connect direct charge) correlation id. Stored when the
-  // customer starts a card payment so the Connect webhook / confirm endpoint can
-  // find this exact invoice from a PaymentIntent and flip it to paid idempotently.
-  // Additive ALTER for DBs created before online payments existed.
-  try {
-    db.exec('ALTER TABLE invoices ADD COLUMN stripe_payment_intent_id TEXT');
-  } catch (e) {
-    if (!e.message.includes('duplicate column name')) throw e;
+  // Online-payment columns added after the invoices table first shipped — additive
+  // ALTERs (idempotent; "duplicate column name" is swallowed):
+  //   stripe_payment_intent_id  correlates a PaymentIntent → this invoice so the
+  //                             Connect webhook / confirm endpoint can flip it paid.
+  //   amount_refunded/refunded_at  reflect a refund the business issued on the
+  //                             connected account (charge.refunded webhook), so a
+  //                             refunded invoice doesn't keep reading as simply paid.
+  for (const stmt of [
+    'ALTER TABLE invoices ADD COLUMN stripe_payment_intent_id TEXT',
+    'ALTER TABLE invoices ADD COLUMN amount_refunded REAL DEFAULT 0',
+    'ALTER TABLE invoices ADD COLUMN refunded_at TEXT',
+  ]) {
+    try {
+      db.exec(stmt);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_business ON invoices(business_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id)');
