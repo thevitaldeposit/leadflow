@@ -227,7 +227,7 @@ export default function PublicInvoicePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100">
+      <div className="h-screen w-full overflow-y-auto flex items-center justify-center bg-slate-100">
         <div className="animate-spin w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full" />
       </div>
     );
@@ -235,7 +235,7 @@ export default function PublicInvoicePage() {
 
   if (error || !invoice) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-4">
+      <div className="h-screen w-full overflow-y-auto flex items-center justify-center bg-slate-100 px-4">
         <div className="bg-white rounded-2xl shadow-sm p-8 max-w-sm text-center">
           <div className="w-12 h-12 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center text-2xl mx-auto mb-4">✕</div>
           <h1 className="text-lg font-bold text-gray-900">Invoice unavailable</h1>
@@ -251,7 +251,12 @@ export default function PublicInvoicePage() {
   const biz = inv.business || {};
 
   return (
-    <div className="min-h-screen bg-slate-100 pb-12">
+    // The global CSS locks html/body scroll (so the authed dashboard's <main> is
+    // the only scroller). This page renders with no dashboard chrome, so it must
+    // be its own scroll container — otherwise everything past the first viewport
+    // (sign + pay) is clipped and unreachable, especially on mobile. Mirrors the
+    // h-screen/overflow-y-auto pattern the other public pages (e.g. LandingPage) use.
+    <div className="h-screen w-full overflow-y-auto bg-slate-100 pb-12">
       {/* Branded header */}
       <div className="bg-slate-900 text-white">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 flex items-center justify-between">
