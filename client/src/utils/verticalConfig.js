@@ -122,6 +122,40 @@ export function getCustomerStatusLabel(value) {
   return CUSTOMER_STATUSES.find(s => s.value === value)?.label || value || 'Lead';
 }
 
+// ── Invoice lifecycle ─────────────────────────────────────────────────────────
+// draft → sent → signed → paid. 'paid' is reachable today only via the owner's
+// manual record action; online payment collection is a separate, later task.
+export const INVOICE_STATUSES = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'sent', label: 'Sent' },
+  { value: 'signed', label: 'Signed' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'void', label: 'Void' },
+];
+
+export const INVOICE_STATUS_STYLES = {
+  draft: 'bg-gray-100 text-gray-600 border-gray-200',
+  sent: 'bg-blue-100 text-blue-700 border-blue-200',
+  signed: 'bg-violet-100 text-violet-700 border-violet-200',
+  paid: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  void: 'bg-gray-100 text-gray-400 border-gray-200',
+};
+
+export function getInvoiceStatusLabel(value) {
+  return INVOICE_STATUSES.find(s => s.value === value)?.label || value || 'Draft';
+}
+
+// Generic line-item types for the invoice editor. Free-form on the server (any
+// string is accepted) — these are just the presets the dropdown offers, so the
+// model generalizes past dumpster rental (base service, add-ons, overages, fees).
+export const INVOICE_LINE_TYPES = [
+  { value: 'service', label: 'Service' },
+  { value: 'addon', label: 'Add-on' },
+  { value: 'overage', label: 'Overage' },
+  { value: 'fee', label: 'Fee' },
+  { value: 'discount', label: 'Discount' },
+];
+
 // Field packs render the "Industry Details" section of the lead detail view.
 // Field types:
 //   - text       single-line editable string

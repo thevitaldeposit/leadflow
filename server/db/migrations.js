@@ -638,6 +638,85 @@ function runMigrations() {
     console.error('[migrations] Customer backfill failed (non-fatal):', e.message);
   }
 
+  // ── Invoices: customer-facing invoice + contract + e-signature ─────────────
+  // A generic invoice entity (business_id-scoped) layered over the customers/leads
+  // model. Line items are deliberately generic — description + qty + unit + rate +
+  // amount with a free-form line_type — so the same schema serves any service
+  // business; dumpster-specific concepts (e.g. a weight overage) are just a
+  // line_type, never a column. Default rates are pulled from the per-client pricing
+  // layer when an invoice is drafted (see invoiceService.prefill) and COPIED onto
+  // the line item, so an issued invoice is an immutable snapshot. The customer
+  // reviews + signs via a tokenized public link (public_token) with no login; the
+  // captured signature + full name + timestamp + IP/User-Agent are stored on the
+  // invoice as dispute evidence, alongside a snapshot of the exact terms signed.
+  // Payment collection is a separate, later task — paid_at / payment_method /
+  // payment_reference are the placeholder columns and stay null until then.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+      lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+      invoice_number TEXT,
+      status TEXT DEFAULT 'draft',
+      public_token TEXT UNIQUE,
+      issue_date TEXT,
+      due_date TEXT,
+      currency TEXT DEFAULT 'USD',
+      subtotal REAL DEFAULT 0,
+      tax_rate REAL DEFAULT 0,
+      tax_amount REAL DEFAULT 0,
+      total REAL DEFAULT 0,
+      amount_paid REAL DEFAULT 0,
+      notes TEXT,
+      terms TEXT,
+      bill_to_name TEXT,
+      bill_to_email TEXT,
+      bill_to_phone TEXT,
+      bill_to_address TEXT,
+      sent_at TEXT,
+      viewed_at TEXT,
+      signed_at TEXT,
+      signer_name TEXT,
+      signature_type TEXT,
+      signature_data TEXT,
+      signed_terms TEXT,
+      signer_ip TEXT,
+      signer_user_agent TEXT,
+      paid_at TEXT,
+      payment_method TEXT,
+      payment_reference TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_business ON invoices(business_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_lead ON invoices(lead_id)');
+  // SQLite treats NULLs as distinct in a UNIQUE index, but every invoice is issued
+  // with a token, so this enforces a single owner per public link.
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_token ON invoices(public_token)');
+
+  // Line items belong to one invoice and are removed with it (ON DELETE CASCADE).
+  // business_id is denormalized for scoping convenience / defense-in-depth.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS invoice_line_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+      business_id INTEGER REFERENCES businesses(id),
+      description TEXT,
+      service_key TEXT,
+      line_type TEXT DEFAULT 'service',
+      quantity REAL DEFAULT 1,
+      unit TEXT,
+      unit_rate REAL DEFAULT 0,
+      amount REAL DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_invoice_line_items_invoice ON invoice_line_items(invoice_id)');
+
   console.log('Database migrations completed successfully.');
 }
 

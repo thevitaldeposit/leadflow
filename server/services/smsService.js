@@ -122,4 +122,45 @@ async function sendPaymentSms(lead, force = false) {
   }
 }
 
-module.exports = { sendPaymentSms };
+// Text the customer a link to their invoice (review + sign). Additive sibling to
+// sendPaymentSms — reuses the same Twilio Messages API path; does NOT touch the
+// inbound call flow, recording, or caller ID. Respects the per-business smsEnabled
+// setting. `link` is the fully-built public invoice URL built by the caller.
+async function sendInvoiceSms(invoice, link) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_PHONE_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    console.log('[sms] Twilio credentials not configured — skipping invoice SMS');
+    return { sent: false, reason: 'no_credentials' };
+  }
+
+  const smsEnabled = getDbSetting('smsEnabled', invoice.business_id);
+  if (smsEnabled === false) {
+    return { sent: false, reason: 'disabled' };
+  }
+
+  const toNumber = normalizePhone(invoice.bill_to_phone);
+  if (!toNumber) {
+    return { sent: false, reason: 'no_phone' };
+  }
+
+  const businessName = getDbSetting('businessName', invoice.business_id) || 'our business';
+  const firstName = invoice.bill_to_name ? String(invoice.bill_to_name).split(' ')[0] : null;
+  const greeting = firstName ? `Hi ${firstName}!` : 'Hi there!';
+  const totalStr = invoice.total != null ? ` for $${Number(invoice.total).toFixed(2)}` : '';
+
+  const message = `${greeting} ${businessName} sent you invoice ${invoice.invoice_number}${totalStr}. Review, read the terms, and sign here: ${link} Reply STOP to opt out.`;
+
+  try {
+    await twilioPost(accountSid, authToken, { From: fromNumber, To: toNumber, Body: message });
+    console.log(`[sms] Invoice SMS sent to ${toNumber} for invoice ${invoice.id}`);
+    return { sent: true, phone: toNumber };
+  } catch (err) {
+    console.error(`[sms] Failed to send invoice SMS for invoice ${invoice.id}:`, err.message);
+    return { sent: false, reason: 'send_error', error: err.message };
+  }
+}
+
+module.exports = { sendPaymentSms, sendInvoiceSms };

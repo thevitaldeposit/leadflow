@@ -79,6 +79,43 @@ async function sendWelcomeEmail({ to, firstName }) {
   });
 }
 
+// Deliver an invoice link to the customer. Plain, business-branded message with a
+// single call-to-action button to the tokenized public invoice page (review +
+// sign). Additive — reuses the lazy Resend client; never touches the other mails.
+async function sendInvoiceEmail({ to, businessName, customerName, invoiceNumber, total, dueDate, link }) {
+  const safeBiz = escapeHtml(businessName || 'Your service provider');
+  const safeNum = escapeHtml(invoiceNumber || 'Invoice');
+  const greeting = customerName ? `Hi ${escapeHtml(String(customerName).split(' ')[0])},` : 'Hi there,';
+  const totalStr = total != null ? `$${Number(total).toFixed(2)}` : null;
+  const dueStr = dueDate
+    ? new Date(`${dueDate}T00:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    : null;
+
+  const html = `
+  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; color: #111827;">
+    <h1 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">${safeNum} from ${safeBiz}</h1>
+    <p style="font-size: 15px; line-height: 1.6; color: #374151; margin: 16px 0;">${greeting}</p>
+    <p style="font-size: 15px; line-height: 1.6; color: #374151; margin: 0 0 16px;">
+      ${safeBiz} has sent you an invoice${totalStr ? ` for <strong>${totalStr}</strong>` : ''}${dueStr ? `, due ${escapeHtml(dueStr)}` : ''}.
+      Review the details, read the terms, and sign to confirm using the secure link below.
+    </p>
+    <a href="${link}" style="display: inline-block; background: #6366f1; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 500; padding: 12px 24px; border-radius: 8px;">
+      View &amp; sign invoice
+    </a>
+    <p style="font-size: 13px; line-height: 1.6; color: #9ca3af; margin: 32px 0 0;">
+      If the button doesn't work, copy and paste this link into your browser:<br />
+      <a href="${link}" style="color: #6366f1; word-break: break-all;">${link}</a>
+    </p>
+  </div>`;
+
+  return getResend().emails.send({
+    from: FROM_ADDRESS,
+    to,
+    subject: `${safeNum} from ${safeBiz}`,
+    html,
+  });
+}
+
 // Escape user-supplied text before interpolating it into the contact emails so a
 // submission can't inject markup into the HTML body.
 function escapeHtml(str) {
@@ -136,4 +173,4 @@ async function sendContactConfirmation({ name, email }) {
   });
 }
 
-module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail };
+module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail, sendInvoiceEmail };

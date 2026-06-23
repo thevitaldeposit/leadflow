@@ -7,6 +7,10 @@ import LeadListPage from './pages/LeadListPage';
 import CustomersListPage from './pages/CustomersListPage';
 import CustomerDetailPage from './pages/CustomerDetailPage';
 import PricingPage from './pages/PricingPage';
+import InvoicesListPage from './pages/InvoicesListPage';
+import InvoiceEditorPage from './pages/InvoiceEditorPage';
+import InvoiceDetailPage from './pages/InvoiceDetailPage';
+import PublicInvoicePage from './pages/PublicInvoicePage';
 import SettingsPage from './pages/SettingsPage';
 import BillingPage from './pages/BillingPage';
 import InventoryPage from './pages/InventoryPage';
@@ -59,6 +63,10 @@ function AppRoutes() {
         <Route path="/terms" element={<TermsOfServicePage />} />
         <Route path="/contact" element={<ContactPage />} />
 
+        {/* Public, tokenized invoice — the customer's review + sign page. No login,
+            no dashboard chrome; reachable whether signed in or not. */}
+        <Route path="/invoice/:token" element={<PublicInvoicePage />} />
+
         {user ? (
           // Authenticated. Billing stays reachable outside the subscription gate
           // so a blocked account can still update payment or resubscribe — it keeps
@@ -79,6 +87,10 @@ function AppRoutes() {
                 <Route path="/customers" element={<CustomersListPage />} />
                 <Route path="/customers/:id" element={<CustomerDetailPage />} />
                 <Route path="/pricing" element={<PricingPage />} />
+                <Route path="/invoices" element={<InvoicesListPage />} />
+                <Route path="/invoices/new" element={<InvoiceEditorPage />} />
+                <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+                <Route path="/invoices/:id/edit" element={<InvoiceEditorPage />} />
                 <Route path="/leads" element={<LeadListPage />} />
                 <Route path="/leads/:id" element={<LeadDetailPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

@@ -127,6 +127,61 @@ export const api = {
     }),
   deleteDiscountGroup: (id) => request(`/pricing/groups/${id}`, { method: 'DELETE' }),
 
+  // Invoices (owner-facing). Customer-facing review + sign uses the public methods
+  // below (no auth, tokenized link).
+  getInvoices: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/invoices${qs ? `?${qs}` : ''}`);
+  },
+  getInvoice: (id) => request(`/invoices/${id}`),
+  // Prefill the New Invoice form from a customer (+ optional job) and the pricing layer.
+  getInvoicePrefill: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/invoices/prefill${qs ? `?${qs}` : ''}`);
+  },
+  createInvoice: (body) =>
+    request('/invoices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateInvoice: (id, body) =>
+    request(`/invoices/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
+  sendInvoice: (id, channel = 'both') =>
+    request(`/invoices/${id}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel }),
+    }),
+  markInvoicePaid: (id, body = {}) =>
+    request(`/invoices/${id}/mark-paid`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  // Per-business invoice defaults (terms template, due window, tax, numbering).
+  getInvoiceDefaults: () => request('/invoices/defaults'),
+  setInvoiceDefaults: (body) =>
+    request('/invoices/defaults', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  // Public, tokenized invoice (no login) — the customer's review + sign page.
+  getPublicInvoice: (token) => request(`/public/invoices/${token}`),
+  signPublicInvoice: (token, body) =>
+    request(`/public/invoices/${token}/sign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
   // Extraction
   extractTranscript: (transcript) =>
     request('/extract/transcript', {

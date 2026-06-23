@@ -2,13 +2,21 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Phone, PhoneMissed, PhoneOutgoing, MessageSquare, Voicemail,
-  StickyNote, RefreshCw, MapPin, Edit2, Trash2, Check, X, FileText, DollarSign,
+  StickyNote, RefreshCw, MapPin, Edit2, Trash2, Check, X, FileText, DollarSign, Plus,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
   CUSTOMER_STATUSES, CUSTOMER_STATUS_STYLES, getCustomerStatusLabel,
   JOB_STATUS_STYLES, getJobStatusLabel,
+  INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
 } from '../utils/verticalConfig';
+
+const money = (n, c = 'USD') => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: c }).format(v); }
+  catch { return `$${v.toFixed(2)}`; }
+};
 
 const ACTIVITY_ICONS = {
   inbound_call: Phone,
@@ -93,6 +101,7 @@ export default function CustomerDetailPage() {
   const navigate = useNavigate();
   const [customer, setCustomer] = useState(null);
   const [groups, setGroups] = useState([]);
+  const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -103,9 +112,10 @@ export default function CustomerDetailPage() {
   const [savingTerms, setSavingTerms] = useState(false);
 
   const load = useCallback(() => {
-    return Promise.all([api.getCustomer(id), api.getPricing()]).then(([c, p]) => {
+    return Promise.all([api.getCustomer(id), api.getPricing(), api.getInvoices({ customer_id: id })]).then(([c, p, inv]) => {
       setCustomer(c);
       setGroups(p.groups || []);
+      setInvoices(inv || []);
       setNotesDraft(c.notes || '');
       setTermsDraft(c.contract_terms || '');
     });
@@ -364,12 +374,47 @@ export default function CustomerDetailPage() {
         </div>
       </Card>
 
-      {/* Invoices placeholder */}
-      <Card title="Invoices" icon={FileText}>
-        <div className="px-5 py-8 text-center">
-          <p className="text-sm text-gray-400">Invoicing isn't built yet.</p>
-          <p className="text-xs text-gray-400 mt-1">This customer's effective rates and contract terms are ready for it.</p>
-        </div>
+      {/* Invoices */}
+      <Card
+        title={`Invoices (${invoices.length})`}
+        icon={FileText}
+        action={
+          <button onClick={() => navigate(`/invoices/new?customer_id=${id}`)} className="flex items-center gap-1.5 text-xs font-medium text-accent hover:text-accent/80">
+            <Plus size={13} /> New Invoice
+          </button>
+        }
+      >
+        {invoices.length === 0 ? (
+          <div className="px-5 py-8 text-center">
+            <p className="text-sm text-gray-400">No invoices yet.</p>
+            <p className="text-xs text-gray-400 mt-1">Create one — line items and terms prefill from this customer's rates.</p>
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Issued</th>
+                <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {invoices.map((inv) => (
+                <tr key={inv.id} className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => navigate(`/invoices/${inv.id}`)}>
+                  <td className="px-5 py-3 font-medium text-gray-800">{inv.invoice_number}</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${INVOICE_STATUS_STYLES[inv.status] || INVOICE_STATUS_STYLES.draft}`}>
+                      {getInvoiceStatusLabel(inv.status)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{fmtDate(inv.issue_date)}</td>
+                  <td className="px-5 py-3 text-right text-gray-900 font-medium whitespace-nowrap">{money(inv.total, inv.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Card>
 
       {/* Activity timeline */}

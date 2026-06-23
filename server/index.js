@@ -32,6 +32,8 @@ const { router: billingRouter, handleStripeWebhook } = require('./routes/billing
 const adminRouter = require('./routes/admin');
 const customersRouter = require('./routes/customers');
 const pricingRouter = require('./routes/pricing');
+const invoicesRouter = require('./routes/invoices');
+const publicInvoicesRouter = require('./routes/publicInvoices');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -126,6 +128,9 @@ app.get('/api/dashboard/stats', requireAuth, (req, res) => {
 app.use('/api/leads', leadsRouter);
 app.use('/api/customers', customersRouter);
 app.use('/api/pricing', pricingRouter);
+app.use('/api/invoices', invoicesRouter);
+// Public, tokenized invoice surface (no auth) — the customer's review + sign page.
+app.use('/api/public/invoices', publicInvoicesRouter);
 app.use('/api/dumpsters', dumpsterRouter);
 app.use('/api/schedule', scheduleRouter);
 app.use('/api/extract', extractRouter);
