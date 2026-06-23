@@ -727,11 +727,15 @@ function runMigrations() {
   //   contact_email         public contact email shown on the policy pages
   //   contact_phone         public display phone, e.g. "(815) 503-0701"
   //   policy_effective_date ISO date the policy took effect (stored at signup)
+  //   state                 governing-law state for the Terms, e.g. "Illinois"
+  //   processor             payment processor named in the copy, e.g. "Stripe"
   const POLICY_COLUMNS = [
     'ALTER TABLE businesses ADD COLUMN service TEXT',
     'ALTER TABLE businesses ADD COLUMN contact_email TEXT',
     'ALTER TABLE businesses ADD COLUMN contact_phone TEXT',
     'ALTER TABLE businesses ADD COLUMN policy_effective_date TEXT',
+    'ALTER TABLE businesses ADD COLUMN state TEXT',
+    'ALTER TABLE businesses ADD COLUMN processor TEXT',
   ];
   for (const stmt of POLICY_COLUMNS) {
     try {
@@ -741,6 +745,11 @@ function runMigrations() {
     }
   }
 
+  // Every Stream customer is billed through Stripe, so default the processor for
+  // any business that doesn't have one set. COALESCE keeps it idempotent and never
+  // overwrites a value an owner has customized.
+  db.prepare("UPDATE businesses SET processor = COALESCE(processor, 'Stripe')").run();
+
   // Seed Valley Binz's policy fields (the first customer). COALESCE so this only
   // fills values that are still NULL — idempotent across restarts and never
   // clobbers a value the owner later edits.
@@ -749,7 +758,9 @@ function runMigrations() {
       service = COALESCE(service, 'dumpster rental'),
       contact_email = COALESCE(contact_email, 'valleybinz@gmail.com'),
       contact_phone = COALESCE(contact_phone, '(815) 503-0701'),
-      policy_effective_date = COALESCE(policy_effective_date, '2026-06-23')
+      policy_effective_date = COALESCE(policy_effective_date, '2026-06-23'),
+      state = COALESCE(state, 'Illinois'),
+      processor = COALESCE(processor, 'Stripe')
     WHERE slug = 'valley-binz'
   `).run();
 

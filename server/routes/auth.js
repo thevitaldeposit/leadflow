@@ -100,9 +100,12 @@ router.post('/register', async (req, res) => {
     // SMS compliance pages (/c/:slug/privacy|terms) render from these fields, so
     // populate them at signup. service = the chosen industry as a lowercase noun
     // phrase; contact_email defaults to the login email; the policy takes effect
-    // today. contact_phone is set later in Settings (no phone is collected here).
+    // today; processor is Stripe for every Stream customer. contact_phone and
+    // governing-law state are set later in Settings (not collected here) — the
+    // policy pages fall back gracefully until then.
     const policyService = industryType ? String(industryType).trim().toLowerCase() : null;
     const policyEffectiveDate = new Date().toISOString().slice(0, 10);
+    const policyProcessor = 'Stripe';
 
     // Create the business and its owner user atomically. node:sqlite's
     // DatabaseSync has no transaction() helper (that is a better-sqlite3 API),
@@ -115,8 +118,8 @@ router.post('/register', async (req, res) => {
           INSERT INTO businesses
             (name, owner_first_name, owner_last_name, slug, industry_type,
              stripe_customer_id, stripe_subscription_id, subscription_status,
-             service, contact_email, policy_effective_date)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             service, contact_email, policy_effective_date, processor)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           String(businessName),
@@ -129,7 +132,8 @@ router.post('/register', async (req, res) => {
           subscriptionStatus,
           policyService,
           normEmail,
-          policyEffectiveDate
+          policyEffectiveDate,
+          policyProcessor
         );
       businessId = Number(bizInfo.lastInsertRowid);
       const userInfo = db
