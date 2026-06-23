@@ -97,6 +97,13 @@ router.post('/register', async (req, res) => {
     const passwordHash = await hashPassword(String(password));
     const slug = uniqueSlug(slugify(businessName));
 
+    // SMS compliance pages (/c/:slug/privacy|terms) render from these fields, so
+    // populate them at signup. service = the chosen industry as a lowercase noun
+    // phrase; contact_email defaults to the login email; the policy takes effect
+    // today. contact_phone is set later in Settings (no phone is collected here).
+    const policyService = industryType ? String(industryType).trim().toLowerCase() : null;
+    const policyEffectiveDate = new Date().toISOString().slice(0, 10);
+
     // Create the business and its owner user atomically. node:sqlite's
     // DatabaseSync has no transaction() helper (that is a better-sqlite3 API),
     // so drive BEGIN/COMMIT/ROLLBACK directly.
@@ -107,8 +114,9 @@ router.post('/register', async (req, res) => {
         .prepare(`
           INSERT INTO businesses
             (name, owner_first_name, owner_last_name, slug, industry_type,
-             stripe_customer_id, stripe_subscription_id, subscription_status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             stripe_customer_id, stripe_subscription_id, subscription_status,
+             service, contact_email, policy_effective_date)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           String(businessName),
@@ -118,7 +126,10 @@ router.post('/register', async (req, res) => {
           industryType ? String(industryType) : null,
           stripeCustomerId ? String(stripeCustomerId) : null,
           stripeSubscriptionId ? String(stripeSubscriptionId) : null,
-          subscriptionStatus
+          subscriptionStatus,
+          policyService,
+          normEmail,
+          policyEffectiveDate
         );
       businessId = Number(bizInfo.lastInsertRowid);
       const userInfo = db

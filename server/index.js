@@ -34,6 +34,7 @@ const customersRouter = require('./routes/customers');
 const pricingRouter = require('./routes/pricing');
 const invoicesRouter = require('./routes/invoices');
 const publicInvoicesRouter = require('./routes/publicInvoices');
+const policyPagesRouter = require('./routes/policyPages');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -147,6 +148,9 @@ app.use('/api/billing', billingRouter);
 app.use('/api/admin', adminRouter);
 // Public payment page — must be before the SPA catch-all
 app.use('/pay', paymentRouter);
+// Public per-customer SMS compliance pages (privacy + SMS terms) for A2P 10DLC
+// review — server-rendered HTML, must be before the SPA catch-all.
+app.use('/c', policyPagesRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

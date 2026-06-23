@@ -717,6 +717,42 @@ function runMigrations() {
   `);
   db.exec('CREATE INDEX IF NOT EXISTS idx_invoice_line_items_invoice ON invoice_line_items(invoice_id)');
 
+  // ── SMS compliance pages: per-customer policy fields ───────────────────────
+  // Public privacy + SMS terms pages (served at /c/:slug/privacy and /c/:slug/terms
+  // by routes/policyPages.js) render every customer from their `businesses` row for
+  // A2P 10DLC carrier review. The slug already lives on businesses; these columns
+  // add the remaining fields the templates need. Additive — same
+  // attempt-and-swallow-duplicate pattern as the column blocks above.
+  //   service               plain lowercase noun phrase, e.g. "dumpster rental"
+  //   contact_email         public contact email shown on the policy pages
+  //   contact_phone         public display phone, e.g. "(815) 503-0701"
+  //   policy_effective_date ISO date the policy took effect (stored at signup)
+  const POLICY_COLUMNS = [
+    'ALTER TABLE businesses ADD COLUMN service TEXT',
+    'ALTER TABLE businesses ADD COLUMN contact_email TEXT',
+    'ALTER TABLE businesses ADD COLUMN contact_phone TEXT',
+    'ALTER TABLE businesses ADD COLUMN policy_effective_date TEXT',
+  ];
+  for (const stmt of POLICY_COLUMNS) {
+    try {
+      db.exec(stmt);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  }
+
+  // Seed Valley Binz's policy fields (the first customer). COALESCE so this only
+  // fills values that are still NULL — idempotent across restarts and never
+  // clobbers a value the owner later edits.
+  db.prepare(`
+    UPDATE businesses SET
+      service = COALESCE(service, 'dumpster rental'),
+      contact_email = COALESCE(contact_email, 'valleybinz@gmail.com'),
+      contact_phone = COALESCE(contact_phone, '(815) 503-0701'),
+      policy_effective_date = COALESCE(policy_effective_date, '2026-06-23')
+    WHERE slug = 'valley-binz'
+  `).run();
+
   console.log('Database migrations completed successfully.');
 }
 
