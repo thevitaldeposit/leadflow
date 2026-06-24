@@ -197,6 +197,31 @@ function SignSection({ token, invoice, onSigned }) {
 // Stripe Elements appearance — tuned to this page's accent.
 const PAY_APPEARANCE = { theme: 'stripe', variables: { colorPrimary: '#4f46e5', borderRadius: '10px' } };
 
+// Centered "Payment Complete" success screen. Rendered BOTH immediately after a
+// successful client-side confirm (inside CardForm, before any server round-trip)
+// AND for an already-paid invoice (PaymentSection) — same component both ways, so
+// the instant success and the later webhook-reconciled receipt never disagree and
+// there's no jarring swap. The card line shows only when brand + last4 are known
+// (they aren't surfaced to this public page today, so it's gracefully omitted
+// rather than invented).
+function PaymentComplete({ amountLabel, cardBrand, cardLast4, paidAt }) {
+  const card =
+    cardBrand && cardLast4
+      ? `${cardBrand.charAt(0).toUpperCase()}${cardBrand.slice(1)} ${cardLast4}`
+      : null;
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-6 sm:p-8 text-center">
+      <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-4xl mx-auto">
+        ✓
+      </div>
+      <h2 className="text-xl font-bold text-gray-900 mt-4">Payment Complete</h2>
+      <p className="text-3xl font-extrabold text-gray-900 mt-2">{amountLabel}</p>
+      {card && <p className="text-sm text-gray-500 mt-1.5">{card}</p>}
+      {paidAt && <p className="text-xs text-gray-400 mt-3">Paid {fmtDateTime(paidAt)}</p>}
+    </div>
+  );
+}
+
 // The card form, mounted inside <Elements> (bound to the business's CONNECTED
 // account). On a successful confirm it flips the invoice to paid via the confirm
 // endpoint (the Connect webhook is the async backstop) and hands the updated
@@ -206,6 +231,7 @@ function CardForm({ token, amountLabel, onPaid, onCancel }) {
   const elements = useElements();
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
+  const [paid, setPaid] = useState(null); // truthy once the card confirm succeeds
 
   const submit = async (e) => {
     e.preventDefault();
@@ -227,21 +253,30 @@ function CardForm({ token, amountLabel, onPaid, onCancel }) {
     }
 
     if (paymentIntent && (paymentIntent.status === 'succeeded' || paymentIntent.status === 'processing')) {
-      try {
-        const updated = await api.confirmInvoicePayment(token, paymentIntent.id);
-        onPaid(updated);
-      } catch {
-        // The webhook will still reconcile it — surface a soft message rather than
-        // implying the charge failed.
-        setError('Your payment went through. It may take a moment to update here.');
-        setProcessing(false);
-      }
+      // Show the success screen immediately from the client's OWN confirmation —
+      // don't gate it on our confirm endpoint or the async Connect webhook. That
+      // race is exactly what used to surface a misleading red "it went through…"
+      // message styled like a failure, with the Pay button still showing.
+      setPaid({});
+      // Best-effort: flip the invoice to paid server-side now so a reload, the
+      // receipt, and the header "Paid" badge reflect it. The webhook is the
+      // backstop, so a failure here is intentionally silent — the customer has
+      // already seen success.
+      api.confirmInvoicePayment(token, paymentIntent.id)
+        .then((updated) => { if (updated) onPaid(updated); })
+        .catch(() => {});
       return;
     }
 
     setError('Payment could not be completed. Please try again.');
     setProcessing(false);
   };
+
+  // Replace the whole form with the success screen once paid — no Pay button, no
+  // form, no red text for a success.
+  if (paid) {
+    return <PaymentComplete amountLabel={amountLabel} cardBrand={paid.cardBrand} cardLast4={paid.cardLast4} />;
+  }
 
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -292,17 +327,25 @@ function PaymentSection({ token, invoice, onPaid }) {
 
   if (invoice.paid_at) {
     const refunded = Number(invoice.amount_refunded) > 0;
+    // Straight payment → the clean centered success screen (same one CardForm
+    // shows the instant the card confirms). Refunds keep the informational amber
+    // row — a refund isn't a "success" to celebrate with a green check.
+    if (!refunded) {
+      return (
+        <PaymentComplete
+          amountLabel={money(invoice.amount_paid || invoice.total, invoice.currency)}
+          paidAt={invoice.paid_at}
+        />
+      );
+    }
     return (
       <div className="bg-white rounded-2xl shadow-sm p-5 sm:p-6">
         <div className="flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${refunded ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-            {refunded ? '↩' : '✓'}
-          </div>
+          <div className="w-9 h-9 rounded-full flex items-center justify-center text-lg flex-shrink-0 bg-amber-100 text-amber-700">↩</div>
           <div>
-            <p className={`font-semibold ${refunded ? 'text-amber-900' : 'text-emerald-900'}`}>{refunded ? 'Refunded' : 'Payment received'}</p>
+            <p className="font-semibold text-amber-900">Refunded</p>
             <p className="text-sm text-gray-500">
-              {money(invoice.amount_paid || invoice.total, invoice.currency)} paid · {fmtDateTime(invoice.paid_at)}
-              {refunded && <> · {money(invoice.amount_refunded, invoice.currency)} refunded</>}
+              {money(invoice.amount_paid || invoice.total, invoice.currency)} paid · {fmtDateTime(invoice.paid_at)} · {money(invoice.amount_refunded, invoice.currency)} refunded
             </p>
           </div>
         </div>
