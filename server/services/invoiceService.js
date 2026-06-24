@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const db = require('../db/database');
 const { resolveEffectivePricing } = require('./pricingService');
 const { displayNameOf } = require('./customerService');
+const { GENERIC_TERMS, businessTypeKey, resolveDefaultContract } = require('./contractTemplates');
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
 // Generic invoice + contract + e-signature layer over customers/leads. Everything
@@ -10,13 +11,14 @@ const { displayNameOf } = require('./customerService');
 // Default rates are read from the per-client pricing layer at draft time and
 // copied onto the invoice so an issued invoice is a fixed snapshot.
 
-// A sensible, business-agnostic default contract/terms block. Businesses edit
-// their own default in Settings (invoiceTerms) and can override per-invoice.
-const DEFAULT_TERMS =
-  'Payment is due by the due date shown above. By signing below you confirm the ' +
-  'services and amounts listed are correct, authorize the work described, and ' +
-  'agree to pay the total due. Returned payments or balances past due may incur ' +
-  'additional fees.';
+// The business-agnostic fallback terms block, used when an invoice has no
+// customized terms and the business type has no dedicated contract. The richer,
+// business-type-specific default contract (e.g. the full dumpster-rental
+// agreement) is resolved at display/sign time in getEffectiveContractText, keyed
+// off the business's type — see services/contractTemplates.js. Businesses can
+// still override per-invoice (the editor's terms field) or set a business default
+// (invoiceTerms), both of which take precedence over the type contract.
+const DEFAULT_TERMS = GENERIC_TERMS;
 
 const DEFAULTS = { dueDays: 14, taxRate: 0, prefix: 'INV-', startNumber: 1001 };
 
@@ -545,14 +547,45 @@ function signInvoice(token, { signerName, signatureData, signatureType, ip, user
   if (data.length > 2_000_000) return { error: 'signature_too_large' };
 
   const at = nowIso();
+  // Snapshot the exact contract the customer was shown (resolved by business type),
+  // not the raw terms column — so signed_terms is faithful dispute evidence.
+  const signedTerms = getEffectiveContractText(inv) || null;
   db.prepare(`
     UPDATE invoices
     SET status = 'signed', signed_at = ?, signer_name = ?, signature_type = ?,
         signature_data = ?, signed_terms = ?, signer_ip = ?, signer_user_agent = ?, updated_at = ?
     WHERE id = ?
-  `).run(at, name, type, data, inv.terms || null, ip || null, userAgent ? String(userAgent).slice(0, 500) : null, at, inv.id);
+  `).run(at, name, type, data, signedTerms, ip || null, userAgent ? String(userAgent).slice(0, 500) : null, at, inv.id);
 
   return { invoice: getInvoiceByToken(token) };
+}
+
+// The normalized contract-type key for a business: its signup industry_type, or —
+// for an env-configured anchor business that predates the signup flow and has no
+// industry_type (e.g. Valley Binz) — the LEADFLOW default vertical env vars. A real
+// signup industry is never overridden by the global env.
+function businessContractTypeKey(businessId) {
+  const biz = db.prepare('SELECT industry_type FROM businesses WHERE id = ?').get(businessId);
+  const key = businessTypeKey(biz && biz.industry_type);
+  if (key) return key;
+  return businessTypeKey(process.env.LEADFLOW_DEFAULT_SUB_VERTICAL)
+    || businessTypeKey(process.env.LEADFLOW_DEFAULT_VERTICAL)
+    || 'generic';
+}
+
+// Resolve the contract text the customer actually SEES on the public page and
+// SIGNS (snapshotted into signed_terms). Resolution order:
+//   1. Terms customized for this invoice — anything the owner set that isn't the
+//      generic auto-default (a per-invoice edit, or a saved business default).
+//   2. The default contract for this business's type (e.g. the full dumpster-
+//      rental agreement) — see services/contractTemplates.js.
+// This is the single seam a future per-business "build your contract" Settings
+// feature hooks into: store the business's contract and prefer it in step 2.
+function getEffectiveContractText(invoice) {
+  if (!invoice) return GENERIC_TERMS;
+  const stored = (invoice.terms || '').trim();
+  if (stored && stored !== GENERIC_TERMS.trim()) return invoice.terms;
+  return resolveDefaultContract(businessContractTypeKey(invoice.business_id));
 }
 
 // Shape an invoice for the PUBLIC page — strips internal evidence (IP/UA) and
@@ -572,7 +605,10 @@ function toPublic(invoice, business, payment = {}) {
     total: invoice.total,
     amount_paid: invoice.amount_paid,
     notes: invoice.notes,
-    terms: invoice.terms,
+    // The full contract the customer reads + signs, resolved by business type
+    // (falls back to any per-invoice/business override). NOT necessarily the raw
+    // stored terms column — see getEffectiveContractText.
+    terms: getEffectiveContractText(invoice),
     bill_to_name: invoice.bill_to_name,
     bill_to_email: invoice.bill_to_email,
     bill_to_phone: invoice.bill_to_phone,

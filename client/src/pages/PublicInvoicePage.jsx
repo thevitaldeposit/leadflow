@@ -503,10 +503,13 @@ export default function PublicInvoicePage() {
           </div>
         )}
 
-        {/* Terms / contract */}
+        {/* Terms / contract — the full agreement flows naturally in the page so it
+            reads top-to-bottom and the Sign card below stays reachable by scrolling
+            the page (this page is its own scroll container). No inner scroll box:
+            on mobile a nested scroller is cramped for a multi-section contract. */}
         <div className="bg-white rounded-2xl shadow-sm p-5 sm:p-6">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Terms &amp; Conditions</p>
-          <div className="text-sm text-gray-700 whitespace-pre-wrap max-h-56 overflow-y-auto leading-relaxed">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Terms &amp; Conditions</p>
+          <div className="text-[13px] text-gray-700 whitespace-pre-wrap leading-relaxed">
             {inv.terms || 'No additional terms.'}
           </div>
         </div>
