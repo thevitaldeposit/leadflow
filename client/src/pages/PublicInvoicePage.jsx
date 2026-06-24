@@ -7,8 +7,10 @@ import { getConnectedStripe } from '../utils/stripe';
 // ── PUBLIC, tokenized invoice page ─────────────────────────────────────────────
 // Opened by the customer from an email/SMS link with NO login. Renders the line
 // items, balance, and terms, captures an e-signature (drawn or typed) + full name,
-// and shows a clearly-disabled payment placeholder (online payment is a later
-// task). Self-contained: its own chrome, no dashboard layout.
+// then unlocks pay-by-card (Stripe Connect direct charge). Payment is GATED behind
+// signing: the Pay area stays disabled until the contract is signed, and the
+// server rejects a charge on an unsigned invoice. Self-contained: its own chrome,
+// no dashboard layout.
 
 function money(n, currency = 'USD') {
   const v = Number(n);
@@ -360,6 +362,29 @@ function PaymentSection({ token, invoice, onPaid }) {
         <p className="text-sm text-gray-500 mt-1">
           {invoice.business?.phone ? 'Contact the business to arrange payment.' : 'The business will share payment options with you.'}
         </p>
+      </div>
+    );
+  }
+
+  // Gate: payment unlocks only after the contract is signed. Until then the Pay
+  // area is rendered disabled (button not clickable) with a hint pointing back to
+  // the signature card above. The server enforces the same rule, so this is UX,
+  // not the security boundary. Once `signed_at` lands (the sign call updates the
+  // invoice in state) this branch falls through to the live Pay flow below.
+  if (invoice.signature_required && !invoice.signed_at) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm p-5 sm:p-6">
+        <h2 className="text-base font-bold text-gray-900">Pay this invoice</h2>
+        <p className="text-sm text-gray-500 mt-1 mb-4">Pay securely by card. Powered by Stripe.</p>
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          className="w-full py-3.5 rounded-xl text-base font-bold text-white bg-gray-300 cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          <span aria-hidden="true">🔒</span> Pay {money(invoice.total, invoice.currency)} by card
+        </button>
+        <p className="text-sm text-gray-500 mt-2 text-center">Sign above to enable payment</p>
       </div>
     );
   }

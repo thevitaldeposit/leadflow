@@ -101,6 +101,15 @@ router.post('/:token/create-payment-intent', async (req, res) => {
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     if (invoice.status === 'paid' || invoice.paid_at) return res.json({ alreadyPaid: true });
 
+    // Gate: an invoice that carries a contract must be signed before any charge can
+    // start. This is the real enforcement point — the client also disables the Pay
+    // UI until signed, but never trust that alone. A PaymentIntent can only ever be
+    // created here, so this single gate also keeps the webhook/confirm paths from
+    // ever flipping an unsigned invoice to paid.
+    if (invoiceService.requiresSignature(invoice) && !invoice.signed_at) {
+      return res.status(409).json({ error: 'Please sign this invoice before paying.' });
+    }
+
     const business = connectService.loadBusiness(invoice.business_id);
     if (!business || !connectService.isConfigured() || !business.connect_charges_enabled) {
       return res.status(409).json({ error: 'This business is not accepting online payments yet.' });
@@ -137,6 +146,13 @@ router.post('/:token/confirm-payment', async (req, res) => {
 
     // Already paid → just return current state.
     if (invoice.status === 'paid' || invoice.paid_at) return res.json(publicView(invoice));
+
+    // Defense-in-depth: never reconcile an unsigned invoice to paid. In the normal
+    // flow this can't happen (the intent could only have been created post-signature
+    // above), but guard the state-flipping endpoint directly too.
+    if (invoiceService.requiresSignature(invoice) && !invoice.signed_at) {
+      return res.status(409).json({ error: 'Please sign this invoice before paying.' });
+    }
 
     const piId = (req.body && (req.body.paymentIntentId || req.body.payment_intent_id)) || invoice.stripe_payment_intent_id;
     if (!piId || !connectService.isConfigured() || !business.stripe_connect_account_id) {

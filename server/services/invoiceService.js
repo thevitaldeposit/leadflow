@@ -604,6 +604,19 @@ function getEffectiveContractText(invoice) {
   return resolveDefaultContract(businessContractTypeKey(invoice.business_id));
 }
 
+// Whether this invoice must be SIGNED before it can be paid. Paying is the act of
+// authorizing a contract, so any invoice that presents terms requires the
+// customer's signature first. Every invoice today resolves to a contract
+// (getEffectiveContractText falls back to the business-type / generic terms), so
+// this is effectively always true — the seam exists so a hypothetical
+// contract-less invoice could skip the gate and keep the pay-immediately flow.
+// Used both to expose `signature_required` on the public payload and to enforce
+// the gate server-side in routes/publicInvoices.js.
+function requiresSignature(invoice) {
+  if (!invoice) return false;
+  return !!(getEffectiveContractText(invoice) || '').trim();
+}
+
 // Shape an invoice for the PUBLIC page — strips internal evidence (IP/UA) and
 // scoping fields. `payment` is the business's online-payment state, resolved by
 // the caller from the Connect layer: { enabled, connectedAccountId, publishableKey }.
@@ -637,6 +650,10 @@ function toPublic(invoice, business, payment = {}) {
       unit_rate: it.unit_rate,
       amount: it.amount,
     })),
+    // Whether the customer must sign before the Pay action unlocks. Drives the
+    // client-side gate; the same rule is enforced server-side on the charge
+    // endpoint so the UI is never the only guard.
+    signature_required: requiresSignature(invoice),
     signed_at: invoice.signed_at,
     signer_name: invoice.signer_name,
     signature_type: invoice.signature_type,
@@ -696,6 +713,7 @@ module.exports = {
   getInvoiceByToken,
   recordView,
   signInvoice,
+  requiresSignature,
   toPublic,
   getBusinessBranding,
 };
