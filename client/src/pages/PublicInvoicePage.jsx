@@ -289,7 +289,7 @@ function CardForm({ token, amountLabel, onPaid, onCancel }) {
         disabled={!stripe || processing}
         className="w-full py-3.5 rounded-xl text-base font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
       >
-        {processing ? 'Processing…' : `Pay ${amountLabel}`}
+        {processing ? 'Processing…' : 'Pay'}
       </button>
       <button type="button" onClick={onCancel} disabled={processing} className="w-full text-sm text-gray-500 hover:text-gray-700">
         Cancel
@@ -382,7 +382,7 @@ function PaymentSection({ token, invoice, onPaid }) {
           aria-disabled="true"
           className="w-full py-3.5 rounded-xl text-base font-bold text-white bg-gray-300 cursor-not-allowed flex items-center justify-center gap-2"
         >
-          <span aria-hidden="true">🔒</span> Pay {money(invoice.total, invoice.currency)} by card
+          <span aria-hidden="true">🔒</span> Pay
         </button>
         <p className="text-sm text-gray-500 mt-2 text-center">Sign above to enable payment</p>
       </div>
@@ -406,7 +406,7 @@ function PaymentSection({ token, invoice, onPaid }) {
             disabled={starting}
             className="w-full py-3.5 rounded-xl text-base font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
-            {starting ? 'Starting…' : `Pay ${money(invoice.total, invoice.currency)} by card`}
+            {starting ? 'Starting…' : 'Pay'}
           </button>
         </>
       )}
