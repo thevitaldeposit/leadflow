@@ -124,7 +124,11 @@ function applyPaidIntent(accountId, paymentIntent) {
 function applyRefund(accountId, charge) {
   const business = connectService.getBusinessByConnectAccount(accountId);
   if (!business) { console.warn('[connect] refund for unknown connected account', accountId); return null; }
-  const piId = charge.payment_intent;
+  // payment_intent is a string id on webhook (snapshot) events, but an expanded
+  // object when the owner-side Payments route reuses this after issuing a refund.
+  const piId = charge.payment_intent && typeof charge.payment_intent === 'object'
+    ? charge.payment_intent.id
+    : charge.payment_intent;
   const invoice = piId ? invoiceService.findByPaymentIntent(business.id, piId) : null;
   if (!invoice) { console.warn('[connect] refund had no matching invoice', charge.id); return null; }
 
@@ -215,4 +219,4 @@ function handleConnectWebhook(req, res) {
   }
 }
 
-module.exports = { router, handleConnectWebhook, applyPaidIntent };
+module.exports = { router, handleConnectWebhook, applyPaidIntent, applyRefund };

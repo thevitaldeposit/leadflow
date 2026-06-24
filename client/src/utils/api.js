@@ -301,6 +301,18 @@ export const api = {
   getConnectStatus: () => request('/connect/status'),
   startConnectOnboarding: () => request('/connect/onboard', { method: 'POST' }),
 
+  // Payments / Transactions — the card payments received on the business's own
+  // connected account, with in-app refunds. :id is a Stripe charge id (ch_…).
+  getPayments: () => request('/payments'),
+  getPayment: (id) => request(`/payments/${id}`),
+  // Refund a charge. body.amount is dollars; omit it for a full (remaining) refund.
+  refundPayment: (id, body = {}) =>
+    request(`/payments/${id}/refund`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
   // Admin panel — all endpoints are restricted to business_id = 1 (403 otherwise).
   getAdminBusinesses: () => request('/admin/businesses'),
   setBusinessSubscription: (id, status) =>

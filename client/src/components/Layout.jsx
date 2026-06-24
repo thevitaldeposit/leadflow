@@ -14,6 +14,7 @@ import {
   DollarSign,
   Shield,
   CreditCard,
+  Wallet,
   LogOut,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
@@ -28,6 +29,7 @@ const PAGE_TITLES = {
   '/pricing': 'Pricing',
   '/invoices': 'Invoices',
   '/invoices/new': 'New Invoice',
+  '/payments': 'Payments',
   '/action-queue': 'Action Queue',
   '/opportunities': 'All Opportunities',
   '/booked': 'Booked Jobs',
@@ -123,7 +125,7 @@ export default function Layout({ children }) {
   }, []);
 
   const isHomeServices = location.pathname === '/' ||
-    ['/customers', '/pricing', '/invoices', '/action-queue', '/opportunities', '/booked', '/schedule', '/inventory', '/completed'].some(p => location.pathname.startsWith(p));
+    ['/customers', '/pricing', '/invoices', '/payments', '/action-queue', '/opportunities', '/booked', '/schedule', '/inventory', '/completed'].some(p => location.pathname.startsWith(p));
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -176,6 +178,11 @@ export default function Layout({ children }) {
           <NavLink to="/invoices" className={linkClass}>
             <ReceiptText size={18} />
             Invoices
+          </NavLink>
+
+          <NavLink to="/payments" className={linkClass}>
+            <Wallet size={18} />
+            Payments
           </NavLink>
 
           <div className="pt-2 pb-1">

@@ -282,6 +282,49 @@ async function createInvoicePaymentIntent(invoice, business) {
   };
 }
 
+// ── Transactions & refunds (owner-facing Payments view) ────────────────────────
+// All reads/writes here target the business's connected account (direct charges),
+// so they are inherently business-scoped: a connected account belongs to exactly
+// one business. Stripe is the SOURCE OF TRUTH for amounts, fees, and the refundable
+// balance — a refund is always validated against a freshly-read charge, never a
+// cached figure. The money moves on the connected account's balance (it is the
+// merchant of record); the platform takes no leg in any of this.
+
+// Recent charges on a connected account, most recent first. Card brand/last4 and
+// the cumulative refunded total live on each charge; fee/net (the balance
+// transaction) are fetched per-charge in retrieveCharge to keep this list cheap.
+async function listConnectedCharges(accountId, { limit = 100 } = {}) {
+  const res = await stripe.charges.list({ limit }, { stripeAccount: accountId });
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+// One charge with the balance transaction (Stripe fee + net) and its PaymentIntent
+// (whose metadata correlates back to the invoice) expanded, on the connected acct.
+async function retrieveCharge(accountId, chargeId) {
+  return stripe.charges.retrieve(
+    chargeId,
+    { expand: ['balance_transaction', 'payment_intent'] },
+    { stripeAccount: accountId }
+  );
+}
+
+// The refunds already issued against a charge (most recent first), on the connected
+// account. Listed separately rather than relying on charge.refunds, whose default
+// inclusion on the charge object varies by API version.
+async function listChargeRefunds(accountId, chargeId, { limit = 100 } = {}) {
+  const res = await stripe.refunds.list({ charge: chargeId, limit }, { stripeAccount: accountId });
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+// Issue a refund against a charge on the connected account. Full refund when
+// amountCents is omitted/null; partial for a positive amount. The connected account
+// is the merchant of record, so the money leaves ITS balance — no platform leg.
+async function createRefund(accountId, chargeId, amountCents) {
+  const params = { charge: chargeId };
+  if (Number.isFinite(amountCents) && amountCents > 0) params.amount = Math.round(amountCents);
+  return stripe.refunds.create(params, { stripeAccount: accountId });
+}
+
 // Webhook handler helper: refresh a business's cached Connect flags from an
 // account.updated event payload, keyed by the connected account id.
 function applyAccountUpdate(accountId, account) {
@@ -305,6 +348,10 @@ module.exports = {
   createOnboardingLink,
   createInvoicePaymentIntent,
   retrievePaymentIntent,
+  listConnectedCharges,
+  retrieveCharge,
+  listChargeRefunds,
+  createRefund,
   applyAccountUpdate,
   summarizeAccount,
   // exposed for tests / callers that want the raw client

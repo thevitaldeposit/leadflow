@@ -10,6 +10,8 @@ import PricingPage from './pages/PricingPage';
 import InvoicesListPage from './pages/InvoicesListPage';
 import InvoiceEditorPage from './pages/InvoiceEditorPage';
 import InvoiceDetailPage from './pages/InvoiceDetailPage';
+import PaymentsPage from './pages/PaymentsPage';
+import PaymentDetailPage from './pages/PaymentDetailPage';
 import PublicInvoicePage from './pages/PublicInvoicePage';
 import SettingsPage from './pages/SettingsPage';
 import BillingPage from './pages/BillingPage';
@@ -91,6 +93,8 @@ function AppRoutes() {
                 <Route path="/invoices/new" element={<InvoiceEditorPage />} />
                 <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
                 <Route path="/invoices/:id/edit" element={<InvoiceEditorPage />} />
+                <Route path="/payments" element={<PaymentsPage />} />
+                <Route path="/payments/:id" element={<PaymentDetailPage />} />
                 <Route path="/leads" element={<LeadListPage />} />
                 <Route path="/leads/:id" element={<LeadDetailPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

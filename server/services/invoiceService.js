@@ -470,6 +470,22 @@ function findByPaymentIntent(businessId, paymentIntentId) {
     .get(paymentIntentId, businessId);
 }
 
+// Map a business's invoices by the Stripe PaymentIntent that collected them, so the
+// owner-facing Payments view can link each Stripe charge back to its invoice +
+// customer in one query instead of a Stripe round-trip per row. Keyed by PI id.
+function getInvoiceRefsByPaymentIntent(businessId) {
+  const rows = db.prepare(`
+    SELECT i.id, i.invoice_number, i.stripe_payment_intent_id, i.bill_to_name,
+           i.total, i.currency, i.customer_id, c.display_name AS customer_display_name
+    FROM invoices i
+    LEFT JOIN customers c ON c.id = i.customer_id
+    WHERE i.business_id = ? AND i.stripe_payment_intent_id IS NOT NULL
+  `).all(businessId);
+  const map = {};
+  for (const r of rows) map[r.stripe_payment_intent_id] = r;
+  return map;
+}
+
 // Flip an invoice to paid from a successful online payment. IDEMPOTENT — both the
 // webhook and the client-side confirm fallback can call this; whichever lands
 // first wins and the second is a no-op. Returns { invoice, alreadyPaid }.
@@ -674,6 +690,7 @@ module.exports = {
   markPaid,
   attachPaymentIntent,
   findByPaymentIntent,
+  getInvoiceRefsByPaymentIntent,
   recordOnlinePayment,
   recordRefund,
   getInvoiceByToken,

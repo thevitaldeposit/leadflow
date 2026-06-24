@@ -30,6 +30,7 @@ const contactRouter = require('./routes/contact');
 const dashboardRouter = require('./routes/dashboard');
 const { router: billingRouter, handleStripeWebhook } = require('./routes/billing');
 const { router: connectRouter, handleConnectWebhook } = require('./routes/connect');
+const paymentsRouter = require('./routes/payments');
 const adminRouter = require('./routes/admin');
 const customersRouter = require('./routes/customers');
 const pricingRouter = require('./routes/pricing');
@@ -150,6 +151,9 @@ app.use('/api/contact', contactRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/billing', billingRouter);
 app.use('/api/connect', connectRouter);
+// Owner-facing Payments / Transactions view + in-app refunds (business's own
+// connected account). Separate from /api/billing (platform subscription).
+app.use('/api/payments', paymentsRouter);
 app.use('/api/admin', adminRouter);
 // Public payment page — must be before the SPA catch-all
 app.use('/pay', paymentRouter);
