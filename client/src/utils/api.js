@@ -97,6 +97,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lead_ids: leadIds, reason }),
     }),
+  // Add a discrete customer note (also surfaces in the profile's Activity Feed).
+  addCustomerNote: (id, body) =>
+    request(`/customers/${id}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    }),
   getCustomerPricing: (id) => request(`/customers/${id}/pricing`),
   // Upsert (or clear, with custom_price = null) one per-customer rate override.
   setCustomerPricing: (id, body) =>

@@ -638,6 +638,23 @@ function runMigrations() {
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_pricing_unique ON customer_pricing(customer_id, service_key)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_customer_pricing_business ON customer_pricing(business_id)');
 
+  // Customer notes — discrete, timestamped notes the owner adds against a
+  // customer (e.g. what was discussed on an outbound callback). These are a
+  // person-level record, distinct from per-lead activity_log entries, and are
+  // surfaced both as the profile's Notes list and merged into its Activity Feed.
+  // Removed with their customer (ON DELETE CASCADE). Purely additive — nothing in
+  // the call/extraction/booking pipeline reads or writes this table.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS customer_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_customer_notes_customer ON customer_notes(customer_id)');
+
   // Link column on leads. Additive — same attempt-and-swallow-duplicate pattern.
   // ON DELETE SET NULL so deleting a customer never deletes its call records; the
   // orphaned leads simply get re-linked (or re-create the customer) on the next

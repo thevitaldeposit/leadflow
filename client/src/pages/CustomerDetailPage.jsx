@@ -2,8 +2,9 @@ import { useEffect, useState, useCallback, Fragment } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Phone, PhoneMissed, PhoneOutgoing, MessageSquare, Voicemail,
-  StickyNote, RefreshCw, MapPin, Edit2, Trash2, Check, X, FileText, DollarSign, Plus,
-  ChevronDown, ChevronRight, Zap, Briefcase, Clock,
+  StickyNote, RefreshCw, MapPin, Mail, Edit2, Trash2, Check, X, FileText,
+  DollarSign, Plus, ChevronDown, ChevronRight, Zap, Briefcase, Clock,
+  Activity, AlertCircle,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
@@ -44,12 +45,23 @@ function fmtDateTime(iso) {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-const inputCls = 'w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent';
+const inputCls = 'w-full text-sm border border-divider bg-surface rounded-lg px-3 py-2 text-content focus:outline-none focus:ring-2 focus:ring-brand';
 const labelCls = 'block text-xs font-medium text-muted uppercase tracking-wide mb-1';
+const badgeCls = 'inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border';
 
-function Card({ title, icon: Icon, children, action }) {
+// The inline jump-links below the top card. Each smooth-scrolls the page to the
+// matching inline section (single-page scroll — no separate routes).
+const JUMP_LINKS = [
+  { id: 'active-inquiry', label: 'Active Inquiry' },
+  { id: 'jobs', label: 'Jobs' },
+  { id: 'invoices', label: 'Invoices' },
+  { id: 'pricing', label: 'Pricing' },
+  { id: 'notes', label: 'Notes' },
+];
+
+function Card({ id, title, icon: Icon, children, action }) {
   return (
-    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+    <div id={id} className={`bg-surface rounded-xl border border-divider shadow-sm overflow-hidden ${id ? 'scroll-mt-6' : ''}`}>
       <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between">
         <div className="flex items-center gap-2">
           {Icon && <Icon size={15} className="text-muted" />}
@@ -92,9 +104,144 @@ function ProfileForm({ customer, onSave, onCancel }) {
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-3 py-2 rounded-lg"><X size={14} /> Cancel</button>
-        <button type="submit" disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-4 py-2 rounded-lg"><Check size={14} /> {saving ? 'Saving…' : 'Save'}</button>
+        <button type="submit" disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-content bg-brand hover:bg-brand-hover disabled:opacity-50 px-4 py-2 rounded-lg"><Check size={14} /> {saving ? 'Saving…' : 'Save'}</button>
       </div>
     </form>
+  );
+}
+
+// Initials avatar for the top card.
+function Avatar({ name }) {
+  const initials = (name || '?')
+    .split(/\s+/).filter(Boolean).slice(0, 2)
+    .map(w => w[0]?.toUpperCase()).join('') || '?';
+  return (
+    <div className="w-16 h-16 rounded-full bg-brand/15 text-brand flex items-center justify-center text-xl font-bold flex-shrink-0">
+      {initials}
+    </div>
+  );
+}
+
+function ContactLine({ icon: Icon, value }) {
+  if (!value) return null;
+  return (
+    <p className="flex items-center gap-2">
+      <Icon size={14} className="text-subtle flex-shrink-0" />
+      <span className="text-content truncate">{value}</span>
+    </p>
+  );
+}
+
+// Quick Stats — the rollup numbers on the right of the top card. Real data for
+// this customer; the same figures are NOT repeated in the Invoices section.
+function QuickStats({ totalJobs, totalSpent, outstanding, lastJob }) {
+  const rows = [
+    { icon: Briefcase, label: 'Total Jobs', value: totalJobs },
+    { icon: DollarSign, label: 'Total Spent', value: totalSpent },
+    { icon: AlertCircle, label: 'Outstanding', value: outstanding },
+    { icon: Clock, label: 'Last Job', value: lastJob },
+  ];
+  return (
+    <div className="lg:w-72 flex-shrink-0 rounded-xl border border-divider bg-surface-2 p-4">
+      <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Quick Stats</p>
+      <div className="space-y-2.5">
+        {rows.map(r => (
+          <div key={r.label} className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm text-muted"><r.icon size={14} className="text-subtle" /> {r.label}</span>
+            <span className="text-sm font-semibold text-content">{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// The full-height right rail. Lists interactions/events most-recent first and
+// grows as the customer is interacted with (calls, status changes, invoice paid,
+// notes added, …). Notes added below are merged in server-side as note_added.
+function ActivityFeed({ activity }) {
+  return (
+    <div className="bg-surface rounded-xl border border-divider shadow-sm flex flex-col lg:max-h-[calc(100vh-7rem)]">
+      <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Activity size={15} className="text-muted" />
+          <h2 className="text-sm font-bold text-content">Activity Feed</h2>
+        </div>
+        <span className="text-[11px] text-muted">{activity.length}</span>
+      </div>
+      {activity.length === 0 ? (
+        <div className="px-5 py-8 text-center text-sm text-muted">No activity yet.</div>
+      ) : (
+        <ul className="divide-y divide-divider overflow-y-auto scrollbar-subtle min-h-0">
+          {activity.map(a => {
+            const Icon = ACTIVITY_ICONS[a.activity_type] || StickyNote;
+            return (
+              <li key={a.id} className="px-5 py-3 flex items-start gap-3">
+                <span className="mt-0.5 flex-shrink-0 w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center">
+                  <Icon size={14} className="text-muted" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-content break-words">{a.description || a.activity_type}</p>
+                  <p className="text-xs text-muted mt-0.5">{fmtDateTime(a.created_at)}</p>
+                  {a.lead_id && (
+                    <Link to={`/leads/${a.lead_id}`} className="text-[11px] text-brand hover:underline">View job →</Link>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// Notes section — discrete notes the owner adds (important for outbound
+// interactions, e.g. a callback recap). Each added note also pushes to the
+// Activity Feed (the server merges customer_notes into the activity timeline).
+function NotesSection({ id, notes, legacyNote, draft, setDraft, onAdd, saving }) {
+  const canAdd = draft.trim().length > 0 && !saving;
+  return (
+    <Card id={id} title="Notes" icon={StickyNote}>
+      <div className="px-5 py-4 space-y-3">
+        <textarea
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          rows={3}
+          placeholder="Add a note — e.g. recap of an outbound callback, what was discussed…"
+          className={inputCls + ' resize-y'}
+        />
+        <div className="flex justify-end">
+          <button
+            onClick={onAdd}
+            disabled={!canAdd}
+            className="flex items-center gap-1.5 text-sm font-medium text-content bg-brand hover:bg-brand-hover disabled:opacity-50 px-4 py-2 rounded-lg"
+          >
+            <Plus size={14} /> {saving ? 'Adding…' : 'Add Note'}
+          </button>
+        </div>
+
+        {legacyNote && (
+          <div className="rounded-lg border border-divider bg-surface-2 px-3 py-2">
+            <p className="text-[11px] font-semibold text-muted uppercase tracking-wide mb-1">General note</p>
+            <p className="text-sm text-content whitespace-pre-wrap">{legacyNote}</p>
+          </div>
+        )}
+
+        {notes.length === 0 && !legacyNote ? (
+          <p className="text-sm text-muted text-center py-4">No notes yet. Add one to record a call or follow-up.</p>
+        ) : (
+          <ul className="space-y-2">
+            {notes.map(n => (
+              <li key={n.id} className="rounded-lg border border-divider bg-surface-2 px-3 py-2">
+                <p className="text-sm text-content whitespace-pre-wrap">{n.body}</p>
+                <p className="text-xs text-muted mt-1">{fmtDateTime(n.created_at)}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -107,10 +254,10 @@ export default function CustomerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [notesDraft, setNotesDraft] = useState('');
   const [termsDraft, setTermsDraft] = useState('');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState({});
-  const [savingNotes, setSavingNotes] = useState(false);
   const [savingTerms, setSavingTerms] = useState(false);
 
   const load = useCallback(() => {
@@ -118,7 +265,6 @@ export default function CustomerDetailPage() {
       setCustomer(c);
       setGroups(p.groups || []);
       setInvoices(inv || []);
-      setNotesDraft(c.notes || '');
       setTermsDraft(c.contract_terms || '');
     });
   }, [id]);
@@ -146,13 +292,22 @@ export default function CustomerDetailPage() {
     await patch({ discount_group_id: value === '' ? null : Number(value) });
   };
 
-  const saveNotes = async () => {
-    setSavingNotes(true);
-    try { await patch({ notes: notesDraft }); } finally { setSavingNotes(false); }
-  };
   const saveTerms = async () => {
     setSavingTerms(true);
     try { await patch({ contract_terms: termsDraft }); } finally { setSavingTerms(false); }
+  };
+
+  // Add a discrete note; the server persists it AND merges it into the activity
+  // feed, so reloading surfaces it in both the Notes list and the Activity Feed.
+  const addNote = async () => {
+    const body = noteDraft.trim();
+    if (!body) return;
+    setSavingNote(true);
+    try {
+      await api.addCustomerNote(id, body);
+      setNoteDraft('');
+      await load();
+    } finally { setSavingNote(false); }
   };
 
   const saveOverride = async (key, label, unit) => {
@@ -178,13 +333,19 @@ export default function CustomerDetailPage() {
     await load();
   };
 
+  const scrollToId = (sectionId) => (e) => {
+    e.preventDefault();
+    const el = document.getElementById(sectionId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-accent border-t-transparent rounded-full" /></div>;
+    return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-brand border-t-transparent rounded-full" /></div>;
   }
   if (error || !customer) {
     return (
       <div className="max-w-3xl mx-auto">
-        <Link to="/customers" className="text-sm text-accent inline-flex items-center gap-1"><ArrowLeft size={14} /> Customers</Link>
+        <Link to="/customers" className="text-sm text-brand inline-flex items-center gap-1"><ArrowLeft size={14} /> Customers</Link>
         <div className="bg-surface rounded-xl border border-divider p-10 text-center text-sm text-muted mt-4">{error || 'Customer not found'}</div>
       </div>
     );
@@ -193,6 +354,7 @@ export default function CustomerDetailPage() {
   const c = customer;
   const statusStyle = CUSTOMER_STATUS_STYLES[c.status] || CUSTOMER_STATUS_STYLES.lead;
   const pricing = c.pricing || { items: [], group: null };
+  const primaryAddress = c.address || (c.addresses && c.addresses[0]) || null;
 
   // Engagements: one ongoing piece of business (inquiry → job → completed). The
   // single open one (if any) is the "active" engagement, expanded below; the rest
@@ -201,293 +363,287 @@ export default function CustomerDetailPage() {
   const activeEngagement = engagements.find(e => e.is_active) || null;
   const historyEngagements = engagements.filter(e => !e.is_active);
 
+  // Quick Stats: outstanding = unpaid invoice balances; last job = newest
+  // booked/completed engagement (else the newest engagement of any kind).
+  const outstanding = invoices.reduce((s, inv) => {
+    if (inv.status === 'paid' || inv.status === 'void') return s;
+    const bal = Number(inv.total || 0) - Number(inv.amount_paid || 0);
+    return s + (bal > 0 ? bal : 0);
+  }, 0);
+  const lastJobEng = engagements.find(e => e.status === 'completed' || e.status === 'booked') || engagements[0] || null;
+  const lastJob = lastJobEng ? fmtDate(lastJobEng.delivery_date || lastJobEng.created_at) : '—';
+
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
-      <Link to="/customers" className="text-sm text-accent inline-flex items-center gap-1 hover:underline"><ArrowLeft size={14} /> Customers</Link>
-
-      {/* Header */}
-      <div className="bg-surface rounded-xl border border-divider shadow-sm px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-content">{c.display_name}</h1>
-              <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${statusStyle}`}>
-                {getCustomerStatusLabel(c.status)}
-              </span>
-            </div>
-            <p className="text-sm text-muted mt-1">
-              {[c.company, c.phone, c.email].filter(Boolean).join(' · ') || 'No contact info'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="text-right">
-              <select
-                value={c.status_overridden ? c.status : '__derived__'}
-                onChange={e => handleStatusChange(e.target.value === '__derived__' ? 'auto' : e.target.value)}
-                className="text-xs border border-divider rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent"
-              >
-                <option value="__derived__">Auto (from jobs)</option>
-                {CUSTOMER_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-              <p className="text-[10px] text-muted mt-1">{c.status_overridden ? 'Pinned manually' : 'Auto from job history'}</p>
-            </div>
-            <button onClick={handleDelete} title="Delete customer" className="p-2 rounded-lg text-muted hover:text-danger hover:bg-danger/10"><Trash2 size={15} /></button>
-          </div>
-        </div>
-
-        {/* Totals */}
-        <div className="grid grid-cols-4 gap-3 mt-4">
-          {[
-            ['Jobs', c.totals.jobs],
-            ['Open', c.totals.open_jobs],
-            ['Completed', c.totals.completed_jobs],
-            ['Revenue', c.totals.total_revenue ? `$${c.totals.total_revenue.toLocaleString()}` : '$0'],
-          ].map(([label, val]) => (
-            <div key={label} className="rounded-lg border border-divider bg-surface-2 px-3 py-2">
-              <p className="text-lg font-bold text-content">{val}</p>
-              <p className="text-[11px] text-muted">{label}</p>
-            </div>
-          ))}
+    <div className="max-w-[1400px] mx-auto">
+      {/* Action row — breadcrumb left, lifecycle status + edit/delete right */}
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <Link to="/customers" className="text-sm text-brand inline-flex items-center gap-1 hover:underline"><ArrowLeft size={14} /> Customers</Link>
+        <div className="flex items-center gap-2">
+          <select
+            value={c.status_overridden ? c.status : '__derived__'}
+            onChange={e => handleStatusChange(e.target.value === '__derived__' ? 'auto' : e.target.value)}
+            title={c.status_overridden ? 'Pinned manually' : 'Auto from job history'}
+            className="text-xs border border-divider bg-surface rounded-lg px-2.5 py-2 text-content focus:outline-none focus:ring-2 focus:ring-brand"
+          >
+            <option value="__derived__">Auto (from jobs)</option>
+            {CUSTOMER_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          {!editingProfile && (
+            <button onClick={() => setEditingProfile(true)} className="inline-flex items-center gap-1.5 text-sm font-medium text-content bg-surface-2 hover:bg-surface border border-divider px-3 py-2 rounded-lg"><Edit2 size={14} /> Edit Customer</button>
+          )}
+          <button onClick={handleDelete} title="Delete customer" className="p-2 rounded-lg text-muted hover:text-danger hover:bg-danger/10 border border-divider"><Trash2 size={15} /></button>
         </div>
       </div>
 
-      {/* Contact / profile — kept at the top of the profile, above the engagement
-          and job-history details. */}
-      <Card
-        title="Contact"
-        action={!editingProfile && (
-          <button onClick={() => setEditingProfile(true)} className="flex items-center gap-1.5 text-xs font-medium text-accent hover:text-accent/80"><Edit2 size={13} /> Edit</button>
-        )}
-      >
-        {editingProfile ? (
-          <ProfileForm customer={c} onSave={handleProfileSave} onCancel={() => setEditingProfile(false)} />
-        ) : (
-          <div className="px-5 py-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-            <Field label="Name" value={[c.first_name, c.last_name].filter(Boolean).join(' ')} />
-            <Field label="Company" value={c.company} />
-            <Field label="Phone" value={c.phone} />
-            <Field label="Email" value={c.email} />
-            <div className="col-span-2">
-              <p className={labelCls}>Addresses</p>
-              {c.addresses.length === 0 ? <p className="text-muted">—</p> : (
-                <div className="space-y-1">
-                  {c.addresses.map((a, i) => (
-                    <p key={i} className="text-content flex items-center gap-1.5"><MapPin size={13} className="text-muted" /> {a}</p>
-                  ))}
+      <div className="flex flex-col lg:flex-row gap-5 items-start">
+        {/* ── Main column ─────────────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0 w-full space-y-4">
+          {/* Top card: identity + contact (left), empty middle, Quick Stats (right) */}
+          <div className="bg-surface rounded-xl border border-divider shadow-sm">
+            {editingProfile ? (
+              <>
+                <div className="px-5 py-3.5 border-b border-divider">
+                  <h2 className="text-sm font-bold text-content">Edit Customer</h2>
                 </div>
-              )}
-            </div>
+                <ProfileForm customer={c} onSave={handleProfileSave} onCancel={() => setEditingProfile(false)} />
+              </>
+            ) : (
+              <div className="px-6 py-5 flex flex-col lg:flex-row gap-6">
+                {/* Left: name + contact */}
+                <div className="flex gap-4 min-w-0">
+                  <Avatar name={c.display_name} />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h1 className="text-2xl font-bold text-content leading-tight">{c.display_name}</h1>
+                      <span className={`${badgeCls} ${statusStyle}`}>{getCustomerStatusLabel(c.status)}</span>
+                    </div>
+                    <div className="mt-3 space-y-1.5 text-sm text-muted">
+                      <ContactLine icon={Phone} value={c.phone} />
+                      <ContactLine icon={Mail} value={c.email} />
+                      <ContactLine icon={MapPin} value={primaryAddress} />
+                      {c.company && <ContactLine icon={Briefcase} value={c.company} />}
+                      {!c.phone && !c.email && !primaryAddress && !c.company && <p className="text-muted">No contact info</p>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Middle: intentionally minimal — reserved for future content */}
+                <div className="flex-1 hidden lg:block" aria-hidden="true" />
+
+                {/* Right: Quick Stats */}
+                <QuickStats
+                  totalJobs={c.totals.jobs}
+                  totalSpent={money(c.totals.total_revenue)}
+                  outstanding={money(outstanding)}
+                  lastJob={lastJob}
+                />
+              </div>
+            )}
           </div>
-        )}
-      </Card>
 
-      {/* Active engagement — the current Active Inquiry or booked Job, expanded by
-          default so its details (booking signals, key dates, industry fields, AI
-          summary, recording) show on load. Display-only; never re-runs booking. */}
-      {activeEngagement && (
-        <ActiveEngagement engagement={activeEngagement} onClose={handleCloseEngagement} />
-      )}
+          {/* Jump links — smooth-scroll to each inline section */}
+          <nav className="bg-surface rounded-xl border border-divider shadow-sm px-3 py-2 flex items-center gap-1 flex-wrap text-sm">
+            {JUMP_LINKS.map(l => (
+              <a
+                key={l.id}
+                href={`#${l.id}`}
+                onClick={scrollToId(l.id)}
+                className="px-3 py-1.5 rounded-lg text-muted hover:text-content hover:bg-surface-2 font-medium transition-colors"
+              >
+                {l.label}
+              </a>
+            ))}
+          </nav>
 
-      {/* Job History — completed and closed engagements, collapsed for review.
-          Each row expands to that engagement's calls + intelligence. */}
-      <Card
-        title={`Job History (${historyEngagements.length})`}
-        action={historyEngagements.length > 0 && <span className="text-[11px] text-muted">Tap to expand</span>}
-      >
-        {historyEngagements.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-muted">
-            {activeEngagement ? 'No completed or closed jobs yet.' : 'No jobs yet.'}
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-surface-2 border-b border-divider">
-              <tr>
-                <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Service</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Status</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Date</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Revenue</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-divider">
-              {historyEngagements.map(e => <EngagementRow key={e.id} engagement={e} />)}
-            </tbody>
-          </table>
-        )}
-      </Card>
+          {/* Active Inquiry — the current active engagement, expanded by default */}
+          {activeEngagement ? (
+            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} />
+          ) : (
+            <Card id="active-inquiry" title="Active Inquiry" icon={MessageSquare}>
+              <div className="px-5 py-8 text-center text-sm text-muted">No active inquiry. A new call opens one automatically.</div>
+            </Card>
+          )}
 
-      {/* Per-client pricing */}
-      <Card title="Pricing" icon={DollarSign}>
-        <div className="px-5 py-4 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Discount Group</label>
-              <select value={c.discount_group_id || ''} onChange={e => handleGroupChange(e.target.value)} className={inputCls}>
-                <option value="">No group (retail)</option>
-                {groups.map(g => <option key={g.id} value={g.id}>{g.name} (−{g.discount_percent}%)</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Contract Terms</label>
-              <div className="flex gap-2">
-                <input className={inputCls} value={termsDraft} onChange={e => setTermsDraft(e.target.value)} placeholder="e.g. Net 30, PO required" />
-                {termsDraft !== (c.contract_terms || '') && (
-                  <button onClick={saveTerms} disabled={savingTerms} className="text-xs font-medium text-content bg-accent hover:bg-accent/90 px-3 rounded-lg disabled:opacity-50">Save</button>
+          {/* Jobs (Job History) — completed/closed engagements; Job ID expands in place */}
+          <Card
+            id="jobs"
+            title={`Job History (${historyEngagements.length})`}
+            icon={Briefcase}
+            action={historyEngagements.length > 0 && <span className="text-[11px] text-muted">Tap a Job ID to expand</span>}
+          >
+            {historyEngagements.length === 0 ? (
+              <div className="px-5 py-8 text-center text-sm text-muted">
+                {activeEngagement ? 'No completed or closed jobs yet.' : 'No jobs yet.'}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-surface-2 border-b border-divider">
+                    <tr>
+                      <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Job ID</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Date</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Service</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Size</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Status</th>
+                      <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-divider">
+                    {historyEngagements.map(e => <JobHistoryRow key={e.id} engagement={e} />)}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {/* Invoices — Create Invoice when empty; populated otherwise. No Quick Stats here. */}
+          <Card
+            id="invoices"
+            title={`Invoices (${invoices.length})`}
+            icon={FileText}
+            action={
+              <button onClick={() => navigate(`/invoices/new?customer_id=${id}`)} className="flex items-center gap-1.5 text-xs font-medium text-brand hover:text-brand-hover">
+                <Plus size={13} /> New Invoice
+              </button>
+            }
+          >
+            {invoices.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <p className="text-sm text-muted">No invoices yet.</p>
+                <p className="text-xs text-muted mt-1">Line items and terms prefill from this customer's rates.</p>
+                <button
+                  onClick={() => navigate(`/invoices/new?customer_id=${id}`)}
+                  className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-content bg-brand hover:bg-brand-hover px-4 py-2 rounded-lg"
+                >
+                  <Plus size={14} /> Create Invoice
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-surface-2 border-b border-divider">
+                    <tr>
+                      <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Invoice</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Status</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Issued</th>
+                      <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-divider">
+                    {invoices.map((inv) => (
+                      <tr key={inv.id} className="hover:bg-surface-2 cursor-pointer transition-colors" onClick={() => navigate(`/invoices/${inv.id}`)}>
+                        <td className="px-5 py-3 font-medium text-content">{inv.invoice_number}</td>
+                        <td className="px-4 py-3">
+                          <span className={`${badgeCls} ${INVOICE_STATUS_STYLES[inv.status] || INVOICE_STATUS_STYLES.draft}`}>
+                            {getInvoiceStatusLabel(inv.status)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">{fmtDate(inv.issue_date)}</td>
+                        <td className="px-5 py-3 text-right text-content font-medium whitespace-nowrap">{money(inv.total, inv.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {/* Pricing — per-client rates (kept; existing feature) */}
+          <Card id="pricing" title="Pricing" icon={DollarSign}>
+            <div className="px-5 py-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Discount Group</label>
+                  <select value={c.discount_group_id || ''} onChange={e => handleGroupChange(e.target.value)} className={inputCls}>
+                    <option value="">No group (retail)</option>
+                    {groups.map(g => <option key={g.id} value={g.id}>{g.name} (−{g.discount_percent}%)</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Contract Terms</label>
+                  <div className="flex gap-2">
+                    <input className={inputCls} value={termsDraft} onChange={e => setTermsDraft(e.target.value)} placeholder="e.g. Net 30, PO required" />
+                    {termsDraft !== (c.contract_terms || '') && (
+                      <button onClick={saveTerms} disabled={savingTerms} className="text-xs font-medium text-content bg-brand hover:bg-brand-hover px-3 rounded-lg disabled:opacity-50">Save</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className={labelCls + ' mb-0'}>Effective Rates</p>
+                  <Link to="/pricing" className="text-[11px] text-brand hover:underline">Edit default price list →</Link>
+                </div>
+                {pricing.items.length === 0 ? (
+                  <p className="text-sm text-muted">No price list yet. <Link to="/pricing" className="text-brand hover:underline">Set up default prices</Link>.</p>
+                ) : (
+                  <table className="w-full text-sm border border-divider rounded-lg overflow-hidden">
+                    <thead className="bg-surface-2">
+                      <tr>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Service</th>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Default</th>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Custom</th>
+                        <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Effective</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-divider">
+                      {pricing.items.map(it => {
+                        const draftVal = priceDrafts[it.service_key] !== undefined
+                          ? priceDrafts[it.service_key]
+                          : (it.custom_price != null ? String(it.custom_price) : '');
+                        return (
+                          <tr key={it.service_key}>
+                            <td className="px-3 py-2 text-content">{it.label}{it.unit ? <span className="text-muted text-xs"> / {it.unit}</span> : null}</td>
+                            <td className="px-3 py-2 text-muted">{it.default_price != null ? `$${it.default_price}` : '—'}</td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-1">
+                                <span className="text-muted text-xs">$</span>
+                                <input
+                                  type="number" min="0" step="0.01"
+                                  value={draftVal}
+                                  placeholder="—"
+                                  onChange={e => setPriceDrafts(d => ({ ...d, [it.service_key]: e.target.value }))}
+                                  onBlur={() => saveOverride(it.service_key, it.label, it.unit)}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                  className="w-20 text-sm border border-divider bg-surface rounded px-2 py-1 text-content focus:outline-none focus:ring-2 focus:ring-brand"
+                                />
+                              </div>
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className="font-semibold text-content">{it.effective_price != null ? `$${it.effective_price}` : '—'}</span>
+                              {it.source !== 'default' && (
+                                <span className={`ml-1.5 text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded ${it.source === 'custom' ? 'bg-brand/10 text-brand' : 'bg-warning/10 text-warning'}`}>{it.source}</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 )}
+                <p className="text-[11px] text-muted mt-1.5">Effective rate = custom override, else group discount, else the default price.</p>
               </div>
             </div>
-          </div>
+          </Card>
 
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <p className={labelCls + ' mb-0'}>Effective Rates</p>
-              <Link to="/pricing" className="text-[11px] text-accent hover:underline">Edit default price list →</Link>
-            </div>
-            {pricing.items.length === 0 ? (
-              <p className="text-sm text-muted">No price list yet. <Link to="/pricing" className="text-accent hover:underline">Set up default prices</Link>.</p>
-            ) : (
-              <table className="w-full text-sm border border-divider rounded-lg overflow-hidden">
-                <thead className="bg-surface-2">
-                  <tr>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Service</th>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Default</th>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Custom</th>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Effective</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-divider">
-                  {pricing.items.map(it => {
-                    const draftVal = priceDrafts[it.service_key] !== undefined
-                      ? priceDrafts[it.service_key]
-                      : (it.custom_price != null ? String(it.custom_price) : '');
-                    return (
-                      <tr key={it.service_key}>
-                        <td className="px-3 py-2 text-content">{it.label}{it.unit ? <span className="text-muted text-xs"> / {it.unit}</span> : null}</td>
-                        <td className="px-3 py-2 text-muted">{it.default_price != null ? `$${it.default_price}` : '—'}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-1">
-                            <span className="text-muted text-xs">$</span>
-                            <input
-                              type="number" min="0" step="0.01"
-                              value={draftVal}
-                              placeholder="—"
-                              onChange={e => setPriceDrafts(d => ({ ...d, [it.service_key]: e.target.value }))}
-                              onBlur={() => saveOverride(it.service_key, it.label, it.unit)}
-                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                              className="w-20 text-sm border border-divider rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent"
-                            />
-                          </div>
-                        </td>
-                        <td className="px-3 py-2">
-                          <span className="font-semibold text-content">{it.effective_price != null ? `$${it.effective_price}` : '—'}</span>
-                          {it.source !== 'default' && (
-                            <span className={`ml-1.5 text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded ${it.source === 'custom' ? 'bg-brand/10 text-brand' : 'bg-warning/10 text-warning'}`}>{it.source}</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-            <p className="text-[11px] text-muted mt-1.5">Effective rate = custom override, else group discount, else the default price.</p>
-          </div>
-        </div>
-      </Card>
-
-      {/* Invoices */}
-      <Card
-        title={`Invoices (${invoices.length})`}
-        icon={FileText}
-        action={
-          <button onClick={() => navigate(`/invoices/new?customer_id=${id}`)} className="flex items-center gap-1.5 text-xs font-medium text-accent hover:text-accent/80">
-            <Plus size={13} /> New Invoice
-          </button>
-        }
-      >
-        {invoices.length === 0 ? (
-          <div className="px-5 py-8 text-center">
-            <p className="text-sm text-muted">No invoices yet.</p>
-            <p className="text-xs text-muted mt-1">Create one — line items and terms prefill from this customer's rates.</p>
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-surface-2 border-b border-divider">
-              <tr>
-                <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Invoice</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Status</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Issued</th>
-                <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-divider">
-              {invoices.map((inv) => (
-                <tr key={inv.id} className="hover:bg-surface-2 cursor-pointer transition-colors" onClick={() => navigate(`/invoices/${inv.id}`)}>
-                  <td className="px-5 py-3 font-medium text-content">{inv.invoice_number}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${INVOICE_STATUS_STYLES[inv.status] || INVOICE_STATUS_STYLES.draft}`}>
-                      {getInvoiceStatusLabel(inv.status)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">{fmtDate(inv.issue_date)}</td>
-                  <td className="px-5 py-3 text-right text-content font-medium whitespace-nowrap">{money(inv.total, inv.currency)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Card>
-
-      {/* Activity timeline */}
-      <Card title={`Activity (${c.activity.length})`}>
-        {c.activity.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-muted">No activity yet.</div>
-        ) : (
-          <ul className="divide-y divide-divider">
-            {c.activity.map(a => {
-              const Icon = ACTIVITY_ICONS[a.activity_type] || StickyNote;
-              return (
-                <li key={a.id} className="px-5 py-3 flex items-start gap-3">
-                  <Icon size={15} className="text-muted mt-0.5 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-content">{a.description || a.activity_type}</p>
-                    <p className="text-xs text-muted">{fmtDateTime(a.created_at)}</p>
-                  </div>
-                  <Link to={`/leads/${a.lead_id}`} className="text-[11px] text-accent hover:underline flex-shrink-0">Job →</Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Card>
-
-      {/* Notes */}
-      <Card title="Notes" icon={StickyNote}>
-        <div className="px-5 py-4 space-y-2">
-          <textarea
-            value={notesDraft}
-            onChange={e => setNotesDraft(e.target.value)}
-            rows={4}
-            placeholder="Free-text notes about this customer…"
-            className={inputCls + ' resize-y'}
+          {/* Notes — adding a note also pushes it to the Activity Feed */}
+          <NotesSection
+            id="notes"
+            notes={c.notes_list || []}
+            legacyNote={c.notes}
+            draft={noteDraft}
+            setDraft={setNoteDraft}
+            onAdd={addNote}
+            saving={savingNote}
           />
-          {notesDraft !== (c.notes || '') && (
-            <div className="flex justify-end">
-              <button onClick={saveNotes} disabled={savingNotes} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-4 py-2 rounded-lg">
-                <Check size={14} /> {savingNotes ? 'Saving…' : 'Save notes'}
-              </button>
-            </div>
-          )}
         </div>
-      </Card>
-    </div>
-  );
-}
 
-function Field({ label, value }) {
-  return (
-    <div>
-      <p className={labelCls}>{label}</p>
-      <p className="text-content">{value || '—'}</p>
+        {/* ── Right rail: Activity Feed (full page height) ──────────────────── */}
+        <aside className="w-full lg:w-80 flex-shrink-0 lg:sticky lg:top-0 lg:self-start">
+          <ActivityFeed activity={c.activity} />
+        </aside>
+      </div>
     </div>
   );
 }
@@ -541,7 +697,7 @@ function EngagementBody({ engagement: e }) {
 // The active engagement — the open Active Inquiry or booked Job — rendered
 // expanded with its status, a Stale flag for an idle inquiry, and (for an
 // inquiry) the manual Close / Mark Lost actions. Nothing here changes booking.
-function ActiveEngagement({ engagement: e, onClose }) {
+function ActiveEngagement({ id, engagement: e, onClose }) {
   const [closing, setClosing] = useState(false);
   const style = JOB_STATUS_STYLES[e.status] || JOB_STATUS_STYLES.inquiry;
   const close = async (reason) => {
@@ -554,16 +710,16 @@ function ActiveEngagement({ engagement: e, onClose }) {
   };
 
   return (
-    <Card title={e.label} icon={e.status === 'booked' ? Briefcase : MessageSquare}>
+    <Card id={id} title={e.label} icon={e.status === 'booked' ? Briefcase : MessageSquare}>
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
-        <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${style}`}>{e.label}</span>
+        <span className={`${badgeCls} ${style}`}>{e.label}</span>
         {e.stale && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-warning/10 text-warning border-warning/30">
+          <span className={`${badgeCls} bg-warning/10 text-warning border-warning/30`}>
             <Clock size={11} /> Stale
           </span>
         )}
         {e.auto_booked && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-success/10 text-success border-success/30">
+          <span className={`${badgeCls} bg-success/10 text-success border-success/30`}>
             <Zap size={11} /> Auto-booked
           </span>
         )}
@@ -584,31 +740,40 @@ function ActiveEngagement({ engagement: e, onClose }) {
   );
 }
 
-// One collapsed history engagement (completed / closed). Expands to its calls.
-function EngagementRow({ engagement: e }) {
+// One collapsed Job History engagement (completed / closed / non-active). The
+// blue Job ID expands the job's call intelligence in place — no separate page.
+function JobHistoryRow({ engagement: e }) {
   const [open, setOpen] = useState(false);
-  const style = JOB_STATUS_STYLES[e.status] || 'bg-surface-2 text-muted';
+  const style = JOB_STATUS_STYLES[e.status] || 'bg-surface-2 text-muted border-divider';
+  const toggle = () => setOpen(o => !o);
   return (
     <Fragment>
-      <tr className="hover:bg-surface-2 cursor-pointer transition-colors" onClick={() => setOpen(o => !o)}>
-        <td className="px-5 py-3 text-content">
-          <div className="flex items-center gap-2">
-            {open ? <ChevronDown size={14} className="text-muted flex-shrink-0" /> : <ChevronRight size={14} className="text-muted flex-shrink-0" />}
-            <span>{e.service}</span>
-            {e.auto_booked && (
-              <span title="Auto-booked from the call" className="inline-flex items-center text-success"><Zap size={12} /></span>
-            )}
-          </div>
+      <tr className="hover:bg-surface-2 cursor-pointer transition-colors" onClick={toggle}>
+        <td className="px-5 py-3 whitespace-nowrap">
+          <button
+            onClick={(ev) => { ev.stopPropagation(); toggle(); }}
+            className="inline-flex items-center gap-1.5 text-brand font-medium hover:underline"
+          >
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            #{e.id}
+          </button>
         </td>
+        <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">{fmtDate(e.delivery_date || e.created_at)}</td>
+        <td className="px-4 py-3 text-content">
+          <span className="inline-flex items-center gap-1.5">
+            {e.service}
+            {e.auto_booked && <Zap size={12} className="text-success" title="Auto-booked from the call" />}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-muted whitespace-nowrap">{e.dumpster_size || '—'}</td>
         <td className="px-4 py-3">
-          <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${style}`}>{e.label}</span>
+          <span className={`${badgeCls} ${style}`}>{e.label}</span>
         </td>
-        <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">{e.delivery_date ? fmtDate(e.delivery_date) : fmtDate(e.created_at)}</td>
-        <td className="px-4 py-3 text-content">{e.estimated_revenue ? `$${Math.round(e.estimated_revenue).toLocaleString()}` : '—'}</td>
+        <td className="px-5 py-3 text-right text-content font-medium whitespace-nowrap">{e.estimated_revenue ? money(e.estimated_revenue) : '—'}</td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={4} className="p-0 border-t border-divider">
+          <td colSpan={6} className="p-0 border-t border-divider">
             <EngagementBody engagement={e} />
           </td>
         </tr>

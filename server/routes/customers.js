@@ -236,6 +236,36 @@ router.post('/:id/engagements/close', (req, res) => {
   }
 });
 
+// POST /api/customers/:id/notes — add a discrete, timestamped note against the
+// customer (e.g. recap of an outbound callback). The note is returned and also
+// surfaces in the profile's Activity Feed (getCustomerDetail merges it as a
+// note_added entry). Touches nothing in the call/extraction/booking pipeline.
+router.post('/:id/notes', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?')
+      .get(req.params.id, businessId);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+    const body = (req.body?.body || req.body?.note || '').toString().trim();
+    if (!body) return res.status(400).json({ error: 'Note text is required' });
+
+    const now = new Date().toISOString();
+    const info = db.prepare(
+      'INSERT INTO customer_notes (business_id, customer_id, body, created_at) VALUES (?, ?, ?, ?)'
+    ).run(businessId, customer.id, body, now);
+    // Touch the customer so list ordering (last activity) reflects the note.
+    db.prepare('UPDATE customers SET updated_at = ? WHERE id = ?').run(now, customer.id);
+
+    const note = db.prepare('SELECT id, body, created_at FROM customer_notes WHERE id = ?')
+      .get(Number(info.lastInsertRowid));
+    res.status(201).json({ success: true, note });
+  } catch (err) {
+    console.error('POST /customers/:id/notes error:', err);
+    res.status(500).json({ error: 'Failed to add note' });
+  }
+});
+
 // GET /api/customers/:id/pricing — resolved effective pricing for this customer.
 router.get('/:id/pricing', (req, res) => {
   try {

@@ -548,6 +548,28 @@ function getCustomerDetail(businessId, customerId) {
     `).all(...allIds);
   }
 
+  // Customer-level notes: their own list for the Notes section, and merged into
+  // the activity feed as note_added entries (lead_id null) so adding a note shows
+  // up in the timeline. Read-only here — purely a join over an additive table.
+  let notesList = [];
+  try {
+    notesList = db.prepare(
+      'SELECT id, body, created_at FROM customer_notes WHERE customer_id = ? AND business_id = ? ORDER BY created_at DESC, id DESC'
+    ).all(customer.id, businessId);
+  } catch { notesList = []; /* table absent / not migrated */ }
+  if (notesList.length) {
+    const noteActivity = notesList.map((n) => ({
+      id: `note-${n.id}`,
+      lead_id: null,
+      activity_type: 'note_added',
+      description: n.body,
+      created_at: n.created_at,
+    }));
+    activity = [...activity, ...noteActivity].sort(
+      (a, b) => String(b.created_at).localeCompare(String(a.created_at))
+    );
+  }
+
   const group = customer.discount_group_id
     ? db.prepare('SELECT * FROM discount_groups WHERE id = ? AND business_id = ?').get(customer.discount_group_id, businessId)
     : null;
@@ -574,6 +596,7 @@ function getCustomerDetail(businessId, customerId) {
     jobs,            // legacy per-call list (kept for back-compat)
     engagements,     // grouped inquiry→job→completed lifecycle records
     activity,
+    notes_list: notesList,   // discrete customer notes (newest first)
     // Totals reflect engagements (one ongoing piece of business), so repeat calls
     // about the same inquiry count once and revenue isn't double-counted.
     totals: {
