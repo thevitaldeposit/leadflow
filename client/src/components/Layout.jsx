@@ -140,7 +140,7 @@ export default function Layout({ children }) {
       <aside className="w-60 flex-shrink-0 bg-sidebar flex flex-col">
         {/* Logo */}
         <div className="h-14 flex items-center px-5 border-b border-white/10">
-          <img src="/assets/stream-logo-remove.png" alt="Stream" style={{ width: '150px' }} />
+          <img src="/assets/stream-logo-remove2.png" alt="Stream" style={{ width: '150px' }} />
         </div>
 
         {/* Nav */}
