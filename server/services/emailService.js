@@ -160,7 +160,7 @@ function buildInvoiceEmailHtml({ businessName, customerName, invoiceNumber, tota
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td align="center" style="padding:28px 0 4px;">
-                    <a href="${safeLink}" style="display:inline-block; background-color:${STREAM_BLUE}; color:#ffffff; text-decoration:none; font-family:${FONT}; font-size:16px; font-weight:600; line-height:1; padding:15px 44px; border-radius:10px;">View &amp; Pay</a>
+                    <a href="${safeLink}" style="display:inline-block; background-color:${STREAM_BLUE}; background-image:linear-gradient(135deg, ${STREAM_BLUE} 0%, ${STREAM_BLUE_LIGHT} 100%); color:#ffffff; text-decoration:none; font-family:${FONT}; font-size:16px; font-weight:600; line-height:1; padding:15px 44px; border-radius:10px;">View &amp; Pay</a>
                   </td>
                 </tr>
               </table>
