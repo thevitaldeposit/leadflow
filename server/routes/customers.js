@@ -12,6 +12,7 @@ const {
   displayNameOf,
   leadIsCompleted,
   leadIsBooked,
+  paidInvoiceContextForCustomer,
 } = require('../services/customerService');
 const { resolveEffectivePricing } = require('../services/pricingService');
 const { logActivity } = require('../services/activityLog');
@@ -210,12 +211,15 @@ router.post('/:id/engagements/close', (req, res) => {
     const note = reason === 'closed' ? 'Inquiry closed by owner' : 'Inquiry marked lost';
 
     const now = new Date().toISOString();
+    // Same paid-via-invoice context the profile uses, so a call completed by a paid
+    // invoice (not just leads.paid_at) is recognized as completed and never closed.
+    const paidCtx = paidInvoiceContextForCustomer(businessId, customer.id);
     let closed = 0;
     for (const rawId of ids) {
       const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND customer_id = ? AND business_id = ?')
         .get(rawId, customer.id, businessId);
       // Only close still-open inquiry calls; never a booked/completed/already-terminal one.
-      if (!lead || leadIsCompleted(lead) || leadIsBooked(lead)) continue;
+      if (!lead || leadIsCompleted(lead, paidCtx) || leadIsBooked(lead)) continue;
       if (lead.job_status === 'lost' || lead.job_status === 'spam') continue;
       db.prepare('UPDATE leads SET job_status = ?, updated_at = ? WHERE id = ?').run('lost', now, lead.id);
       logActivity(lead.id, 'status_change', note);

@@ -251,14 +251,8 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
-      {/* Active engagement — the current Active Inquiry or booked Job, expanded by
-          default so its details (booking signals, key dates, industry fields, AI
-          summary, recording) show on load. Display-only; never re-runs booking. */}
-      {activeEngagement && (
-        <ActiveEngagement engagement={activeEngagement} onClose={handleCloseEngagement} />
-      )}
-
-      {/* Contact / profile */}
+      {/* Contact / profile — kept at the top of the profile, above the engagement
+          and job-history details. */}
       <Card
         title="Contact"
         action={!editingProfile && (
@@ -286,6 +280,13 @@ export default function CustomerDetailPage() {
           </div>
         )}
       </Card>
+
+      {/* Active engagement — the current Active Inquiry or booked Job, expanded by
+          default so its details (booking signals, key dates, industry fields, AI
+          summary, recording) show on load. Display-only; never re-runs booking. */}
+      {activeEngagement && (
+        <ActiveEngagement engagement={activeEngagement} onClose={handleCloseEngagement} />
+      )}
 
       {/* Job History — completed and closed engagements, collapsed for review.
           Each row expands to that engagement's calls + intelligence. */}

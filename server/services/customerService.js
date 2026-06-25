@@ -296,11 +296,43 @@ function tsToMs(ts) {
   return Number.isNaN(ms) ? null : ms;
 }
 
+// Paid invoices count toward completion even though the payment is recorded on the
+// invoice (invoices.paid_at), not the lead (leads.paid_at). Build a per-customer
+// "paid context" once: the set of lead ids a paid invoice is attached to, plus a
+// flag for any paid invoice with no specific lead (a customer-level payment that
+// applies to the customer's job). "Paid" = invoice marked paid (status 'paid' OR
+// paid_at set). Invoices created from the profile carry only customer_id (lead_id
+// null), so the customer-level flag is the common path; an explicit lead_id stays
+// precise to that call's engagement. Read-only — this never writes a lead, changes
+// booking signals, or books anything; it only feeds the completion check below.
+function paidInvoiceContextForCustomer(businessId, customerId) {
+  const ctx = { leadIds: new Set(), hasUnlinked: false };
+  if (!businessId || !customerId) return ctx;
+  try {
+    const rows = db.prepare(`
+      SELECT lead_id FROM invoices
+      WHERE business_id = ? AND customer_id = ?
+        AND (status = 'paid' OR paid_at IS NOT NULL)
+    `).all(businessId, customerId);
+    for (const r of rows) {
+      if (r.lead_id) ctx.leadIds.add(r.lead_id);
+      else ctx.hasUnlinked = true;
+    }
+  } catch { /* invoices table absent / not migrated — treat as no payments */ }
+  return ctx;
+}
+
 // Per-call lifecycle predicates used to derive an engagement's status. These read
 // stored fields only — they never re-evaluate booking signals or auto-book.
-function leadIsCompleted(lead) {
+// A call counts as paid when leads.paid_at is set OR a paid invoice covers it (its
+// own linked invoice, or a customer-level invoice — see paidInvoiceContextForCustomer);
+// completion still also requires the pickup date to have passed.
+function leadIsCompleted(lead, paidCtx) {
   if ((lead.job_status || '') === 'completed') return true;
-  return !!lead.paid_at && pickupHasPassed(lead.pickup_date);
+  const paidByInvoice = !!paidCtx
+    && (paidCtx.hasUnlinked || paidCtx.leadIds.has(lead.id));
+  const paid = !!lead.paid_at || paidByInvoice;
+  return paid && pickupHasPassed(lead.pickup_date);
 }
 function leadIsBooked(lead) {
   return OPERATIONAL_STATUSES.has(lead.job_status) || lead.status === 'booked';
@@ -312,8 +344,8 @@ function leadIsClosedLost(lead) {
 // Engagement status from its calls (chronological asc; the last is newest = the
 // representative whose details the engagement shows). Most-advanced state wins for
 // completed/booked; a manually-closed (lost) newest call closes an Active Inquiry.
-function engagementStatusOf(leadsAsc) {
-  if (leadsAsc.some(leadIsCompleted)) return 'completed';
+function engagementStatusOf(leadsAsc, paidCtx) {
+  if (leadsAsc.some((l) => leadIsCompleted(l, paidCtx))) return 'completed';
   if (leadsAsc.some(leadIsBooked)) return 'booked';
   if (leadIsClosedLost(leadsAsc[leadsAsc.length - 1])) return 'lost';
   return 'inquiry';
@@ -325,7 +357,7 @@ function engagementIsOpen(status) {
 // Fold a customer's (non-discarded) calls into engagements. Walking oldest → newest,
 // each call joins the open engagement if one exists, else starts a new one; an
 // engagement stops absorbing calls the instant it becomes closed (completed/lost).
-function buildEngagements(activeLeads) {
+function buildEngagements(activeLeads, paidCtx) {
   const asc = [...activeLeads].sort(
     (a, b) => String(a.created_at).localeCompare(String(b.created_at)) || (a.id - b.id)
   );
@@ -334,7 +366,7 @@ function buildEngagements(activeLeads) {
   for (const lead of asc) {
     if (!open) { open = { leads: [] }; engagements.push(open); }
     open.leads.push(lead);
-    open.status = engagementStatusOf(open.leads);
+    open.status = engagementStatusOf(open.leads, paidCtx);
     if (!engagementIsOpen(open.status)) open = null;
   }
   return engagements;
@@ -398,8 +430,8 @@ function shapeEngagement(eng) {
 
 // Engagements for a customer's active leads, newest engagement first, with the
 // single open engagement (if any) flagged is_active so the UI expands it.
-function engagementsForLeads(activeLeads) {
-  const shaped = buildEngagements(activeLeads).map(shapeEngagement);
+function engagementsForLeads(activeLeads, paidCtx) {
+  const shaped = buildEngagements(activeLeads, paidCtx).map(shapeEngagement);
   shaped.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || (b.id - a.id));
   let activeMarked = false;
   for (const e of shaped) {
@@ -493,7 +525,10 @@ function getCustomerDetail(businessId, customerId) {
   const agg = aggregateLeads(activeLeads);
   const jobs = activeLeads.map(toJob);
   // Engagements: the customer's calls grouped into inquiry→job→completed records.
-  const engagements = engagementsForLeads(activeLeads);
+  // A job completes on payment + pickup-passed; payment may live on the lead
+  // (leads.paid_at) or on a paid invoice for this customer (paidCtx).
+  const paidCtx = paidInvoiceContextForCustomer(businessId, customer.id);
+  const engagements = engagementsForLeads(activeLeads, paidCtx);
 
   // Addresses: the customer's primary plus every distinct job address.
   const addrSet = new Set();
@@ -561,6 +596,7 @@ module.exports = {
   listCustomers,
   getCustomerDetail,
   engagementsForLeads,
+  paidInvoiceContextForCustomer,
   leadIsCompleted,
   leadIsBooked,
   leadIsClosedLost,
