@@ -198,15 +198,11 @@ function getCustomerRow(businessId, customerId) {
   return db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId);
 }
 
-// Full invoice (with line items) scoped to a business, or null. `effective_terms`
-// is the contract the customer actually reads + signs, resolved by business type
-// (getEffectiveContractText) — owner-side views show this, not the raw `terms`
-// column, which is no longer the source of the displayed contract.
+// Full invoice (with line items) scoped to a business, or null.
 function getInvoice(businessId, id) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ? AND business_id = ?').get(id, businessId);
   if (!inv) return null;
   inv.line_items = getLineItems(inv.id);
-  inv.effective_terms = getEffectiveContractText(inv);
   return inv;
 }
 

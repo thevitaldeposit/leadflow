@@ -224,11 +224,9 @@ export default function InvoiceDetailPage() {
         <Card title="Note to Customer"><div className="px-5 py-4 text-sm text-gray-700 whitespace-pre-wrap">{inv.notes}</div></Card>
       )}
 
-      {/* Terms — the business-type contract the customer reads + signs (resolved
-          server-side as effective_terms), not a per-invoice entry. */}
-      <Card title="Terms & Contract">
-        <div className="px-5 py-4 text-sm text-gray-700 whitespace-pre-wrap max-h-56 overflow-y-auto leading-relaxed">{inv.effective_terms || inv.terms || 'No terms attached.'}</div>
-      </Card>
+      {/* No inline Terms & Contract here: the agreement the customer reads + signs
+          is resolved by business type and shown on the public invoice page — use
+          "Preview" above to see exactly what the customer sees. */}
 
       {/* Signature evidence */}
       {inv.signed_at && (
@@ -267,14 +265,9 @@ export default function InvoiceDetailPage() {
         </Card>
       )}
 
-      {/* Payment placeholder */}
-      <div className="bg-white rounded-xl border border-dashed border-gray-200 px-5 py-4 flex items-center justify-between">
-        <div>
-          <p className="text-sm font-semibold text-gray-700">Online payment</p>
-          <p className="text-xs text-gray-400 mt-0.5">Coming in a later release. Use “Mark paid” to record payments for now.</p>
-        </div>
-        <span className="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Coming soon</span>
-      </div>
+      {/* Online payment is live on the public invoice link (Stripe Connect); the
+          customer pays there. Payment status is reflected by the status pill, the
+          Refunded badge, and the History timeline above — no placeholder needed. */}
     </div>
   );
 }
