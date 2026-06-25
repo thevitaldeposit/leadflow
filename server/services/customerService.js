@@ -252,6 +252,163 @@ function aggregateLeads(leadRows) {
   return { jobs, completed, open, revenue, lastActivityAt, addresses: [...addresses] };
 }
 
+// ── Engagements: the inquiry → job → completed lifecycle over a customer's calls ─
+// A customer's calls (leads) are grouped into ENGAGEMENTS — one ongoing piece of
+// business. This is a READ-TIME derivation (same philosophy as reconcile): it
+// never touches the call/transcription/extraction pipeline, the booking-signal
+// computation, or auto-book. The codified rule:
+//   • A new call attaches to the customer's currently-OPEN engagement (an Active
+//     Inquiry, or a booked-but-not-completed Job) and refreshes its details
+//     (latest call wins). If every prior engagement is closed/completed, the call
+//     opens a NEW Active Inquiry. By construction there is at most one open
+//     engagement per customer at a time.
+//   • An engagement is a Job once any of its calls is booked, and Completed once a
+//     call is paid AND its pickup date has passed. Inquiries close only manually
+//     (Close / Mark Lost); nothing auto-closes an Active Inquiry.
+const STALE_INQUIRY_DAYS = 14;
+const STALE_INQUIRY_MS = STALE_INQUIRY_DAYS * 24 * 60 * 60 * 1000;
+
+const ENGAGEMENT_LABELS = {
+  inquiry: 'Active Inquiry',
+  booked: 'Job',
+  completed: 'Completed',
+  lost: 'Closed',
+};
+
+function localTodayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// "The pickup date has passed" — strictly before today (local). pickup_date is a
+// plain YYYY-MM-DD, so a lexical compare is timezone-safe.
+function pickupHasPassed(pickupDate) {
+  if (!pickupDate) return false;
+  const s = String(pickupDate).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && s < localTodayStr();
+}
+
+// Parse a SQLite timestamp (naive "YYYY-MM-DD HH:MM:SS" is UTC) to ms.
+function tsToMs(ts) {
+  if (!ts) return null;
+  const s = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(ts) ? `${ts.replace(' ', 'T')}Z` : ts;
+  const ms = new Date(s).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+// Per-call lifecycle predicates used to derive an engagement's status. These read
+// stored fields only — they never re-evaluate booking signals or auto-book.
+function leadIsCompleted(lead) {
+  if ((lead.job_status || '') === 'completed') return true;
+  return !!lead.paid_at && pickupHasPassed(lead.pickup_date);
+}
+function leadIsBooked(lead) {
+  return OPERATIONAL_STATUSES.has(lead.job_status) || lead.status === 'booked';
+}
+function leadIsClosedLost(lead) {
+  return lead.job_status === 'lost' || lead.job_status === 'spam';
+}
+
+// Engagement status from its calls (chronological asc; the last is newest = the
+// representative whose details the engagement shows). Most-advanced state wins for
+// completed/booked; a manually-closed (lost) newest call closes an Active Inquiry.
+function engagementStatusOf(leadsAsc) {
+  if (leadsAsc.some(leadIsCompleted)) return 'completed';
+  if (leadsAsc.some(leadIsBooked)) return 'booked';
+  if (leadIsClosedLost(leadsAsc[leadsAsc.length - 1])) return 'lost';
+  return 'inquiry';
+}
+function engagementIsOpen(status) {
+  return status === 'inquiry' || status === 'booked';
+}
+
+// Fold a customer's (non-discarded) calls into engagements. Walking oldest → newest,
+// each call joins the open engagement if one exists, else starts a new one; an
+// engagement stops absorbing calls the instant it becomes closed (completed/lost).
+function buildEngagements(activeLeads) {
+  const asc = [...activeLeads].sort(
+    (a, b) => String(a.created_at).localeCompare(String(b.created_at)) || (a.id - b.id)
+  );
+  const engagements = [];
+  let open = null;
+  for (const lead of asc) {
+    if (!open) { open = { leads: [] }; engagements.push(open); }
+    open.leads.push(lead);
+    open.status = engagementStatusOf(open.leads);
+    if (!engagementIsOpen(open.status)) open = null;
+  }
+  return engagements;
+}
+
+// Shape one engagement for the customer profile. Display details come from the
+// newest call (latest call wins); industry fields are read straight from the
+// stored vertical_data (never recomputed).
+function shapeEngagement(eng) {
+  const leadsAsc = eng.leads;
+  const rep = leadsAsc[leadsAsc.length - 1];
+  const status = eng.status;
+  let vd = {};
+  try { vd = rep.vertical_data ? JSON.parse(rep.vertical_data) : {}; } catch { vd = {}; }
+
+  let lastActivityAt = null;
+  for (const l of leadsAsc) {
+    const ts = l.updated_at || l.created_at;
+    if (ts && (!lastActivityAt || ts > lastActivityAt)) lastActivityAt = ts;
+  }
+  // Stale is a display-only flag: an Active Inquiry with no new call/update for
+  // two weeks. It never closes, books, or otherwise changes the engagement.
+  const lastMs = tsToMs(lastActivityAt);
+  const stale = status === 'inquiry' && lastMs != null
+    ? (Date.now() - lastMs) >= STALE_INQUIRY_MS
+    : false;
+
+  return {
+    id: leadsAsc[0].id,                       // engagement anchored to its first call
+    representative_lead_id: rep.id,           // newest call → drives the details
+    lead_ids: leadsAsc.map((l) => l.id),
+    status,
+    label: ENGAGEMENT_LABELS[status] || 'Active Inquiry',
+    is_open: engagementIsOpen(status),
+    stale,
+    service: leadServiceSummary(rep),
+    address: rep.address || vd.deliveryAddress || vd.propertyAddress || null,
+    delivery_date: rep.delivery_date || null,
+    pickup_date: rep.pickup_date || null,
+    scheduled_time: rep.scheduled_time || null,
+    estimated_revenue: leadRevenue(rep),
+    paid_at: rep.paid_at || null,
+    auto_booked: rep.auto_booked === 1,
+    booking_signals: Array.isArray(vd.bookingSignalsDetected) ? vd.bookingSignalsDetected : [],
+    booking_confidence: vd.bookingConfidence || null,
+    intent_level: vd.intentLevel || null,
+    urgency: vd.urgency || null,
+    follow_up_date: vd.followUpDate || rep.follow_up_date || null,
+    // Industry-relevant fields (display stored values; not recomputed).
+    dumpster_size: vd.dumpsterSize || null,
+    debris_type: vd.debrisType || null,
+    rental_duration: vd.rentalDuration || null,
+    vertical: rep.vertical || null,
+    sub_vertical: rep.sub_vertical || null,
+    calls: leadsAsc.slice().reverse().map(toJob),   // newest-first call list
+    created_at: leadsAsc[0].created_at,
+    updated_at: rep.updated_at || rep.created_at,
+    last_activity_at: lastActivityAt,
+  };
+}
+
+// Engagements for a customer's active leads, newest engagement first, with the
+// single open engagement (if any) flagged is_active so the UI expands it.
+function engagementsForLeads(activeLeads) {
+  const shaped = buildEngagements(activeLeads).map(shapeEngagement);
+  shaped.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || (b.id - a.id));
+  let activeMarked = false;
+  for (const e of shaped) {
+    e.is_active = !activeMarked && e.is_open;
+    if (e.is_active) activeMarked = true;
+  }
+  return shaped;
+}
+
 // The customer's best display name, with sensible fallbacks.
 function displayNameOf(customer) {
   return customer.display_name
@@ -335,6 +492,8 @@ function getCustomerDetail(businessId, customerId) {
   const activeLeads = leadRows.filter((l) => !l.discarded);
   const agg = aggregateLeads(activeLeads);
   const jobs = activeLeads.map(toJob);
+  // Engagements: the customer's calls grouped into inquiry→job→completed records.
+  const engagements = engagementsForLeads(activeLeads);
 
   // Addresses: the customer's primary plus every distinct job address.
   const addrSet = new Set();
@@ -377,13 +536,16 @@ function getCustomerDetail(businessId, customerId) {
     created_at: customer.created_at,
     updated_at: customer.updated_at,
     addresses: [...addrSet],
-    jobs,
+    jobs,            // legacy per-call list (kept for back-compat)
+    engagements,     // grouped inquiry→job→completed lifecycle records
     activity,
+    // Totals reflect engagements (one ongoing piece of business), so repeat calls
+    // about the same inquiry count once and revenue isn't double-counted.
     totals: {
-      jobs: agg.jobs,
-      open_jobs: agg.open,
-      completed_jobs: agg.completed,
-      total_revenue: Math.round(agg.revenue),
+      jobs: engagements.length,
+      open_jobs: engagements.filter((e) => e.is_open).length,
+      completed_jobs: engagements.filter((e) => e.status === 'completed').length,
+      total_revenue: Math.round(engagements.reduce((s, e) => s + (e.estimated_revenue || 0), 0)),
     },
   };
 }
@@ -398,4 +560,8 @@ module.exports = {
   recomputeCustomerStatus,
   listCustomers,
   getCustomerDetail,
+  engagementsForLeads,
+  leadIsCompleted,
+  leadIsBooked,
+  leadIsClosedLost,
 };

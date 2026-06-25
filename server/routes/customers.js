@@ -10,8 +10,11 @@ const {
   listCustomers,
   getCustomerDetail,
   displayNameOf,
+  leadIsCompleted,
+  leadIsBooked,
 } = require('../services/customerService');
 const { resolveEffectivePricing } = require('../services/pricingService');
+const { logActivity } = require('../services/activityLog');
 
 // Customers is a web-dashboard (and, later, authenticated iOS) surface. Unlike
 // the shared /api/leads routes, it must never fall back to the default business,
@@ -185,6 +188,47 @@ router.delete('/:id', (req, res) => {
   } catch (err) {
     console.error('DELETE /customers/:id error:', err);
     res.status(500).json({ error: 'Failed to delete customer' });
+  }
+});
+
+// POST /api/customers/:id/engagements/close — manually close an Active Inquiry
+// (Mark Lost / Close). Marks the engagement's still-open calls terminal ('lost')
+// so the inquiry leaves the Action Queue and shows as closed in the profile. This
+// is the ONLY way an inquiry closes — nothing auto-closes one. Booked/completed
+// calls are never touched (Jobs complete automatically on payment + pickup), and
+// it changes no booking signals or auto-book state.
+router.post('/:id/engagements/close', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?')
+      .get(req.params.id, businessId);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+    const ids = Array.isArray(req.body?.lead_ids) ? req.body.lead_ids : [];
+    if (!ids.length) return res.status(400).json({ error: 'lead_ids is required' });
+    const reason = req.body?.reason === 'closed' ? 'closed' : 'lost';
+    const note = reason === 'closed' ? 'Inquiry closed by owner' : 'Inquiry marked lost';
+
+    const now = new Date().toISOString();
+    let closed = 0;
+    for (const rawId of ids) {
+      const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND customer_id = ? AND business_id = ?')
+        .get(rawId, customer.id, businessId);
+      // Only close still-open inquiry calls; never a booked/completed/already-terminal one.
+      if (!lead || leadIsCompleted(lead) || leadIsBooked(lead)) continue;
+      if (lead.job_status === 'lost' || lead.job_status === 'spam') continue;
+      db.prepare('UPDATE leads SET job_status = ?, updated_at = ? WHERE id = ?').run('lost', now, lead.id);
+      logActivity(lead.id, 'status_change', note);
+      closed++;
+    }
+
+    recomputeCustomerStatus(customer.id);
+    reconcileCustomersForBusiness(businessId);
+    const detail = getCustomerDetail(businessId, customer.id);
+    res.json({ closed, customer: detail });
+  } catch (err) {
+    console.error('POST /customers/:id/engagements/close error:', err);
+    res.status(500).json({ error: 'Failed to close engagement' });
   }
 });
 

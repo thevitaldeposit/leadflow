@@ -89,6 +89,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
   deleteCustomer: (id) => request(`/customers/${id}`, { method: 'DELETE' }),
+  // Manually close an Active Inquiry engagement (Mark Lost / Close). lead_ids are
+  // the engagement's calls; reason is 'lost' or 'closed'.
+  closeEngagement: (id, leadIds, reason = 'lost') =>
+    request(`/customers/${id}/engagements/close`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lead_ids: leadIds, reason }),
+    }),
   getCustomerPricing: (id) => request(`/customers/${id}/pricing`),
   // Upsert (or clear, with custom_price = null) one per-customer rate override.
   setCustomerPricing: (id, body) =>

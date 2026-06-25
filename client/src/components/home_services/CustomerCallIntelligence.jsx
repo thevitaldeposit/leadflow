@@ -77,8 +77,13 @@ export default function CustomerCallIntelligence({ jobId }) {
         bookingConfidence={vd.bookingConfidence || null}
       />
 
-      {/* Key dates + intent / urgency / follow-up (read-only; stored values, not recomputed) */}
+      {/* Industry fields + key dates + intent / urgency / follow-up (read-only;
+          stored values, never recomputed). The industry fields self-hide when the
+          call didn't capture them (e.g. non-dumpster verticals). */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+        {vd.dumpsterSize && <ROField label="Dumpster Size" value={vd.dumpsterSize} />}
+        {vd.rentalDuration && <ROField label="Rental Duration" value={vd.rentalDuration} />}
+        {vd.debrisType && <ROField label="Debris Type" value={vd.debrisType} />}
         <ROField label={t.startDate} value={fmtDate(lead.delivery_date)} />
         <ROField label={t.endDate} value={fmtDate(lead.pickup_date)} />
         <ROField label={t.startTime} value={formatTime12(lead.scheduled_time)} />

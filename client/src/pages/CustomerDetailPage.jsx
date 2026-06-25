@@ -3,15 +3,14 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Phone, PhoneMissed, PhoneOutgoing, MessageSquare, Voicemail,
   StickyNote, RefreshCw, MapPin, Edit2, Trash2, Check, X, FileText, DollarSign, Plus,
-  ChevronDown, ChevronRight, Zap,
+  ChevronDown, ChevronRight, Zap, Briefcase, Clock,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
   CUSTOMER_STATUSES, CUSTOMER_STATUS_STYLES, getCustomerStatusLabel,
-  JOB_STATUS_STYLES, getJobStatusLabel,
+  JOB_STATUS_STYLES,
   INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
 } from '../utils/verticalConfig';
-import BookingSignalsPanel from '../components/home_services/BookingSignalsPanel';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
 
 const money = (n, c = 'USD') => {
@@ -113,13 +112,6 @@ export default function CustomerDetailPage() {
   const [priceDrafts, setPriceDrafts] = useState({});
   const [savingNotes, setSavingNotes] = useState(false);
   const [savingTerms, setSavingTerms] = useState(false);
-  const [expandedJobs, setExpandedJobs] = useState(() => new Set());
-
-  const toggleJob = (jobId) => setExpandedJobs(prev => {
-    const next = new Set(prev);
-    if (next.has(jobId)) next.delete(jobId); else next.add(jobId);
-    return next;
-  });
 
   const load = useCallback(() => {
     return Promise.all([api.getCustomer(id), api.getPricing(), api.getInvoices({ customer_id: id })]).then(([c, p, inv]) => {
@@ -178,6 +170,14 @@ export default function CustomerDetailPage() {
     navigate('/customers');
   };
 
+  // Manually close an Active Inquiry (Mark Lost / Close). The engagement's open
+  // calls go terminal, so it leaves the action queue; booked/completed work is
+  // never affected. Nothing here re-runs extraction or booking.
+  const handleCloseEngagement = async (engagement, reason) => {
+    await api.closeEngagement(id, engagement.lead_ids, reason);
+    await load();
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-accent border-t-transparent rounded-full" /></div>;
   }
@@ -193,6 +193,13 @@ export default function CustomerDetailPage() {
   const c = customer;
   const statusStyle = CUSTOMER_STATUS_STYLES[c.status] || CUSTOMER_STATUS_STYLES.lead;
   const pricing = c.pricing || { items: [], group: null };
+
+  // Engagements: one ongoing piece of business (inquiry → job → completed). The
+  // single open one (if any) is the "active" engagement, expanded below; the rest
+  // (completed / closed) collapse into Job History.
+  const engagements = c.engagements || [];
+  const activeEngagement = engagements.find(e => e.is_active) || null;
+  const historyEngagements = engagements.filter(e => !e.is_active);
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -244,15 +251,11 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
-      {/* Booking signals — reflects the customer's most recent call (jobs are
-          returned newest-first). Display-only; rendering these never re-evaluates
-          booking. Self-hides when the latest call has no signals. */}
-      {c.jobs.length > 0 && (
-        <BookingSignalsPanel
-          autoBooked={c.jobs[0].auto_booked}
-          bookingSignals={c.jobs[0].booking_signals}
-          bookingConfidence={c.jobs[0].booking_confidence}
-        />
+      {/* Active engagement — the current Active Inquiry or booked Job, expanded by
+          default so its details (booking signals, key dates, industry fields, AI
+          summary, recording) show on load. Display-only; never re-runs booking. */}
+      {activeEngagement && (
+        <ActiveEngagement engagement={activeEngagement} onClose={handleCloseEngagement} />
       )}
 
       {/* Contact / profile */}
@@ -284,14 +287,16 @@ export default function CustomerDetailPage() {
         )}
       </Card>
 
-      {/* Job history — each row expands to show that call's intelligence
-          (AI summary, recording, transcript, booking signals, key dates). */}
+      {/* Job History — completed and closed engagements, collapsed for review.
+          Each row expands to that engagement's calls + intelligence. */}
       <Card
-        title={`Job History (${c.jobs.length})`}
-        action={c.jobs.length > 0 && <span className="text-[11px] text-gray-400">Tap a job for call details</span>}
+        title={`Job History (${historyEngagements.length})`}
+        action={historyEngagements.length > 0 && <span className="text-[11px] text-gray-400">Tap to expand</span>}
       >
-        {c.jobs.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-gray-400">No jobs yet.</div>
+        {historyEngagements.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-gray-400">
+            {activeEngagement ? 'No completed or closed jobs yet.' : 'No jobs yet.'}
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
@@ -303,45 +308,7 @@ export default function CustomerDetailPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {c.jobs.map(j => {
-                const open = expandedJobs.has(j.id);
-                return (
-                  <Fragment key={j.id}>
-                    <tr
-                      className="hover:bg-gray-50 cursor-pointer transition-colors"
-                      onClick={() => toggleJob(j.id)}
-                    >
-                      <td className="px-5 py-3 text-gray-800">
-                        <div className="flex items-center gap-2">
-                          {open
-                            ? <ChevronDown size={14} className="text-gray-400 flex-shrink-0" />
-                            : <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />}
-                          <span>{j.service}</span>
-                          {j.auto_booked && (
-                            <span title="Auto-booked from the call" className="inline-flex items-center text-emerald-500">
-                              <Zap size={12} />
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${JOB_STATUS_STYLES[j.job_status] || 'bg-gray-100 text-gray-500'}`}>
-                          {getJobStatusLabel(j.job_status)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{j.delivery_date ? fmtDate(j.delivery_date) : fmtDate(j.created_at)}</td>
-                      <td className="px-4 py-3 text-gray-700">{j.estimated_revenue ? `$${Math.round(j.estimated_revenue).toLocaleString()}` : '—'}</td>
-                    </tr>
-                    {open && (
-                      <tr>
-                        <td colSpan={4} className="p-0 border-t border-gray-100">
-                          <CustomerCallIntelligence jobId={j.id} />
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
+              {historyEngagements.map(e => <EngagementRow key={e.id} engagement={e} />)}
             </tbody>
           </table>
         )}
@@ -521,5 +488,130 @@ function Field({ label, value }) {
       <p className={labelCls}>{label}</p>
       <p className="text-gray-800">{value || '—'}</p>
     </div>
+  );
+}
+
+// The body shared by the active engagement and an expanded history row: the
+// newest call's full intelligence (booking signals, dates, industry fields, AI
+// summary, recording) plus any earlier calls in the same engagement, expandable.
+function EngagementBody({ engagement: e }) {
+  const [openCalls, setOpenCalls] = useState(() => new Set());
+  const toggle = (cid) => setOpenCalls(prev => {
+    const next = new Set(prev);
+    if (next.has(cid)) next.delete(cid); else next.add(cid);
+    return next;
+  });
+  const earlier = (e.calls || []).slice(1); // calls[0] is the representative (newest)
+
+  return (
+    <>
+      <CustomerCallIntelligence jobId={e.representative_lead_id} />
+      {earlier.length > 0 && (
+        <div className="px-5 pb-4">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+            Earlier calls in this engagement ({earlier.length})
+          </p>
+          <div className="border border-gray-100 rounded-lg divide-y divide-gray-50 overflow-hidden">
+            {earlier.map(call => {
+              const open = openCalls.has(call.id);
+              return (
+                <Fragment key={call.id}>
+                  <button
+                    onClick={() => toggle(call.id)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-gray-50"
+                  >
+                    <span className="flex items-center gap-2 text-sm text-gray-700">
+                      {open ? <ChevronDown size={13} className="text-gray-400" /> : <ChevronRight size={13} className="text-gray-400" />}
+                      {fmtDateTime(call.created_at) || fmtDate(call.created_at)}
+                    </span>
+                    <span className="text-xs text-gray-400">{call.service}</span>
+                  </button>
+                  {open && <CustomerCallIntelligence jobId={call.id} />}
+                </Fragment>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// The active engagement — the open Active Inquiry or booked Job — rendered
+// expanded with its status, a Stale flag for an idle inquiry, and (for an
+// inquiry) the manual Close / Mark Lost actions. Nothing here changes booking.
+function ActiveEngagement({ engagement: e, onClose }) {
+  const [closing, setClosing] = useState(false);
+  const style = JOB_STATUS_STYLES[e.status] || JOB_STATUS_STYLES.inquiry;
+  const close = async (reason) => {
+    const msg = reason === 'lost'
+      ? 'Mark this inquiry as Lost? It will close and leave the action queue.'
+      : 'Close this inquiry? It will leave the action queue.';
+    if (!confirm(msg)) return;
+    setClosing(true);
+    try { await onClose(e, reason); } finally { setClosing(false); }
+  };
+
+  return (
+    <Card title={e.label} icon={e.status === 'booked' ? Briefcase : MessageSquare}>
+      <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
+        <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${style}`}>{e.label}</span>
+        {e.stale && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-orange-100 text-orange-700 border-orange-200">
+            <Clock size={11} /> Stale
+          </span>
+        )}
+        {e.auto_booked && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-emerald-100 text-emerald-700 border-emerald-200">
+            <Zap size={11} /> Auto-booked
+          </span>
+        )}
+        <span className="flex-1" />
+        {e.estimated_revenue ? <span className="text-sm font-semibold text-gray-900">${Math.round(e.estimated_revenue).toLocaleString()}</span> : null}
+      </div>
+
+      <EngagementBody engagement={e} />
+
+      {e.status === 'inquiry' && (
+        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-end gap-2">
+          <span className="text-[11px] text-gray-400 mr-auto">Inquiries stay open until you close them.</span>
+          <button onClick={() => close('lost')} disabled={closing} className="text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded-lg disabled:opacity-50">Mark Lost</button>
+          <button onClick={() => close('closed')} disabled={closing} className="text-xs font-medium text-gray-600 border border-gray-200 hover:bg-gray-50 px-3 py-1.5 rounded-lg disabled:opacity-50">Close</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// One collapsed history engagement (completed / closed). Expands to its calls.
+function EngagementRow({ engagement: e }) {
+  const [open, setOpen] = useState(false);
+  const style = JOB_STATUS_STYLES[e.status] || 'bg-gray-100 text-gray-500';
+  return (
+    <Fragment>
+      <tr className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => setOpen(o => !o)}>
+        <td className="px-5 py-3 text-gray-800">
+          <div className="flex items-center gap-2">
+            {open ? <ChevronDown size={14} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />}
+            <span>{e.service}</span>
+            {e.auto_booked && (
+              <span title="Auto-booked from the call" className="inline-flex items-center text-emerald-500"><Zap size={12} /></span>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-3">
+          <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${style}`}>{e.label}</span>
+        </td>
+        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{e.delivery_date ? fmtDate(e.delivery_date) : fmtDate(e.created_at)}</td>
+        <td className="px-4 py-3 text-gray-700">{e.estimated_revenue ? `$${Math.round(e.estimated_revenue).toLocaleString()}` : '—'}</td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={4} className="p-0 border-t border-gray-100">
+            <EngagementBody engagement={e} />
+          </td>
+        </tr>
+      )}
+    </Fragment>
   );
 }
