@@ -148,7 +148,6 @@ router.post('/:id/send', async (req, res) => {
           customerName: invoice.bill_to_name,
           invoiceNumber: invoice.invoice_number,
           total: invoice.total,
-          dueDate: invoice.due_date,
           link,
         });
         delivery.email = { sent: true, to: invoice.bill_to_email };
