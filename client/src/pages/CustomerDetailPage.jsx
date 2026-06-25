@@ -44,16 +44,16 @@ function fmtDateTime(iso) {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-const inputCls = 'w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent';
-const labelCls = 'block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1';
+const inputCls = 'w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent';
+const labelCls = 'block text-xs font-medium text-muted uppercase tracking-wide mb-1';
 
 function Card({ title, icon: Icon, children, action }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {Icon && <Icon size={15} className="text-gray-500" />}
-          <h2 className="text-sm font-bold text-gray-800">{title}</h2>
+          {Icon && <Icon size={15} className="text-muted" />}
+          <h2 className="text-sm font-bold text-content">{title}</h2>
         </div>
         {action}
       </div>
@@ -81,7 +81,7 @@ function ProfileForm({ customer, onSave, onCancel }) {
 
   return (
     <form onSubmit={submit} className="px-5 py-4 space-y-3">
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
       <div className="grid grid-cols-2 gap-3">
         <div><label className={labelCls}>First Name</label><input className={inputCls} value={form.firstName} onChange={e => set('firstName', e.target.value)} /></div>
         <div><label className={labelCls}>Last Name</label><input className={inputCls} value={form.lastName} onChange={e => set('lastName', e.target.value)} /></div>
@@ -91,8 +91,8 @@ function ProfileForm({ customer, onSave, onCancel }) {
         <div><label className={labelCls}>Primary Address</label><input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} /></div>
       </div>
       <div className="flex gap-2 justify-end">
-        <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 px-3 py-2 rounded-lg"><X size={14} /> Cancel</button>
-        <button type="submit" disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-white bg-accent hover:bg-accent/90 disabled:opacity-50 px-4 py-2 rounded-lg"><Check size={14} /> {saving ? 'Saving…' : 'Save'}</button>
+        <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-3 py-2 rounded-lg"><X size={14} /> Cancel</button>
+        <button type="submit" disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-4 py-2 rounded-lg"><Check size={14} /> {saving ? 'Saving…' : 'Save'}</button>
       </div>
     </form>
   );
@@ -185,7 +185,7 @@ export default function CustomerDetailPage() {
     return (
       <div className="max-w-3xl mx-auto">
         <Link to="/customers" className="text-sm text-accent inline-flex items-center gap-1"><ArrowLeft size={14} /> Customers</Link>
-        <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-sm text-gray-400 mt-4">{error || 'Customer not found'}</div>
+        <div className="bg-surface rounded-xl border border-divider p-10 text-center text-sm text-muted mt-4">{error || 'Customer not found'}</div>
       </div>
     );
   }
@@ -206,16 +206,16 @@ export default function CustomerDetailPage() {
       <Link to="/customers" className="text-sm text-accent inline-flex items-center gap-1 hover:underline"><ArrowLeft size={14} /> Customers</Link>
 
       {/* Header */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-gray-900">{c.display_name}</h1>
+              <h1 className="text-xl font-bold text-content">{c.display_name}</h1>
               <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${statusStyle}`}>
                 {getCustomerStatusLabel(c.status)}
               </span>
             </div>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-muted mt-1">
               {[c.company, c.phone, c.email].filter(Boolean).join(' · ') || 'No contact info'}
             </p>
           </div>
@@ -224,14 +224,14 @@ export default function CustomerDetailPage() {
               <select
                 value={c.status_overridden ? c.status : '__derived__'}
                 onChange={e => handleStatusChange(e.target.value === '__derived__' ? 'auto' : e.target.value)}
-                className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent"
+                className="text-xs border border-divider rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent"
               >
                 <option value="__derived__">Auto (from jobs)</option>
                 {CUSTOMER_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
-              <p className="text-[10px] text-gray-400 mt-1">{c.status_overridden ? 'Pinned manually' : 'Auto from job history'}</p>
+              <p className="text-[10px] text-muted mt-1">{c.status_overridden ? 'Pinned manually' : 'Auto from job history'}</p>
             </div>
-            <button onClick={handleDelete} title="Delete customer" className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"><Trash2 size={15} /></button>
+            <button onClick={handleDelete} title="Delete customer" className="p-2 rounded-lg text-muted hover:text-danger hover:bg-danger/10"><Trash2 size={15} /></button>
           </div>
         </div>
 
@@ -243,9 +243,9 @@ export default function CustomerDetailPage() {
             ['Completed', c.totals.completed_jobs],
             ['Revenue', c.totals.total_revenue ? `$${c.totals.total_revenue.toLocaleString()}` : '$0'],
           ].map(([label, val]) => (
-            <div key={label} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-              <p className="text-lg font-bold text-gray-900">{val}</p>
-              <p className="text-[11px] text-gray-500">{label}</p>
+            <div key={label} className="rounded-lg border border-divider bg-surface-2 px-3 py-2">
+              <p className="text-lg font-bold text-content">{val}</p>
+              <p className="text-[11px] text-muted">{label}</p>
             </div>
           ))}
         </div>
@@ -269,10 +269,10 @@ export default function CustomerDetailPage() {
             <Field label="Email" value={c.email} />
             <div className="col-span-2">
               <p className={labelCls}>Addresses</p>
-              {c.addresses.length === 0 ? <p className="text-gray-400">—</p> : (
+              {c.addresses.length === 0 ? <p className="text-muted">—</p> : (
                 <div className="space-y-1">
                   {c.addresses.map((a, i) => (
-                    <p key={i} className="text-gray-700 flex items-center gap-1.5"><MapPin size={13} className="text-gray-400" /> {a}</p>
+                    <p key={i} className="text-content flex items-center gap-1.5"><MapPin size={13} className="text-muted" /> {a}</p>
                   ))}
                 </div>
               )}
@@ -292,23 +292,23 @@ export default function CustomerDetailPage() {
           Each row expands to that engagement's calls + intelligence. */}
       <Card
         title={`Job History (${historyEngagements.length})`}
-        action={historyEngagements.length > 0 && <span className="text-[11px] text-gray-400">Tap to expand</span>}
+        action={historyEngagements.length > 0 && <span className="text-[11px] text-muted">Tap to expand</span>}
       >
         {historyEngagements.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-gray-400">
+          <div className="px-5 py-8 text-center text-sm text-muted">
             {activeEngagement ? 'No completed or closed jobs yet.' : 'No jobs yet.'}
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
+            <thead className="bg-surface-2 border-b border-divider">
               <tr>
-                <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Service</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Revenue</th>
+                <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Service</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Status</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Date</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Revenue</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-divider">
               {historyEngagements.map(e => <EngagementRow key={e.id} engagement={e} />)}
             </tbody>
           </table>
@@ -331,7 +331,7 @@ export default function CustomerDetailPage() {
               <div className="flex gap-2">
                 <input className={inputCls} value={termsDraft} onChange={e => setTermsDraft(e.target.value)} placeholder="e.g. Net 30, PO required" />
                 {termsDraft !== (c.contract_terms || '') && (
-                  <button onClick={saveTerms} disabled={savingTerms} className="text-xs font-medium text-white bg-accent hover:bg-accent/90 px-3 rounded-lg disabled:opacity-50">Save</button>
+                  <button onClick={saveTerms} disabled={savingTerms} className="text-xs font-medium text-content bg-accent hover:bg-accent/90 px-3 rounded-lg disabled:opacity-50">Save</button>
                 )}
               </div>
             </div>
@@ -343,29 +343,29 @@ export default function CustomerDetailPage() {
               <Link to="/pricing" className="text-[11px] text-accent hover:underline">Edit default price list →</Link>
             </div>
             {pricing.items.length === 0 ? (
-              <p className="text-sm text-gray-400">No price list yet. <Link to="/pricing" className="text-accent hover:underline">Set up default prices</Link>.</p>
+              <p className="text-sm text-muted">No price list yet. <Link to="/pricing" className="text-accent hover:underline">Set up default prices</Link>.</p>
             ) : (
-              <table className="w-full text-sm border border-gray-100 rounded-lg overflow-hidden">
-                <thead className="bg-gray-50">
+              <table className="w-full text-sm border border-divider rounded-lg overflow-hidden">
+                <thead className="bg-surface-2">
                   <tr>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Service</th>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Default</th>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Custom</th>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Effective</th>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Service</th>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Default</th>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Custom</th>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Effective</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody className="divide-y divide-divider">
                   {pricing.items.map(it => {
                     const draftVal = priceDrafts[it.service_key] !== undefined
                       ? priceDrafts[it.service_key]
                       : (it.custom_price != null ? String(it.custom_price) : '');
                     return (
                       <tr key={it.service_key}>
-                        <td className="px-3 py-2 text-gray-800">{it.label}{it.unit ? <span className="text-gray-400 text-xs"> / {it.unit}</span> : null}</td>
-                        <td className="px-3 py-2 text-gray-500">{it.default_price != null ? `$${it.default_price}` : '—'}</td>
+                        <td className="px-3 py-2 text-content">{it.label}{it.unit ? <span className="text-muted text-xs"> / {it.unit}</span> : null}</td>
+                        <td className="px-3 py-2 text-muted">{it.default_price != null ? `$${it.default_price}` : '—'}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1">
-                            <span className="text-gray-400 text-xs">$</span>
+                            <span className="text-muted text-xs">$</span>
                             <input
                               type="number" min="0" step="0.01"
                               value={draftVal}
@@ -373,14 +373,14 @@ export default function CustomerDetailPage() {
                               onChange={e => setPriceDrafts(d => ({ ...d, [it.service_key]: e.target.value }))}
                               onBlur={() => saveOverride(it.service_key, it.label, it.unit)}
                               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                              className="w-20 text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent"
+                              className="w-20 text-sm border border-divider rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent"
                             />
                           </div>
                         </td>
                         <td className="px-3 py-2">
-                          <span className="font-semibold text-gray-900">{it.effective_price != null ? `$${it.effective_price}` : '—'}</span>
+                          <span className="font-semibold text-content">{it.effective_price != null ? `$${it.effective_price}` : '—'}</span>
                           {it.source !== 'default' && (
-                            <span className={`ml-1.5 text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded ${it.source === 'custom' ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'}`}>{it.source}</span>
+                            <span className={`ml-1.5 text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded ${it.source === 'custom' ? 'bg-brand/10 text-brand' : 'bg-warning/10 text-warning'}`}>{it.source}</span>
                           )}
                         </td>
                       </tr>
@@ -389,7 +389,7 @@ export default function CustomerDetailPage() {
                 </tbody>
               </table>
             )}
-            <p className="text-[11px] text-gray-400 mt-1.5">Effective rate = custom override, else group discount, else the default price.</p>
+            <p className="text-[11px] text-muted mt-1.5">Effective rate = custom override, else group discount, else the default price.</p>
           </div>
         </div>
       </Card>
@@ -406,30 +406,30 @@ export default function CustomerDetailPage() {
       >
         {invoices.length === 0 ? (
           <div className="px-5 py-8 text-center">
-            <p className="text-sm text-gray-400">No invoices yet.</p>
-            <p className="text-xs text-gray-400 mt-1">Create one — line items and terms prefill from this customer's rates.</p>
+            <p className="text-sm text-muted">No invoices yet.</p>
+            <p className="text-xs text-muted mt-1">Create one — line items and terms prefill from this customer's rates.</p>
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
+            <thead className="bg-surface-2 border-b border-divider">
               <tr>
-                <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Issued</th>
-                <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</th>
+                <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Invoice</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Status</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Issued</th>
+                <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Total</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-divider">
               {invoices.map((inv) => (
-                <tr key={inv.id} className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => navigate(`/invoices/${inv.id}`)}>
-                  <td className="px-5 py-3 font-medium text-gray-800">{inv.invoice_number}</td>
+                <tr key={inv.id} className="hover:bg-surface-2 cursor-pointer transition-colors" onClick={() => navigate(`/invoices/${inv.id}`)}>
+                  <td className="px-5 py-3 font-medium text-content">{inv.invoice_number}</td>
                   <td className="px-4 py-3">
                     <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${INVOICE_STATUS_STYLES[inv.status] || INVOICE_STATUS_STYLES.draft}`}>
                       {getInvoiceStatusLabel(inv.status)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{fmtDate(inv.issue_date)}</td>
-                  <td className="px-5 py-3 text-right text-gray-900 font-medium whitespace-nowrap">{money(inv.total, inv.currency)}</td>
+                  <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">{fmtDate(inv.issue_date)}</td>
+                  <td className="px-5 py-3 text-right text-content font-medium whitespace-nowrap">{money(inv.total, inv.currency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -440,17 +440,17 @@ export default function CustomerDetailPage() {
       {/* Activity timeline */}
       <Card title={`Activity (${c.activity.length})`}>
         {c.activity.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-gray-400">No activity yet.</div>
+          <div className="px-5 py-8 text-center text-sm text-muted">No activity yet.</div>
         ) : (
-          <ul className="divide-y divide-gray-50">
+          <ul className="divide-y divide-divider">
             {c.activity.map(a => {
               const Icon = ACTIVITY_ICONS[a.activity_type] || StickyNote;
               return (
                 <li key={a.id} className="px-5 py-3 flex items-start gap-3">
-                  <Icon size={15} className="text-gray-400 mt-0.5 flex-shrink-0" />
+                  <Icon size={15} className="text-muted mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-700">{a.description || a.activity_type}</p>
-                    <p className="text-xs text-gray-400">{fmtDateTime(a.created_at)}</p>
+                    <p className="text-sm text-content">{a.description || a.activity_type}</p>
+                    <p className="text-xs text-muted">{fmtDateTime(a.created_at)}</p>
                   </div>
                   <Link to={`/leads/${a.lead_id}`} className="text-[11px] text-accent hover:underline flex-shrink-0">Job →</Link>
                 </li>
@@ -472,7 +472,7 @@ export default function CustomerDetailPage() {
           />
           {notesDraft !== (c.notes || '') && (
             <div className="flex justify-end">
-              <button onClick={saveNotes} disabled={savingNotes} className="flex items-center gap-1.5 text-sm font-medium text-white bg-accent hover:bg-accent/90 disabled:opacity-50 px-4 py-2 rounded-lg">
+              <button onClick={saveNotes} disabled={savingNotes} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-4 py-2 rounded-lg">
                 <Check size={14} /> {savingNotes ? 'Saving…' : 'Save notes'}
               </button>
             </div>
@@ -487,7 +487,7 @@ function Field({ label, value }) {
   return (
     <div>
       <p className={labelCls}>{label}</p>
-      <p className="text-gray-800">{value || '—'}</p>
+      <p className="text-content">{value || '—'}</p>
     </div>
   );
 }
@@ -509,23 +509,23 @@ function EngagementBody({ engagement: e }) {
       <CustomerCallIntelligence jobId={e.representative_lead_id} />
       {earlier.length > 0 && (
         <div className="px-5 pb-4">
-          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+          <p className="text-[11px] font-semibold text-muted uppercase tracking-wide mb-1.5">
             Earlier calls in this engagement ({earlier.length})
           </p>
-          <div className="border border-gray-100 rounded-lg divide-y divide-gray-50 overflow-hidden">
+          <div className="border border-divider rounded-lg divide-y divide-divider overflow-hidden">
             {earlier.map(call => {
               const open = openCalls.has(call.id);
               return (
                 <Fragment key={call.id}>
                   <button
                     onClick={() => toggle(call.id)}
-                    className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-gray-50"
+                    className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-surface-2"
                   >
-                    <span className="flex items-center gap-2 text-sm text-gray-700">
-                      {open ? <ChevronDown size={13} className="text-gray-400" /> : <ChevronRight size={13} className="text-gray-400" />}
+                    <span className="flex items-center gap-2 text-sm text-content">
+                      {open ? <ChevronDown size={13} className="text-muted" /> : <ChevronRight size={13} className="text-muted" />}
                       {fmtDateTime(call.created_at) || fmtDate(call.created_at)}
                     </span>
-                    <span className="text-xs text-gray-400">{call.service}</span>
+                    <span className="text-xs text-muted">{call.service}</span>
                   </button>
                   {open && <CustomerCallIntelligence jobId={call.id} />}
                 </Fragment>
@@ -558,26 +558,26 @@ function ActiveEngagement({ engagement: e, onClose }) {
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
         <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${style}`}>{e.label}</span>
         {e.stale && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-orange-100 text-orange-700 border-orange-200">
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-warning/10 text-warning border-warning/30">
             <Clock size={11} /> Stale
           </span>
         )}
         {e.auto_booked && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-emerald-100 text-emerald-700 border-emerald-200">
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-success/10 text-success border-success/30">
             <Zap size={11} /> Auto-booked
           </span>
         )}
         <span className="flex-1" />
-        {e.estimated_revenue ? <span className="text-sm font-semibold text-gray-900">${Math.round(e.estimated_revenue).toLocaleString()}</span> : null}
+        {e.estimated_revenue ? <span className="text-sm font-semibold text-content">${Math.round(e.estimated_revenue).toLocaleString()}</span> : null}
       </div>
 
       <EngagementBody engagement={e} />
 
       {e.status === 'inquiry' && (
-        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-end gap-2">
-          <span className="text-[11px] text-gray-400 mr-auto">Inquiries stay open until you close them.</span>
-          <button onClick={() => close('lost')} disabled={closing} className="text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded-lg disabled:opacity-50">Mark Lost</button>
-          <button onClick={() => close('closed')} disabled={closing} className="text-xs font-medium text-gray-600 border border-gray-200 hover:bg-gray-50 px-3 py-1.5 rounded-lg disabled:opacity-50">Close</button>
+        <div className="px-5 py-3 border-t border-divider flex items-center justify-end gap-2">
+          <span className="text-[11px] text-muted mr-auto">Inquiries stay open until you close them.</span>
+          <button onClick={() => close('lost')} disabled={closing} className="text-xs font-medium text-danger border border-danger/30 hover:bg-danger/10 px-3 py-1.5 rounded-lg disabled:opacity-50">Mark Lost</button>
+          <button onClick={() => close('closed')} disabled={closing} className="text-xs font-medium text-muted border border-divider hover:bg-surface-2 px-3 py-1.5 rounded-lg disabled:opacity-50">Close</button>
         </div>
       )}
     </Card>
@@ -587,28 +587,28 @@ function ActiveEngagement({ engagement: e, onClose }) {
 // One collapsed history engagement (completed / closed). Expands to its calls.
 function EngagementRow({ engagement: e }) {
   const [open, setOpen] = useState(false);
-  const style = JOB_STATUS_STYLES[e.status] || 'bg-gray-100 text-gray-500';
+  const style = JOB_STATUS_STYLES[e.status] || 'bg-surface-2 text-muted';
   return (
     <Fragment>
-      <tr className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => setOpen(o => !o)}>
-        <td className="px-5 py-3 text-gray-800">
+      <tr className="hover:bg-surface-2 cursor-pointer transition-colors" onClick={() => setOpen(o => !o)}>
+        <td className="px-5 py-3 text-content">
           <div className="flex items-center gap-2">
-            {open ? <ChevronDown size={14} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />}
+            {open ? <ChevronDown size={14} className="text-muted flex-shrink-0" /> : <ChevronRight size={14} className="text-muted flex-shrink-0" />}
             <span>{e.service}</span>
             {e.auto_booked && (
-              <span title="Auto-booked from the call" className="inline-flex items-center text-emerald-500"><Zap size={12} /></span>
+              <span title="Auto-booked from the call" className="inline-flex items-center text-success"><Zap size={12} /></span>
             )}
           </div>
         </td>
         <td className="px-4 py-3">
           <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${style}`}>{e.label}</span>
         </td>
-        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{e.delivery_date ? fmtDate(e.delivery_date) : fmtDate(e.created_at)}</td>
-        <td className="px-4 py-3 text-gray-700">{e.estimated_revenue ? `$${Math.round(e.estimated_revenue).toLocaleString()}` : '—'}</td>
+        <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">{e.delivery_date ? fmtDate(e.delivery_date) : fmtDate(e.created_at)}</td>
+        <td className="px-4 py-3 text-content">{e.estimated_revenue ? `$${Math.round(e.estimated_revenue).toLocaleString()}` : '—'}</td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={4} className="p-0 border-t border-gray-100">
+          <td colSpan={4} className="p-0 border-t border-divider">
             <EngagementBody engagement={e} />
           </td>
         </tr>

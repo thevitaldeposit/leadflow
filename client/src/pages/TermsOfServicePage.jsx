@@ -4,8 +4,8 @@ import { AudioLines } from 'lucide-react';
 
 function Wordmark() {
   return (
-    <Link to="/" className="flex items-center gap-2 text-slate-900">
-      <AudioLines className="text-blue-600" size={24} strokeWidth={2.5} />
+    <Link to="/" className="flex items-center gap-2 text-content">
+      <AudioLines className="text-brand" size={24} strokeWidth={2.5} />
       <span className="text-lg font-bold tracking-tight">Stream</span>
     </Link>
   );
@@ -14,8 +14,8 @@ function Wordmark() {
 function Section({ title, children }) {
   return (
     <section className="mt-8">
-      <h2 className="text-lg font-semibold tracking-tight text-slate-900">{title}</h2>
-      <div className="mt-2 space-y-3 leading-relaxed text-slate-600">{children}</div>
+      <h2 className="text-lg font-semibold tracking-tight text-content">{title}</h2>
+      <div className="mt-2 space-y-3 leading-relaxed text-muted">{children}</div>
     </section>
   );
 }
@@ -26,19 +26,19 @@ export default function TermsOfServicePage() {
   }, []);
 
   return (
-    <div className="min-h-screen w-full overflow-y-auto bg-white text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
+    <div className="min-h-screen w-full overflow-y-auto bg-surface text-content">
+      <header className="border-b border-divider bg-surface">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
           <Wordmark />
-          <Link to="/" className="text-sm font-medium text-slate-500 transition-colors hover:text-slate-700">
+          <Link to="/" className="text-sm font-medium text-muted transition-colors hover:text-content">
             Back to home
           </Link>
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-6 py-12 sm:py-16">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Terms of Service</h1>
-        <p className="mt-2 text-sm text-slate-500">Last updated: June 2026</p>
+        <h1 className="text-3xl font-bold tracking-tight text-content sm:text-4xl">Terms of Service</h1>
+        <p className="mt-2 text-sm text-muted">Last updated: June 2026</p>
 
         <Section title="1. Acceptance">
           <p>
@@ -88,7 +88,7 @@ export default function TermsOfServicePage() {
         <Section title="7. Data">
           <p>
             You retain ownership of your business data. We process it solely to provide the Service. See our{' '}
-            <Link to="/privacy" className="font-medium text-blue-600 hover:text-blue-500">
+            <Link to="/privacy" className="font-medium text-brand hover:text-brand">
               Privacy Policy
             </Link>{' '}
             for details.
@@ -116,14 +116,14 @@ export default function TermsOfServicePage() {
             Three T's Capital LLC
             <br />
             Email:{' '}
-            <a href="mailto:info@joinstream.app" className="font-medium text-blue-600 hover:text-blue-500">
+            <a href="mailto:info@joinstream.app" className="font-medium text-brand hover:text-brand">
               info@joinstream.app
             </a>
           </p>
         </Section>
 
-        <div className="mt-12 border-t border-slate-100 pt-6 text-sm text-slate-500">
-          <Link to="/privacy" className="font-medium text-blue-600 hover:text-blue-500">
+        <div className="mt-12 border-t border-divider pt-6 text-sm text-muted">
+          <Link to="/privacy" className="font-medium text-brand hover:text-brand">
             Privacy Policy
           </Link>
         </div>

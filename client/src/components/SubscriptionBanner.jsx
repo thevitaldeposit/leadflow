@@ -27,17 +27,17 @@ export default function SubscriptionBanner() {
   };
 
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
       <div className="flex items-center gap-2.5">
-        <AlertCircle size={18} className="text-amber-500 flex-shrink-0" />
-        <p className="text-sm text-amber-800">
+        <AlertCircle size={18} className="text-warning flex-shrink-0" />
+        <p className="text-sm text-warning">
           Your subscription is inactive. Subscribe to continue using Stream.
         </p>
       </div>
       <button
         onClick={subscribe}
         disabled={busy}
-        className="text-sm font-semibold bg-amber-500 text-white rounded-lg px-4 py-2 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+        className="text-sm font-semibold bg-warning text-background rounded-lg px-4 py-2 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
       >
         {busy ? 'Redirecting…' : 'Subscribe'}
       </button>

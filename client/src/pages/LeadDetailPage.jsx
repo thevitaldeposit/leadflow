@@ -50,7 +50,7 @@ export default function LeadDetailPage() {
 
   if (error || !lead) {
     return (
-      <div className="text-center py-12 text-gray-500 text-sm">
+      <div className="text-center py-12 text-muted text-sm">
         {error || 'Lead not found.'}
         <button onClick={() => navigate('/leads')} className="block mx-auto mt-3 text-accent hover:underline">
           Back to leads
@@ -85,21 +85,21 @@ export default function LeadDetailPage() {
           <div className="flex items-center justify-between mb-4">
             <button
               onClick={() => navigate(-1)}
-              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
+              className="flex items-center gap-1.5 text-sm text-muted hover:text-content transition-colors"
             >
               <ArrowLeft size={15} />
               Back
             </button>
             <div className="flex items-center gap-2">
               {isFresh && (
-                <div className="flex items-center gap-1.5 text-sm text-green-600 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">
+                <div className="flex items-center gap-1.5 text-sm text-success bg-success/10 border border-success/30 px-3 py-1.5 rounded-lg">
                   <CheckCircle size={14} />
                   Lead extracted and saved
                 </div>
               )}
               <button
                 onClick={handleDelete}
-                className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 text-sm text-muted hover:text-danger hover:bg-danger/10 px-3 py-1.5 rounded-lg transition-colors"
               >
                 <Trash2 size={14} />
                 Delete Lead
@@ -109,7 +109,7 @@ export default function LeadDetailPage() {
 
           <HomeServicesLeadDetail lead={lead} onUpdate={setLead} />
 
-          <p className="text-xs text-gray-400 px-1 mt-4">
+          <p className="text-xs text-muted px-1 mt-4">
             {extractionLabel(lead.extraction_type)} · {new Date(lead.created_at).toLocaleString()}
           </p>
           {isAudio && <div className="mt-3"><AudioSection lead={lead} /></div>}
@@ -124,21 +124,21 @@ export default function LeadDetailPage() {
       <div className="flex items-center justify-between">
         <button
           onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
+          className="flex items-center gap-1.5 text-sm text-muted hover:text-content transition-colors"
         >
           <ArrowLeft size={15} />
           Back
         </button>
         <div className="flex items-center gap-2">
           {isFresh && (
-            <div className="flex items-center gap-1.5 text-sm text-green-600 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">
+            <div className="flex items-center gap-1.5 text-sm text-success bg-success/10 border border-success/30 px-3 py-1.5 rounded-lg">
               <CheckCircle size={14} />
               Lead extracted and saved
             </div>
           )}
           <button
             onClick={handleDelete}
-            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 text-sm text-muted hover:text-danger hover:bg-danger/10 px-3 py-1.5 rounded-lg transition-colors"
           >
             <Trash2 size={14} />
             Delete Lead
@@ -147,8 +147,8 @@ export default function LeadDetailPage() {
       </div>
 
       <div>
-        <h2 className="text-xl font-bold text-gray-900">{fullName}</h2>
-        <p className="text-sm text-gray-400 mt-0.5">
+        <h2 className="text-xl font-bold text-content">{fullName}</h2>
+        <p className="text-sm text-muted mt-0.5">
           {extractionLabel(lead.extraction_type)} · {new Date(lead.created_at).toLocaleString()}
         </p>
       </div>

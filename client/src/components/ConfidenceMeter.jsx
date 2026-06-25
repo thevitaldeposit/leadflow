@@ -3,20 +3,20 @@ export default function ConfidenceMeter({ value, showLabel = true }) {
 
   let color, label, bg;
   if (value >= 0.8) {
-    color = 'bg-green-500';
-    bg = 'bg-green-100';
+    color = 'bg-success';
+    bg = 'bg-success/10';
     label = 'High';
   } else if (value >= 0.6) {
-    color = 'bg-yellow-400';
-    bg = 'bg-yellow-100';
+    color = 'bg-warning';
+    bg = 'bg-warning/10';
     label = 'Med';
   } else if (value >= 0.4) {
-    color = 'bg-orange-400';
-    bg = 'bg-orange-100';
+    color = 'bg-warning';
+    bg = 'bg-warning/10';
     label = 'Low';
   } else {
-    color = 'bg-red-500';
-    bg = 'bg-red-100';
+    color = 'bg-danger';
+    bg = 'bg-danger/10';
     label = 'Very Low';
   }
 

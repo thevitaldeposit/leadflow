@@ -79,28 +79,28 @@ function AvailabilitySection() {
   }, [deliveryDate, rentalDuration, runCheck]);
 
   return (
-    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
-        <Package size={16} className="text-emerald-600" />
-        <h2 className="text-sm font-bold text-gray-900">Availability Checker</h2>
-        <span className="ml-2 text-xs text-gray-400">Used during live calls — results update instantly</span>
+    <section className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-divider flex items-center gap-2">
+        <Package size={16} className="text-success" />
+        <h2 className="text-sm font-bold text-content">Availability Checker</h2>
+        <span className="ml-2 text-xs text-muted">Used during live calls — results update instantly</span>
       </div>
 
       {/* Inputs */}
       <div className="px-5 py-4 flex flex-wrap items-end gap-6">
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+          <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1.5">
             Delivery Date
           </label>
           <input
             type="date"
             value={deliveryDate}
             onChange={e => setDeliveryDate(e.target.value)}
-            className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+            className="text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-surface"
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+          <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1.5">
             Rental Duration (days)
           </label>
           <input
@@ -110,19 +110,19 @@ function AvailabilitySection() {
             placeholder="e.g. 7"
             value={rentalDuration}
             onChange={e => setRentalDuration(e.target.value)}
-            className="text-sm border border-gray-200 rounded-lg px-3 py-2 w-28 focus:outline-none focus:ring-2 focus:ring-accent"
+            className="text-sm border border-divider rounded-lg px-3 py-2 w-28 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
         {pickupDate && (
           <div className="pb-2">
-            <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold mb-0.5">Pickup Date</p>
-            <p className="text-sm font-semibold text-gray-800">{formatDate(pickupDate)}</p>
+            <p className="text-xs text-muted uppercase tracking-wide font-semibold mb-0.5">Pickup Date</p>
+            <p className="text-sm font-semibold text-content">{formatDate(pickupDate)}</p>
           </div>
         )}
         {loading && (
           <div className="pb-2 flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs text-gray-400">Checking…</span>
+            <span className="text-xs text-muted">Checking…</span>
           </div>
         )}
       </div>
@@ -131,7 +131,7 @@ function AvailabilitySection() {
       {results && results.bySizes && (
         <div className="px-5 pb-5 space-y-4">
           {results.bySizes.length === 0 ? (
-            <p className="text-sm text-gray-400">No inventory configured yet.</p>
+            <p className="text-sm text-muted">No inventory configured yet.</p>
           ) : (
             results.bySizes.map(group => (
               <SizeGroup key={group.size} group={group} />
@@ -142,7 +142,7 @@ function AvailabilitySection() {
 
       {!deliveryDate && !rentalDuration && (
         <div className="px-5 pb-5">
-          <p className="text-xs text-gray-400 italic">Enter a delivery date and rental duration to see real-time availability.</p>
+          <p className="text-xs text-muted italic">Enter a delivery date and rental duration to see real-time availability.</p>
         </div>
       )}
     </section>
@@ -154,15 +154,15 @@ function SizeGroup({ group }) {
   const none = availableCount <= 0;
 
   return (
-    <div className={`rounded-xl border ${none ? 'border-red-100 bg-red-50/30' : 'border-gray-100'} px-4 py-3 flex items-center justify-between gap-3`}>
+    <div className={`rounded-xl border ${none ? 'border-danger/30 bg-danger/10' : 'border-divider'} px-4 py-3 flex items-center justify-between gap-3`}>
       <div className="min-w-0">
-        <p className="text-sm font-bold text-gray-800">{size}</p>
-        <p className="text-xs text-gray-400 mt-0.5">
+        <p className="text-sm font-bold text-content">{size}</p>
+        <p className="text-xs text-muted mt-0.5">
           {ownedCount} owned · {bookedCount} on jobs{unitsInService > 0 ? ` · ${unitsInService} in service` : ''}
         </p>
       </div>
       <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 ${
-        none ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700'
+        none ? 'bg-danger/10 text-danger' : 'bg-success/10 text-success'
       }`}>
         {none ? `No ${size} available` : `${availableCount} of ${ownedCount} available`}
       </span>
@@ -234,32 +234,32 @@ function CalendarSection() {
   const selectedData = selectedDay && calData ? calData.days[selectedDay] : null;
 
   return (
-    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <section className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+      <div className="px-5 py-4 border-b border-divider flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Calendar size={16} className="text-blue-600" />
-          <h2 className="text-sm font-bold text-gray-900">Calendar</h2>
+          <Calendar size={16} className="text-brand" />
+          <h2 className="text-sm font-bold text-content">Calendar</h2>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={goToday}
-            className="text-xs font-medium text-gray-500 hover:text-gray-800 px-2.5 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+            className="text-xs font-medium text-muted hover:text-content px-2.5 py-1 rounded-lg hover:bg-surface-2 transition-colors"
           >
             Today
           </button>
-          <button onClick={prevMonth} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors">
+          <button onClick={prevMonth} className="p-1.5 rounded-lg text-muted hover:bg-surface-2 hover:text-content transition-colors">
             <ChevronLeft size={16} />
           </button>
-          <span className="text-sm font-semibold text-gray-800 min-w-[160px] text-center">{monthLabel}</span>
-          <button onClick={nextMonth} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors">
+          <span className="text-sm font-semibold text-content min-w-[160px] text-center">{monthLabel}</span>
+          <button onClick={nextMonth} className="p-1.5 rounded-lg text-muted hover:bg-surface-2 hover:text-content transition-colors">
             <ChevronRight size={16} />
           </button>
         </div>
-        <div className="flex items-center gap-4 text-xs text-gray-500">
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />{term.startAction}</span>
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />{term.endAction}</span>
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block" />Active</span>
+        <div className="flex items-center gap-4 text-xs text-muted">
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-success inline-block" />{term.startAction}</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-brand inline-block" />{term.endAction}</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-warning inline-block" />Active</span>
         </div>
       </div>
 
@@ -275,7 +275,7 @@ function CalendarSection() {
               {/* Day name headers */}
               <div className="grid grid-cols-7 mb-1">
                 {DAY_NAMES.map(n => (
-                  <div key={n} className="text-center text-[11px] font-semibold text-gray-400 uppercase tracking-wide py-1">
+                  <div key={n} className="text-center text-[11px] font-semibold text-muted uppercase tracking-wide py-1">
                     {n}
                   </div>
                 ))}
@@ -302,21 +302,21 @@ function CalendarSection() {
                         isSelected
                           ? 'bg-accent/10 ring-2 ring-accent'
                           : hasAny
-                          ? 'hover:bg-gray-50 cursor-pointer'
-                          : 'hover:bg-gray-50 cursor-default'
+                          ? 'hover:bg-surface-2 cursor-pointer'
+                          : 'hover:bg-surface-2 cursor-default'
                       }`}
                     >
                       <span className={`text-xs font-medium mb-1 rounded-full w-5 h-5 flex items-center justify-center ${
                         isToday
-                          ? 'bg-accent text-white'
-                          : 'text-gray-700'
+                          ? 'bg-accent text-content'
+                          : 'text-content'
                       }`}>
                         {d}
                       </span>
                       <div className="flex gap-0.5 flex-wrap">
-                        {hasDelivery && <span className="w-2 h-2 rounded-full bg-emerald-400" title={`${data.deliveries.length} delivery`} />}
-                        {hasPickup && <span className="w-2 h-2 rounded-full bg-blue-400" title={`${data.pickups.length} pickup`} />}
-                        {hasActive && <span className="w-2 h-2 rounded-full bg-orange-400" title={`${data.activeRentals.length} active`} />}
+                        {hasDelivery && <span className="w-2 h-2 rounded-full bg-success" title={`${data.deliveries.length} delivery`} />}
+                        {hasPickup && <span className="w-2 h-2 rounded-full bg-brand" title={`${data.pickups.length} pickup`} />}
+                        {hasActive && <span className="w-2 h-2 rounded-full bg-warning" title={`${data.activeRentals.length} active`} />}
                       </div>
                     </button>
                   );
@@ -328,15 +328,15 @@ function CalendarSection() {
 
         {/* Day panel */}
         {selectedDay && (
-          <div className="w-72 border-l border-gray-100 flex-shrink-0">
-            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
-              <p className="text-sm font-bold text-gray-800">{formatDate(selectedDay)}</p>
+          <div className="w-72 border-l border-divider flex-shrink-0">
+            <div className="px-4 py-3 bg-surface-2 border-b border-divider">
+              <p className="text-sm font-bold text-content">{formatDate(selectedDay)}</p>
             </div>
             <div className="overflow-y-auto max-h-[420px]">
               {!selectedData || (selectedData.deliveries.length + selectedData.pickups.length + selectedData.activeRentals.length === 0) ? (
-                <p className="px-4 py-6 text-xs text-gray-400 italic">No jobs on this day.</p>
+                <p className="px-4 py-6 text-xs text-muted italic">No jobs on this day.</p>
               ) : (
-                <div className="divide-y divide-gray-50">
+                <div className="divide-y divide-divider">
                   {[...selectedData.deliveries].sort(byScheduledTime).map(job => (
                     <DayJobRow key={`d-${job.id}`} job={job} type="delivery" navigate={navigate} />
                   ))}
@@ -358,9 +358,9 @@ function CalendarSection() {
 
 function DayJobRow({ job, type, navigate }) {
   const typeConfig = {
-    delivery: { label: term.startBadge, bg: 'bg-emerald-100 text-emerald-700' },
-    pickup: { label: term.endBadge, bg: 'bg-blue-100 text-blue-700' },
-    active: { label: 'ACTIVE', bg: 'bg-orange-100 text-orange-700' },
+    delivery: { label: term.startBadge, bg: 'bg-success/10 text-success' },
+    pickup: { label: term.endBadge, bg: 'bg-brand/10 text-brand' },
+    active: { label: 'ACTIVE', bg: 'bg-warning/10 text-warning' },
   };
   const { label, bg } = typeConfig[type];
   // Active rentals are ongoing, so a specific time of day doesn't apply to them.
@@ -369,22 +369,22 @@ function DayJobRow({ job, type, navigate }) {
   return (
     <button
       onClick={() => navigate(`/leads/${job.id}`)}
-      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-surface-2 transition-colors text-left"
     >
       <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${bg}`}>
         {label}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-semibold text-gray-800 truncate">{job.customerName}</p>
+          <p className="text-sm font-semibold text-content truncate">{job.customerName}</p>
           {timeLabel && (
-            <span className={`text-xs font-semibold flex-shrink-0 ${job.scheduledTime ? 'text-gray-600' : 'text-gray-400'}`}>
+            <span className={`text-xs font-semibold flex-shrink-0 ${job.scheduledTime ? 'text-muted' : 'text-muted'}`}>
               {timeLabel}
             </span>
           )}
         </div>
-        {job.dumpsterSize && <p className="text-xs text-gray-500">{job.dumpsterSize}</p>}
-        {job.address && <p className="text-xs text-gray-400 truncate">{job.address}</p>}
+        {job.dumpsterSize && <p className="text-xs text-muted">{job.dumpsterSize}</p>}
+        {job.address && <p className="text-xs text-muted truncate">{job.address}</p>}
       </div>
     </button>
   );

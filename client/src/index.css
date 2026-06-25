@@ -2,6 +2,46 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  ── Design tokens ───────────────────────────────────────────────────────────
+  Single source of truth for the whole product's color theme. Values are
+  space-separated "R G B" channels so Tailwind's `<alpha-value>` syntax (see
+  tailwind.config.js) can apply opacity, e.g. `bg-success/10`. The palette is a
+  dark-navy theme pulled from the product design reference: deep navy canvas,
+  brand blue for buttons/links, green for positive statuses, amber/red for
+  attention/critical, white→gray text. Reference tokens by their semantic name
+  (bg-background, bg-surface, text-content, text-muted, text-brand, bg-brand,
+  text-success, bg-success/10, border-divider, …) — never hardcode hex.
+*/
+:root {
+  color-scheme: dark;
+
+  /* Surfaces — dark-navy elevation ramp (deepest → lightest) */
+  --color-background: 10 22 34;     /* #0a1622  app canvas */
+  --color-surface: 17 31 44;        /* #111f2c  cards / panels */
+  --color-surface-2: 27 41 55;      /* #1b2937  raised / hover / nested */
+  --color-sidebar: 9 20 32;         /* #091420  nav rail */
+  --color-sidebar-hover: 22 36 54;  /* #162436 */
+  --color-sidebar-active: 23 52 88; /* #173458  brand-tinted selection */
+  --color-well: 6 14 24;            /* #060e18  sunken inputs / tracks */
+
+  /* Lines */
+  --color-divider: 30 45 62;        /* #1e2d3e  hairline borders */
+
+  /* Text */
+  --color-content: 244 247 251;     /* #f4f7fb  primary (near-white) */
+  --color-muted: 148 163 184;       /* #94a3b8  secondary */
+  --color-subtle: 100 116 139;      /* #64748b  tertiary / captions */
+
+  /* Accents (pulled from the reference image) */
+  --color-brand: 37 117 237;        /* #2575ed  primary blue */
+  --color-brand-hover: 96 165 250;  /* #60a5fa */
+  --color-success: 46 224 142;      /* #2ee08e  positive / paid / in-progress */
+  --color-warning: 251 191 36;      /* #fbbf24  attention */
+  --color-danger: 239 68 68;        /* #ef4444  critical / destructive */
+  --color-info: 56 189 248;         /* #38bdf8  informational stages */
+}
+
 @layer base {
   html, body {
     height: 100%;
@@ -13,7 +53,7 @@
   }
 
   body {
-    @apply bg-app-bg text-gray-900 antialiased;
+    @apply bg-background text-content antialiased;
     margin: 0;
   }
 
@@ -25,7 +65,7 @@
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: #374151 transparent;
+    scrollbar-color: rgb(var(--color-surface-2)) transparent;
   }
 
   /* Subtle, thin scrollbar that stays out of the way: a faint track and a light
@@ -35,7 +75,7 @@
     scrollbar-color: transparent transparent;
   }
   .scrollbar-subtle:hover {
-    scrollbar-color: #d1d5db transparent;
+    scrollbar-color: rgb(var(--color-divider)) transparent;
   }
   .scrollbar-subtle::-webkit-scrollbar {
     width: 6px;
@@ -49,10 +89,10 @@
     border-radius: 9999px;
   }
   .scrollbar-subtle:hover::-webkit-scrollbar-thumb {
-    background-color: #d1d5db;
+    background-color: rgb(var(--color-divider));
   }
   .scrollbar-subtle::-webkit-scrollbar-thumb:hover {
-    background-color: #9ca3af;
+    background-color: rgb(var(--color-subtle));
   }
 
   @keyframes slide-in {

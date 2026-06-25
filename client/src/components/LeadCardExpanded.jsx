@@ -20,7 +20,7 @@ function EditableField({ label, value, confidence, fieldKey, onSave }) {
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center gap-1.5">
-        <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+        <span className="text-xs font-medium text-muted uppercase tracking-wide">{label}</span>
         <ConfidenceMeter value={confidence} />
       </div>
       {editing ? (
@@ -35,9 +35,9 @@ function EditableField({ label, value, confidence, fieldKey, onSave }) {
       ) : (
         <button
           onClick={() => setEditing(true)}
-          className="text-sm text-left text-gray-800 hover:text-accent hover:bg-blue-50 px-1 py-0.5 rounded transition-colors min-h-[26px]"
+          className="text-sm text-left text-content hover:text-accent hover:bg-brand/10 px-1 py-0.5 rounded transition-colors min-h-[26px]"
         >
-          {value || <span className="text-gray-300 italic">—</span>}
+          {value || <span className="text-muted italic">—</span>}
         </button>
       )}
     </div>
@@ -46,10 +46,10 @@ function EditableField({ label, value, confidence, fieldKey, onSave }) {
 
 function Section({ title, icon: Icon, children }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 bg-gray-50">
-        <Icon size={15} className="text-gray-500" />
-        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
+        <Icon size={15} className="text-muted" />
+        <h3 className="text-sm font-semibold text-content">{title}</h3>
       </div>
       <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">{children}</div>
     </div>
@@ -97,18 +97,18 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
       {(lead.flag_urgent === 1 || lead.flag_needs_manager === 1 || lead.flag_duplicate_suspect === 1) && (
         <div className="space-y-2">
           {lead.flag_urgent === 1 && (
-            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-lg text-sm font-medium">
+            <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger px-4 py-2.5 rounded-lg text-sm font-medium">
               <Flame size={15} /> Urgent Lead — Immediate Follow-Up Required
-              {lead.flag_reason && <span className="font-normal text-red-500">— {lead.flag_reason}</span>}
+              {lead.flag_reason && <span className="font-normal text-danger">— {lead.flag_reason}</span>}
             </div>
           )}
           {lead.flag_needs_manager === 1 && (
-            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-lg text-sm font-medium">
+            <div className="flex items-center gap-2 bg-warning/10 border border-warning/30 text-warning px-4 py-2.5 rounded-lg text-sm font-medium">
               <AlertTriangle size={15} /> Needs Manager Attention
             </div>
           )}
           {lead.flag_duplicate_suspect === 1 && (
-            <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 text-purple-700 px-4 py-2.5 rounded-lg text-sm font-medium">
+            <div className="flex items-center gap-2 bg-brand/10 border border-brand/30 text-brand px-4 py-2.5 rounded-lg text-sm font-medium">
               <Copy size={15} /> Possible Duplicate Lead
             </div>
           )}
@@ -116,14 +116,14 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
       )}
 
       {/* Status + Summary */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Status</p>
+            <p className="text-xs text-muted uppercase tracking-wide font-medium mb-1">Status</p>
             <select
               value={lead.status}
               onChange={e => save('status', e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent"
+              className="text-sm border border-divider rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent"
             >
               {['new', 'contacted', 'appointment_set', 'sold', 'lost'].map(s => (
                 <option key={s} value={s}>
@@ -137,8 +137,8 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
 
         {lead.call_summary && (
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">AI Summary</p>
-            <p className="text-sm text-gray-700 leading-relaxed bg-blue-50 px-3 py-2 rounded-lg">
+            <p className="text-xs font-medium text-muted uppercase tracking-wide mb-1">AI Summary</p>
+            <p className="text-sm text-content leading-relaxed bg-brand/10 px-3 py-2 rounded-lg">
               {lead.call_summary}
             </p>
           </div>
@@ -196,16 +196,16 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
       {/* Appointment & Intent */}
       <Section title="Appointment & Intent" icon={Calendar}>
         <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Appt Set</p>
-          <span className={`text-sm font-medium ${lead.appointment_set ? 'text-green-600' : 'text-gray-400'}`}>
+          <p className="text-xs font-medium text-muted uppercase tracking-wide mb-1">Appt Set</p>
+          <span className={`text-sm font-medium ${lead.appointment_set ? 'text-success' : 'text-muted'}`}>
             {lead.appointment_set ? 'Yes' : 'No'}
           </span>
         </div>
         {field('Date', 'appointment_date', 'appointment_date_confidence')}
         {field('Time', 'appointment_time', 'appointment_time_confidence')}
         <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Intent</p>
-          <span className="text-sm text-gray-800 capitalize">{lead.customer_intent || '—'}</span>
+          <p className="text-xs font-medium text-muted uppercase tracking-wide mb-1">Intent</p>
+          <span className="text-sm text-content capitalize">{lead.customer_intent || '—'}</span>
         </div>
         {field('Visit Type', 'visit_type', 'visit_type_confidence')}
         {field('Lead Source', 'lead_source', 'lead_source_confidence')}
@@ -214,14 +214,14 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
 
       {/* Objections + Notes */}
       {(objections.length > 0 || notes.length > 0) && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div className="bg-surface rounded-xl border border-divider shadow-sm p-4 space-y-3">
           {objections.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Objections</p>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Objections</p>
               <ul className="space-y-1">
                 {objections.map((obj, i) => (
-                  <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                    <span className="text-red-400 mt-0.5">•</span>
+                  <li key={i} className="text-sm text-content flex items-start gap-2">
+                    <span className="text-danger mt-0.5">•</span>
                     {typeof obj === 'object' ? obj.objection || JSON.stringify(obj) : obj}
                   </li>
                 ))}
@@ -230,11 +230,11 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
           )}
           {notes.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Additional Notes</p>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Additional Notes</p>
               <ul className="space-y-1">
                 {notes.map((note, i) => (
-                  <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                    <span className="text-blue-400 mt-0.5">•</span>
+                  <li key={i} className="text-sm text-content flex items-start gap-2">
+                    <span className="text-brand mt-0.5">•</span>
                     {note}
                   </li>
                 ))}
@@ -246,10 +246,10 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
 
       {/* Raw Source */}
       {(lead.raw_transcript || lead.raw_image_path) && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
           <button
             onClick={() => setRawOpen(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-muted hover:bg-surface-2 transition-colors"
           >
             <div className="flex items-center gap-2">
               {lead.raw_transcript ? <FileText size={14} /> : <Image size={14} />}
@@ -258,16 +258,16 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
             {rawOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
           {rawOpen && (
-            <div className="px-4 pb-4 border-t border-gray-100">
+            <div className="px-4 pb-4 border-t border-divider">
               {lead.raw_transcript ? (
-                <pre className="text-xs text-gray-600 whitespace-pre-wrap bg-gray-50 rounded-lg p-3 mt-3 max-h-80 overflow-y-auto font-mono leading-relaxed">
+                <pre className="text-xs text-muted whitespace-pre-wrap bg-surface-2 rounded-lg p-3 mt-3 max-h-80 overflow-y-auto font-mono leading-relaxed">
                   {lead.raw_transcript}
                 </pre>
               ) : (
                 <img
                   src={lead.raw_image_path}
                   alt="Up sheet"
-                  className="mt-3 max-h-96 rounded-lg border border-gray-200"
+                  className="mt-3 max-h-96 rounded-lg border border-divider"
                 />
               )}
             </div>
@@ -276,7 +276,7 @@ export default function LeadCardExpanded({ lead: initialLead, onUpdate }) {
       )}
 
       {saving && (
-        <p className="text-xs text-center text-gray-400">Saving...</p>
+        <p className="text-xs text-center text-muted">Saving...</p>
       )}
     </div>
   );

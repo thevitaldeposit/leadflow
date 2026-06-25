@@ -9,8 +9,8 @@ const MIN_MESSAGE = 20;
 
 function Wordmark() {
   return (
-    <Link to="/" className="flex items-center gap-2 text-slate-900">
-      <AudioLines className="text-blue-600" size={24} strokeWidth={2.5} />
+    <Link to="/" className="flex items-center gap-2 text-content">
+      <AudioLines className="text-brand" size={24} strokeWidth={2.5} />
       <span className="text-lg font-bold tracking-tight">Stream</span>
     </Link>
   );
@@ -19,12 +19,12 @@ function Wordmark() {
 function Field({ label, optional, error, children }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium text-slate-700">
+      <label className="mb-1.5 block text-sm font-medium text-content">
         {label}
-        {optional && <span className="ml-1 font-normal text-slate-400">(optional)</span>}
+        {optional && <span className="ml-1 font-normal text-muted">(optional)</span>}
       </label>
       {children}
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
     </div>
   );
 }
@@ -46,8 +46,8 @@ export default function ContactPage() {
   };
 
   const inputClass = (name) =>
-    `w-full rounded-lg border px-4 py-2.5 text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-      errors[name] ? 'border-red-400' : 'border-slate-300'
+    `w-full rounded-lg border px-4 py-2.5 text-sm text-content transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand ${
+      errors[name] ? 'border-danger' : 'border-divider'
     }`;
 
   const validate = () => {
@@ -92,35 +92,35 @@ export default function ContactPage() {
   };
 
   return (
-    <div className="min-h-screen w-full overflow-y-auto bg-white text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
+    <div className="min-h-screen w-full overflow-y-auto bg-surface text-content">
+      <header className="border-b border-divider bg-surface">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
           <Wordmark />
-          <Link to="/" className="text-sm font-medium text-slate-500 transition-colors hover:text-slate-700">
+          <Link to="/" className="text-sm font-medium text-muted transition-colors hover:text-content">
             Back to home
           </Link>
         </div>
       </header>
 
       <main className="mx-auto max-w-xl px-6 py-12 sm:py-16">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Get in Touch</h1>
-        <p className="mt-3 text-lg leading-relaxed text-slate-600">
+        <h1 className="text-3xl font-bold tracking-tight text-content sm:text-4xl">Get in Touch</h1>
+        <p className="mt-3 text-lg leading-relaxed text-muted">
           Have a question or want to learn more about Stream? We'd love to hear from you.
         </p>
 
         {sent ? (
-          <div className="mt-8 flex items-start gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-6">
-            <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+          <div className="mt-8 flex items-start gap-3 rounded-2xl border border-brand/30 bg-brand/10 p-6">
+            <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-brand text-content">
               <Check size={14} strokeWidth={3} />
             </span>
             <div>
-              <p className="text-sm font-semibold text-slate-900">Thanks for reaching out!</p>
-              <p className="mt-1 text-sm leading-relaxed text-slate-600">
+              <p className="text-sm font-semibold text-content">Thanks for reaching out!</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted">
                 We'll get back to you within 1 business day.
               </p>
               <button
                 onClick={() => setSent(false)}
-                className="mt-3 text-sm font-medium text-blue-600 hover:text-blue-500"
+                className="mt-3 text-sm font-medium text-brand hover:text-brand"
               >
                 Send another message
               </button>
@@ -154,7 +154,7 @@ export default function ContactPage() {
               <select
                 value={form.subject}
                 onChange={(e) => setField('subject', e.target.value)}
-                className={`${inputClass('subject')} bg-white`}
+                className={`${inputClass('subject')} bg-surface`}
               >
                 <option value="">General Inquiry</option>
                 {SUBJECTS.map((s) => (
@@ -176,13 +176,13 @@ export default function ContactPage() {
             </Field>
 
             {submitError && (
-              <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{submitError}</div>
+              <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{submitError}</div>
             )}
 
             <button
               type="submit"
               disabled={sending}
-              className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+              className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-6 py-3 text-sm font-semibold text-content transition-colors hover:bg-brand disabled:opacity-50"
             >
               {sending ? (
                 <>
@@ -198,9 +198,9 @@ export default function ContactPage() {
           </form>
         )}
 
-        <p className="mt-8 text-sm text-slate-500">
+        <p className="mt-8 text-sm text-muted">
           Prefer email? Reach us at{' '}
-          <a href="mailto:info@joinstream.app" className="font-medium text-blue-600 hover:text-blue-500">
+          <a href="mailto:info@joinstream.app" className="font-medium text-brand hover:text-brand">
             info@joinstream.app
           </a>
         </p>

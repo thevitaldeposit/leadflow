@@ -30,8 +30,8 @@ function fmtDateTime(iso) {
 function ROField({ label, value }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
-      <span className="text-sm text-gray-800">{value || <span className="text-gray-300 italic">—</span>}</span>
+      <span className="text-xs font-medium text-muted uppercase tracking-wide">{label}</span>
+      <span className="text-sm text-content">{value || <span className="text-muted italic">—</span>}</span>
     </div>
   );
 }
@@ -62,15 +62,15 @@ export default function CustomerCallIntelligence({ jobId }) {
     return () => { active = false; };
   }, [jobId]);
 
-  if (loading) return <div className="px-5 py-4 text-sm text-gray-400">Loading call details…</div>;
-  if (error || !lead) return <div className="px-5 py-4 text-sm text-gray-400">{error || 'Call details unavailable.'}</div>;
+  if (loading) return <div className="px-5 py-4 text-sm text-muted">Loading call details…</div>;
+  if (error || !lead) return <div className="px-5 py-4 text-sm text-muted">{error || 'Call details unavailable.'}</div>;
 
   const vd = parseVerticalData(lead);
   const t = getTerminology(lead.vertical, getSubVertical(lead));
   const intent = vd.intentLevel ? (INTENT_LABELS[vd.intentLevel] || vd.intentLevel) : null;
 
   return (
-    <div className="px-5 py-4 space-y-4 bg-gray-50/60">
+    <div className="px-5 py-4 space-y-4 bg-surface-2/60">
       <BookingSignalsPanel
         autoBooked={lead.auto_booked === 1}
         bookingSignals={vd.bookingSignalsDetected || []}
@@ -80,7 +80,7 @@ export default function CustomerCallIntelligence({ jobId }) {
       {/* Industry fields + key dates + intent / urgency / follow-up (read-only;
           stored values, never recomputed). The industry fields self-hide when the
           call didn't capture them (e.g. non-dumpster verticals). */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
         {vd.dumpsterSize && <ROField label="Dumpster Size" value={vd.dumpsterSize} />}
         {vd.rentalDuration && <ROField label="Rental Duration" value={vd.rentalDuration} />}
         {vd.debrisType && <ROField label="Debris Type" value={vd.debrisType} />}
@@ -94,13 +94,13 @@ export default function CustomerCallIntelligence({ jobId }) {
 
       {/* AI Summary */}
       {lead.call_summary && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 bg-gray-50">
-            <Sparkles size={15} className="text-gray-500" />
-            <h3 className="text-sm font-semibold text-gray-700">AI Summary</h3>
+        <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
+            <Sparkles size={15} className="text-muted" />
+            <h3 className="text-sm font-semibold text-content">AI Summary</h3>
           </div>
           <div className="p-4">
-            <p className="text-sm text-gray-700 leading-relaxed bg-blue-50 px-3 py-2 rounded-lg">{lead.call_summary}</p>
+            <p className="text-sm text-content leading-relaxed bg-brand/10 px-3 py-2 rounded-lg">{lead.call_summary}</p>
           </div>
         </div>
       )}

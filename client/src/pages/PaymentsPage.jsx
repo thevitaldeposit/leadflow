@@ -24,8 +24,8 @@ const fmtTime = (iso) => {
 };
 
 const STATUS_BADGE = {
-  partially_refunded: { label: 'Partially refunded', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-  refunded: { label: 'Refunded', cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+  partially_refunded: { label: 'Partially refunded', cls: 'bg-warning/10 text-warning border-warning/30' },
+  refunded: { label: 'Refunded', cls: 'bg-surface-2 text-muted border-divider' },
 };
 
 // Group payments (already newest-first) into local-day buckets with friendly labels.
@@ -86,26 +86,26 @@ export default function PaymentsPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <div className="flex items-center gap-2">
-        <Wallet size={18} className="text-gray-500" />
-        <h1 className="text-lg font-bold text-gray-900">Payments</h1>
-        {!loading && <span className="text-sm text-gray-400">{payments.length}</span>}
+        <Wallet size={18} className="text-muted" />
+        <h1 className="text-lg font-bold text-content">Payments</h1>
+        {!loading && <span className="text-sm text-muted">{payments.length}</span>}
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center h-48"><div className="animate-spin w-6 h-6 border-2 border-accent border-t-transparent rounded-full" /></div>
       ) : error ? (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center text-sm text-red-500">{error}</div>
+        <div className="bg-surface rounded-xl border border-divider shadow-sm p-10 text-center text-sm text-danger">{error}</div>
       ) : data && !data.connected ? (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
-          <CreditCard size={28} className="text-gray-300 mx-auto mb-3" />
-          <p className="text-sm font-medium text-gray-700">Set up online payments to see transactions</p>
-          <p className="text-sm text-gray-400 mt-1 mb-4">Connect your Stripe account to accept card payments on invoices and manage refunds here.</p>
-          <Link to="/settings" className="inline-flex items-center gap-1.5 text-sm font-medium text-white bg-accent hover:bg-accent/90 px-4 py-2 rounded-lg">
+        <div className="bg-surface rounded-xl border border-divider shadow-sm p-10 text-center">
+          <CreditCard size={28} className="text-muted mx-auto mb-3" />
+          <p className="text-sm font-medium text-content">Set up online payments to see transactions</p>
+          <p className="text-sm text-muted mt-1 mb-4">Connect your Stripe account to accept card payments on invoices and manage refunds here.</p>
+          <Link to="/settings" className="inline-flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 px-4 py-2 rounded-lg">
             <ExternalLink size={14} /> Go to Settings
           </Link>
         </div>
       ) : payments.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center text-sm text-gray-400">
+        <div className="bg-surface rounded-xl border border-divider shadow-sm p-10 text-center text-sm text-muted">
           No payments yet. Card payments your customers make on invoices will appear here.
         </div>
       ) : (
@@ -113,39 +113,39 @@ export default function PaymentsPage() {
           {groups.map((g) => (
             <div key={g.key}>
               <div className="flex items-center justify-between px-1 mb-1.5">
-                <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">{g.label}</h2>
-                <span className="text-xs text-gray-400">{money(g.total)}</span>
+                <h2 className="text-xs font-bold text-muted uppercase tracking-wide">{g.label}</h2>
+                <span className="text-xs text-muted">{money(g.total)}</span>
               </div>
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden divide-y divide-gray-50">
+              <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden divide-y divide-divider">
                 {g.items.map((p) => {
                   const badge = STATUS_BADGE[p.status];
                   return (
                     <button
                       key={p.id}
                       onClick={() => navigate(`/payments/${p.id}`)}
-                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-2 transition-colors text-left"
                     >
-                      <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
-                        <CreditCard size={16} className="text-gray-500" />
+                      <div className="w-9 h-9 rounded-lg bg-surface-2 flex items-center justify-center flex-shrink-0">
+                        <CreditCard size={16} className="text-muted" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-gray-900 truncate">
+                          <p className="text-sm font-medium text-content truncate">
                             {p.customer_name || brandLabel(p.card_brand)}
                           </p>
                           {badge && (
                             <span className={`inline-flex items-center text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
                           )}
                         </div>
-                        <p className="text-xs text-gray-400 truncate">
+                        <p className="text-xs text-muted truncate">
                           {brandLabel(p.card_brand)}{p.card_last4 ? ` •••• ${p.card_last4}` : ''}{p.invoice_number ? ` · ${p.invoice_number}` : ''}
                         </p>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-semibold text-gray-900">{money(p.amount, p.currency)}</p>
-                        <p className="text-xs text-gray-400">{fmtTime(p.created)}</p>
+                        <p className="text-sm font-semibold text-content">{money(p.amount, p.currency)}</p>
+                        <p className="text-xs text-muted">{fmtTime(p.created)}</p>
                       </div>
-                      <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
+                      <ChevronRight size={16} className="text-muted flex-shrink-0" />
                     </button>
                   );
                 })}

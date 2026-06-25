@@ -43,8 +43,8 @@ function formatPickup(iso) {
 function Field({ label, required, children, span2 }) {
   return (
     <div className={`flex flex-col gap-1 ${span2 ? 'sm:col-span-2' : ''}`}>
-      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-        {label} {required && <span className="text-red-500">*</span>}
+      <label className="text-xs font-medium text-muted uppercase tracking-wide">
+        {label} {required && <span className="text-danger">*</span>}
       </label>
       {children}
     </div>
@@ -52,14 +52,14 @@ function Field({ label, required, children, span2 }) {
 }
 
 const inputCls =
-  'w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white';
+  'w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-surface';
 
 function SectionCard({ title, icon: Icon, children }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 bg-gray-50">
-        <Icon size={15} className="text-gray-500" />
-        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
+        <Icon size={15} className="text-muted" />
+        <h3 className="text-sm font-semibold text-content">{title}</h3>
       </div>
       <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
         {children}
@@ -140,8 +140,8 @@ export default function ManualLeadForm() {
   return (
     <div className="max-w-3xl space-y-5">
       <div>
-        <h2 className="text-lg font-bold text-gray-900">New Lead — Manual Entry</h2>
-        <p className="text-sm text-gray-500 mt-0.5">
+        <h2 className="text-lg font-bold text-content">New Lead — Manual Entry</h2>
+        <p className="text-sm text-muted mt-0.5">
           Add a customer who walked in, texted, emailed, or was booked directly. Only name, phone,
           and one job detail are required.
         </p>
@@ -184,8 +184,8 @@ export default function ManualLeadForm() {
           <input className={inputCls} type="number" min="1" value={form.rentalDuration} onChange={set('rentalDuration')} placeholder="e.g. 7" />
         </Field>
         <Field label={t.endDate}>
-          <div className="text-sm text-gray-600 px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg min-h-[38px] flex items-center">
-            {pickupISO ? formatPickup(pickupISO) : <span className="text-gray-400 italic">Set date + duration to calculate</span>}
+          <div className="text-sm text-muted px-3 py-2 bg-surface-2 border border-divider rounded-lg min-h-[38px] flex items-center">
+            {pickupISO ? formatPickup(pickupISO) : <span className="text-muted italic">Set date + duration to calculate</span>}
           </div>
         </Field>
         <Field label={t.addressLabel} span2>
@@ -200,7 +200,7 @@ export default function ManualLeadForm() {
       <SectionCard title="Quote / Payment" icon={DollarSign}>
         <Field label="Price">
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">$</span>
             <input className={`${inputCls} pl-6`} type="number" min="0" step="1" value={form.price} onChange={set('price')} placeholder="0" />
           </div>
         </Field>
@@ -230,7 +230,7 @@ export default function ManualLeadForm() {
       </SectionCard>
 
       {error && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
+        <p className="text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">{error}</p>
       )}
 
       {/* Save options */}
@@ -238,19 +238,19 @@ export default function ManualLeadForm() {
         <button
           onClick={() => submit(false)}
           disabled={!isValid || submitting}
-          className="flex items-center gap-1.5 text-sm font-medium text-white bg-accent hover:opacity-90 disabled:bg-gray-300 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
+          className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:opacity-90 disabled:bg-surface-2 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
         >
           <Save size={15} /> Save as Lead
         </button>
         <button
           onClick={() => submit(true)}
           disabled={!isValid || submitting}
-          className="flex items-center gap-1.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
+          className="flex items-center gap-1.5 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
         >
           <CheckCircle2 size={15} /> Book Job
         </button>
         {!isValid && (
-          <span className="text-xs text-gray-400">Name, phone, and one job detail required.</span>
+          <span className="text-xs text-muted">Name, phone, and one job detail required.</span>
         )}
       </div>
     </div>

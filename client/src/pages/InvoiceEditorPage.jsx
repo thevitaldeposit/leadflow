@@ -4,8 +4,8 @@ import { ArrowLeft, Plus, Trash2, Check, X, ChevronDown } from 'lucide-react';
 import { api } from '../utils/api';
 import { INVOICE_LINE_TYPES } from '../utils/verticalConfig';
 
-const inputCls = 'w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent';
-const labelCls = 'block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1';
+const inputCls = 'w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent';
+const labelCls = 'block text-xs font-medium text-muted uppercase tracking-wide mb-1';
 
 const money = (n) => {
   const v = Number(n);
@@ -24,9 +24,9 @@ function emptyLine(extra = {}) {
 
 function Card({ title, children, action }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
-        <h2 className="text-sm font-bold text-gray-800">{title}</h2>
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between">
+        <h2 className="text-sm font-bold text-content">{title}</h2>
         {action}
       </div>
       {children}
@@ -175,7 +175,7 @@ export default function InvoiceEditorPage() {
     return (
       <div className="max-w-3xl mx-auto">
         <Link to="/invoices" className="text-sm text-accent inline-flex items-center gap-1"><ArrowLeft size={14} /> Invoices</Link>
-        <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-sm text-gray-400 mt-4">{error}</div>
+        <div className="bg-surface rounded-xl border border-divider p-10 text-center text-sm text-muted mt-4">{error}</div>
       </div>
     );
   }
@@ -185,7 +185,7 @@ export default function InvoiceEditorPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <Link to={backLink} className="text-sm text-accent inline-flex items-center gap-1 hover:underline"><ArrowLeft size={14} /> Back</Link>
-      <h1 className="text-xl font-bold text-gray-900">{isEdit ? 'Edit Invoice' : 'New Invoice'}</h1>
+      <h1 className="text-xl font-bold text-content">{isEdit ? 'Edit Invoice' : 'New Invoice'}</h1>
 
       {/* Bill-to + dates */}
       <Card title="Bill To">
@@ -210,11 +210,11 @@ export default function InvoiceEditorPage() {
                   Add from rates <ChevronDown size={13} />
                 </button>
                 {showRates && (
-                  <div className="absolute right-0 top-6 z-10 w-56 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+                  <div className="absolute right-0 top-6 z-10 w-56 max-h-64 overflow-y-auto bg-surface border border-divider rounded-lg shadow-lg py-1">
                     {rates.map((r) => (
-                      <button key={r.service_key} onClick={() => addFromRate(r)} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex justify-between gap-2">
-                        <span className="text-gray-700 truncate">{r.label}</span>
-                        <span className="text-gray-400">{r.effective_price != null ? money(r.effective_price) : '—'}</span>
+                      <button key={r.service_key} onClick={() => addFromRate(r)} className="w-full text-left px-3 py-2 text-sm hover:bg-surface-2 flex justify-between gap-2">
+                        <span className="text-content truncate">{r.label}</span>
+                        <span className="text-muted">{r.effective_price != null ? money(r.effective_price) : '—'}</span>
                       </button>
                     ))}
                   </div>
@@ -227,40 +227,40 @@ export default function InvoiceEditorPage() {
       >
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
+            <thead className="bg-surface-2 border-b border-divider">
               <tr>
-                <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
-                <th className="text-left px-2 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide w-28">Type</th>
-                <th className="text-right px-2 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">Qty</th>
-                <th className="text-left px-2 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">Unit</th>
-                <th className="text-right px-2 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide w-24">Rate</th>
-                <th className="text-right px-2 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide w-24">Amount</th>
+                <th className="text-left px-4 py-2 text-xs font-semibold text-muted uppercase tracking-wide">Description</th>
+                <th className="text-left px-2 py-2 text-xs font-semibold text-muted uppercase tracking-wide w-28">Type</th>
+                <th className="text-right px-2 py-2 text-xs font-semibold text-muted uppercase tracking-wide w-16">Qty</th>
+                <th className="text-left px-2 py-2 text-xs font-semibold text-muted uppercase tracking-wide w-20">Unit</th>
+                <th className="text-right px-2 py-2 text-xs font-semibold text-muted uppercase tracking-wide w-24">Rate</th>
+                <th className="text-right px-2 py-2 text-xs font-semibold text-muted uppercase tracking-wide w-24">Amount</th>
                 <th className="w-8"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-divider">
               {lines.map((l, i) => (
                 <tr key={i}>
                   <td className="px-4 py-2">
-                    <input className="w-full min-w-[10rem] text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.description} onChange={(e) => setLine(i, 'description', e.target.value)} placeholder="Description" />
+                    <input className="w-full min-w-[10rem] text-sm border border-divider rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.description} onChange={(e) => setLine(i, 'description', e.target.value)} placeholder="Description" />
                   </td>
                   <td className="px-2 py-2">
-                    <select className="w-full text-sm border border-gray-200 rounded px-1.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.line_type} onChange={(e) => setLine(i, 'line_type', e.target.value)}>
+                    <select className="w-full text-sm border border-divider rounded px-1.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.line_type} onChange={(e) => setLine(i, 'line_type', e.target.value)}>
                       {INVOICE_LINE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
                   </td>
                   <td className="px-2 py-2">
-                    <input type="number" step="any" className="w-full text-sm text-right border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} />
+                    <input type="number" step="any" className="w-full text-sm text-right border border-divider rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.quantity} onChange={(e) => setLine(i, 'quantity', e.target.value)} />
                   </td>
                   <td className="px-2 py-2">
-                    <input className="w-full text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.unit} onChange={(e) => setLine(i, 'unit', e.target.value)} placeholder="ea" />
+                    <input className="w-full text-sm border border-divider rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.unit} onChange={(e) => setLine(i, 'unit', e.target.value)} placeholder="ea" />
                   </td>
                   <td className="px-2 py-2">
-                    <input type="number" step="any" className="w-full text-sm text-right border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.unit_rate} onChange={(e) => setLine(i, 'unit_rate', e.target.value)} placeholder="0.00" />
+                    <input type="number" step="any" className="w-full text-sm text-right border border-divider rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.unit_rate} onChange={(e) => setLine(i, 'unit_rate', e.target.value)} placeholder="0.00" />
                   </td>
-                  <td className="px-2 py-2 text-right text-gray-700 whitespace-nowrap">{money(num(l.quantity, 0) * num(l.unit_rate, 0))}</td>
+                  <td className="px-2 py-2 text-right text-content whitespace-nowrap">{money(num(l.quantity, 0) * num(l.unit_rate, 0))}</td>
                   <td className="px-2 py-2 text-center">
-                    <button onClick={() => removeLine(i)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                    <button onClick={() => removeLine(i)} className="text-muted hover:text-danger"><Trash2 size={14} /></button>
                   </td>
                 </tr>
               ))}
@@ -269,16 +269,16 @@ export default function InvoiceEditorPage() {
         </div>
 
         {/* Totals */}
-        <div className="border-t border-gray-100 px-5 py-4">
+        <div className="border-t border-divider px-5 py-4">
           <div className="ml-auto w-full max-w-xs space-y-1.5">
-            <div className="flex justify-between text-sm text-gray-500"><span>Subtotal</span><span>{money(subtotal)}</span></div>
-            <div className="flex justify-between items-center text-sm text-gray-500">
+            <div className="flex justify-between text-sm text-muted"><span>Subtotal</span><span>{money(subtotal)}</span></div>
+            <div className="flex justify-between items-center text-sm text-muted">
               <span className="flex items-center gap-1.5">Tax
-                <input type="number" step="any" className="w-16 text-xs text-right border border-gray-200 rounded px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-accent" value={form.tax_rate} onChange={(e) => set('tax_rate', e.target.value)} />%
+                <input type="number" step="any" className="w-16 text-xs text-right border border-divider rounded px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-accent" value={form.tax_rate} onChange={(e) => set('tax_rate', e.target.value)} />%
               </span>
               <span>{money(taxAmount)}</span>
             </div>
-            <div className="flex justify-between text-base font-bold text-gray-900 pt-2 border-t border-gray-100"><span>Total</span><span>{money(total)}</span></div>
+            <div className="flex justify-between text-base font-bold text-content pt-2 border-t border-divider"><span>Total</span><span>{money(total)}</span></div>
           </div>
         </div>
       </Card>
@@ -294,11 +294,11 @@ export default function InvoiceEditorPage() {
           and signs is resolved by business type on the public invoice page (see
           server getEffectiveContractText), so there's nothing to enter per invoice. */}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pb-4">
-        <button onClick={() => navigate(backLink)} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 px-4 py-2 rounded-lg"><X size={14} /> Cancel</button>
-        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-white bg-accent hover:bg-accent/90 disabled:opacity-50 px-5 py-2 rounded-lg">
+        <button onClick={() => navigate(backLink)} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-4 py-2 rounded-lg"><X size={14} /> Cancel</button>
+        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-5 py-2 rounded-lg">
           <Check size={14} /> {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Create invoice')}
         </button>
       </div>

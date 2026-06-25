@@ -35,11 +35,12 @@ const INDUSTRIES = [
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Stripe Elements appearance — tuned to the blue accent used across the app.
+// Stripe Elements appearance — dark theme matched to the app's design tokens.
 const STRIPE_APPEARANCE = {
-  theme: 'stripe',
+  theme: 'night',
   variables: {
-    colorPrimary: '#2563eb',
+    colorPrimary: '#2575ed',      // --color-brand
+    colorBackground: '#1b2937',   // --color-surface-2
     borderRadius: '8px',
     fontSizeBase: '14px',
     fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -48,8 +49,8 @@ const STRIPE_APPEARANCE = {
 
 function Wordmark() {
   return (
-    <Link to="/" className="flex items-center gap-2 text-slate-900">
-      <AudioLines className="text-blue-600" size={24} strokeWidth={2.5} />
+    <Link to="/" className="flex items-center gap-2 text-content">
+      <AudioLines className="text-brand" size={24} strokeWidth={2.5} />
       <span className="text-lg font-bold tracking-tight">Stream</span>
     </Link>
   );
@@ -63,7 +64,7 @@ function StepBar({ step }) {
         <div
           key={i}
           className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${
-            i < step ? 'bg-blue-600' : 'bg-slate-200'
+            i < step ? 'bg-brand' : 'bg-surface-2'
           }`}
         />
       ))}
@@ -74,9 +75,9 @@ function StepBar({ step }) {
 function Field({ label, error, children }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
+      <label className="mb-1.5 block text-sm font-medium text-content">{label}</label>
       {children}
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
     </div>
   );
 }
@@ -219,22 +220,22 @@ function CalendlyEmbed({ name, email, onScheduled }) {
       />
 
       {status === 'loading' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-xl bg-white">
-          <Loader2 size={22} className="animate-spin text-blue-600" />
-          <p className="text-sm text-slate-500">Loading scheduler…</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-xl bg-surface">
+          <Loader2 size={22} className="animate-spin text-brand" />
+          <p className="text-sm text-muted">Loading scheduler…</p>
         </div>
       )}
 
       {status === 'failed' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-6 text-center">
-          <p className="max-w-xs text-sm text-slate-600">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-xl border border-divider bg-surface-2 px-6 text-center">
+          <p className="max-w-xs text-sm text-muted">
             We couldn't load the scheduler here — it may be blocked by your browser.
           </p>
           <a
             href={CALENDLY_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-content transition-colors hover:bg-brand"
           >
             Open the booking page <ArrowRight size={15} />
           </a>
@@ -299,13 +300,13 @@ function PaymentForm({ onComplete, onBack }) {
       <PaymentElement options={{ layout: 'tabs' }} />
 
       {error && (
-        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>
       )}
 
       <button
         type="submit"
         disabled={!stripe || processing}
-        className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+        className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-6 py-3 text-sm font-semibold text-content transition-colors hover:bg-brand disabled:opacity-50"
       >
         {processing ? (
           <>
@@ -323,22 +324,22 @@ function PaymentForm({ onComplete, onBack }) {
         type="button"
         onClick={onBack}
         disabled={processing}
-        className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+        className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-muted hover:text-content disabled:opacity-50"
       >
         <ArrowLeft size={15} /> Back
       </button>
 
-      <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+      <p className="flex items-center justify-center gap-1.5 text-xs text-muted">
         <Lock size={12} /> Secured by Stripe · cancel anytime
       </p>
 
-      <p className="text-center text-xs leading-relaxed text-slate-400">
+      <p className="text-center text-xs leading-relaxed text-muted">
         By subscribing you agree to our{' '}
-        <Link to="/terms" target="_blank" className="font-medium text-slate-500 hover:text-slate-700">
+        <Link to="/terms" target="_blank" className="font-medium text-muted hover:text-content">
           Terms of Service
         </Link>{' '}
         and{' '}
-        <Link to="/privacy" target="_blank" className="font-medium text-slate-500 hover:text-slate-700">
+        <Link to="/privacy" target="_blank" className="font-medium text-muted hover:text-content">
           Privacy Policy
         </Link>
         .
@@ -370,19 +371,19 @@ function FreeCheckout({ onComplete, onBack }) {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-lg bg-green-50 px-3 py-2.5 text-sm text-green-700">
+      <div className="rounded-lg bg-success/10 px-3 py-2.5 text-sm text-success">
         No payment due today — your promo code covers your subscription.
       </div>
 
       {error && (
-        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>
       )}
 
       <button
         type="button"
         onClick={handleConfirm}
         disabled={processing}
-        className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+        className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-6 py-3 text-sm font-semibold text-content transition-colors hover:bg-brand disabled:opacity-50"
       >
         {processing ? (
           <>
@@ -400,12 +401,12 @@ function FreeCheckout({ onComplete, onBack }) {
         type="button"
         onClick={onBack}
         disabled={processing}
-        className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+        className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-muted hover:text-content disabled:opacity-50"
       >
         <ArrowLeft size={15} /> Back
       </button>
 
-      <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+      <p className="flex items-center justify-center gap-1.5 text-xs text-muted">
         <Lock size={12} /> Secured by Stripe · cancel anytime
       </p>
     </div>
@@ -488,8 +489,8 @@ export default function SignupPage() {
   };
 
   const inputClass = (name) =>
-    `w-full rounded-lg border px-4 py-2.5 text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-      errors[name] ? 'border-red-400' : 'border-slate-300'
+    `w-full rounded-lg border px-4 py-2.5 text-sm text-content transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand ${
+      errors[name] ? 'border-danger' : 'border-divider'
     }`;
 
   // Step 1 → 2
@@ -589,7 +590,7 @@ export default function SignupPage() {
   const containerWidth = step === 4 ? 'max-w-2xl' : 'max-w-lg';
 
   return (
-    <div className="min-h-screen w-full overflow-y-auto bg-slate-50">
+    <div className="min-h-screen w-full overflow-y-auto bg-surface-2">
       <style>{`
         @keyframes signup-step-in {
           from { opacity: 0; transform: translateY(8px); }
@@ -598,10 +599,10 @@ export default function SignupPage() {
         .signup-step { animation: signup-step-in 0.28s ease-out; }
       `}</style>
 
-      <header className="border-b border-slate-200 bg-white">
+      <header className="border-b border-divider bg-surface">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <Wordmark />
-          <span className="text-sm text-slate-500">Step {step} of {TOTAL_STEPS}</span>
+          <span className="text-sm text-muted">Step {step} of {TOTAL_STEPS}</span>
         </div>
       </header>
 
@@ -612,9 +613,9 @@ export default function SignupPage() {
           <div key={step} className="signup-step mt-6">
             {/* ── Step 1 — Account Info ─────────────────────────────────── */}
             {step === 1 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
-                <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create your account</h1>
-                <p className="mt-1.5 text-sm text-slate-600">Let's get you set up with Stream.</p>
+              <div className="rounded-2xl border border-divider bg-surface p-7 shadow-sm">
+                <h1 className="text-2xl font-bold tracking-tight text-content">Create your account</h1>
+                <p className="mt-1.5 text-sm text-muted">Let's get you set up with Stream.</p>
 
                 <form onSubmit={submitAccount} className="mt-6 space-y-5">
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -676,16 +677,16 @@ export default function SignupPage() {
 
                   <button
                     type="submit"
-                    className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                    className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-6 py-3 text-sm font-semibold text-content transition-colors hover:bg-brand"
                   >
                     Next
                     <ArrowRight size={17} className="transition-transform group-hover:translate-x-0.5" />
                   </button>
                 </form>
 
-                <p className="mt-5 text-center text-sm text-slate-500">
+                <p className="mt-5 text-center text-sm text-muted">
                   Already have an account?{' '}
-                  <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
+                  <Link to="/login" className="font-medium text-brand hover:text-brand">
                     Sign in
                   </Link>
                 </p>
@@ -694,13 +695,13 @@ export default function SignupPage() {
 
             {/* ── Step 2 — Your Business ────────────────────────────────── */}
             {step === 2 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
-                <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tell us about your business</h1>
-                <p className="mt-1.5 text-sm text-slate-600">This tailors Stream to how you work.</p>
+              <div className="rounded-2xl border border-divider bg-surface p-7 shadow-sm">
+                <h1 className="text-2xl font-bold tracking-tight text-content">Tell us about your business</h1>
+                <p className="mt-1.5 text-sm text-muted">This tailors Stream to how you work.</p>
 
                 <form onSubmit={submitBusiness} className="mt-6 space-y-5">
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Industry type</label>
+                    <label className="mb-2 block text-sm font-medium text-content">Industry type</label>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {INDUSTRIES.map(({ id, Icon }) => {
                         const selected = form.industryType === id;
@@ -711,19 +712,19 @@ export default function SignupPage() {
                             onClick={() => setField('industryType', id)}
                             className={`flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-center transition-all ${
                               selected
-                                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/30'
-                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                                ? 'border-brand bg-brand/10 ring-2 ring-brand/30'
+                                : 'border-divider bg-surface hover:border-divider hover:bg-surface-2'
                             }`}
                           >
-                            <Icon size={22} className={selected ? 'text-blue-600' : 'text-slate-400'} />
-                            <span className={`text-xs font-medium ${selected ? 'text-blue-700' : 'text-slate-600'}`}>
+                            <Icon size={22} className={selected ? 'text-brand' : 'text-muted'} />
+                            <span className={`text-xs font-medium ${selected ? 'text-brand' : 'text-muted'}`}>
                               {id}
                             </span>
                           </button>
                         );
                       })}
                     </div>
-                    {errors.industryType && <p className="mt-1.5 text-xs text-red-600">{errors.industryType}</p>}
+                    {errors.industryType && <p className="mt-1.5 text-xs text-danger">{errors.industryType}</p>}
                   </div>
 
                   {/* Business name appears once an industry is chosen. */}
@@ -744,13 +745,13 @@ export default function SignupPage() {
                   )}
 
                   {prepError && (
-                    <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{prepError}</div>
+                    <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{prepError}</div>
                   )}
 
                   <button
                     type="submit"
                     disabled={preparing}
-                    className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+                    className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-6 py-3 text-sm font-semibold text-content transition-colors hover:bg-brand disabled:opacity-50"
                   >
                     {preparing ? (
                       <>
@@ -768,7 +769,7 @@ export default function SignupPage() {
                     type="button"
                     onClick={() => setStep(1)}
                     disabled={preparing}
-                    className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                    className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-medium text-muted hover:text-content disabled:opacity-50"
                   >
                     <ArrowLeft size={15} /> Back
                   </button>
@@ -778,23 +779,23 @@ export default function SignupPage() {
 
             {/* ── Step 3 — Payment ──────────────────────────────────────── */}
             {step === 3 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
-                <h1 className="text-2xl font-bold tracking-tight text-slate-900">Payment</h1>
-                <p className="mt-1.5 text-sm text-slate-600">Start your subscription to activate Stream.</p>
+              <div className="rounded-2xl border border-divider bg-surface p-7 shadow-sm">
+                <h1 className="text-2xl font-bold tracking-tight text-content">Payment</h1>
+                <p className="mt-1.5 text-sm text-muted">Start your subscription to activate Stream.</p>
 
                 {/* Order summary */}
-                <div className="mt-6 flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5">
+                <div className="mt-6 flex items-start justify-between gap-4 rounded-xl border border-divider bg-surface-2 px-4 py-3.5">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">Stream — {PRICE_LABEL}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">Full access to your operations dashboard.</p>
+                    <p className="text-sm font-semibold text-content">Stream — {PRICE_LABEL}</p>
+                    <p className="mt-0.5 text-xs text-muted">Full access to your operations dashboard.</p>
                   </div>
-                  <p className="whitespace-nowrap text-base font-bold text-slate-900">$149</p>
+                  <p className="whitespace-nowrap text-base font-bold text-content">$149</p>
                 </div>
 
                 {/* Promo code — optional. Validating re-creates the subscription
                     with the discount applied. */}
                 <div className="mt-4">
-                  <label htmlFor="promoCode" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  <label htmlFor="promoCode" className="mb-1.5 block text-sm font-medium text-content">
                     Promo Code
                   </label>
                   <div className="flex gap-2">
@@ -808,25 +809,25 @@ export default function SignupPage() {
                       }}
                       disabled={!!promo || promoApplying}
                       placeholder="Enter promo code"
-                      className={`w-full rounded-lg border px-4 py-2.5 text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-500 ${
-                        promoError ? 'border-red-400' : 'border-slate-300'
+                      className={`w-full rounded-lg border px-4 py-2.5 text-sm text-content transition-colors focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand disabled:bg-surface-2 disabled:text-muted ${
+                        promoError ? 'border-danger' : 'border-divider'
                       }`}
                     />
                     <button
                       type="button"
                       onClick={applyPromo}
                       disabled={!!promo || promoApplying || !promoInput.trim()}
-                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-divider bg-surface px-5 py-2.5 text-sm font-semibold text-content transition-colors hover:bg-surface-2 disabled:opacity-50"
                     >
                       {promoApplying ? <Loader2 size={15} className="animate-spin" /> : 'Apply'}
                     </button>
                   </div>
                   {promo && (
-                    <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-green-600">
+                    <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-success">
                       <Check size={13} /> {promo.discount} applied
                     </p>
                   )}
-                  {promoError && <p className="mt-1.5 text-xs text-red-600">{promoError}</p>}
+                  {promoError && <p className="mt-1.5 text-xs text-danger">{promoError}</p>}
                 </div>
 
                 <div className="mt-6">
@@ -841,7 +842,7 @@ export default function SignupPage() {
                       <PaymentForm onComplete={finishSignup} onBack={() => setStep(2)} />
                     </Elements>
                   ) : (
-                    <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+                    <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted">
                       <Loader2 size={16} className="animate-spin" /> Loading secure checkout…
                     </div>
                   )}
@@ -851,15 +852,15 @@ export default function SignupPage() {
 
             {/* ── Step 4 — Schedule Setup Call ──────────────────────────── */}
             {step === 4 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+              <div className="rounded-2xl border border-divider bg-surface p-7 shadow-sm">
                 <div className="text-center">
-                  <h1 className="text-2xl font-bold tracking-tight text-slate-900">You're in! 🎉</h1>
-                  <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+                  <h1 className="text-2xl font-bold tracking-tight text-content">You're in! 🎉</h1>
+                  <p className="mx-auto mt-2 max-w-md text-sm text-muted">
                     Schedule your setup call to activate your advanced booking and extraction features.
                   </p>
                 </div>
 
-                <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
+                <div className="mt-6 overflow-hidden rounded-xl border border-divider">
                   <CalendlyEmbed
                     name={`${form.firstName} ${form.lastName}`.trim()}
                     email={form.email.trim()}
@@ -870,7 +871,7 @@ export default function SignupPage() {
                 <div className="mt-5 text-center">
                   <button
                     onClick={goToDashboard}
-                    className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-muted transition-colors hover:text-content"
                   >
                     Skip for now <ArrowRight size={15} />
                   </button>
@@ -880,8 +881,8 @@ export default function SignupPage() {
           </div>
 
           {step === 4 && (
-            <div className="mt-5 flex items-center justify-center gap-2 text-center text-sm text-slate-500">
-              <Check size={15} className="flex-shrink-0 text-blue-600" />
+            <div className="mt-5 flex items-center justify-center gap-2 text-center text-sm text-muted">
+              <Check size={15} className="flex-shrink-0 text-brand" />
               We'll walk you through everything on a quick 30-minute call.
             </div>
           )}

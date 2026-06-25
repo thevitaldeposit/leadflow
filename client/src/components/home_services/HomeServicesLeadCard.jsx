@@ -61,12 +61,12 @@ export default function HomeServicesLeadCard({ lead, onChange }) {
   return (
     <div
       onClick={() => navigate(`/leads/${lead.id}`)}
-      className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 cursor-pointer hover:shadow-md hover:border-gray-200 transition-all flex flex-col gap-3"
+      className="bg-surface rounded-xl shadow-sm border border-divider p-4 cursor-pointer hover:shadow-md hover:border-divider transition-all flex flex-col gap-3"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="font-semibold text-gray-900 truncate">{fullName}</h3>
-          <p className="text-sm text-gray-600 truncate">{subtitle}</p>
+          <h3 className="font-semibold text-content truncate">{fullName}</h3>
+          <p className="text-sm text-muted truncate">{subtitle}</p>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap justify-end flex-shrink-0">
           {lead.call_type === 'voicemail' && <VoicemailBadge />}
@@ -77,12 +77,12 @@ export default function HomeServicesLeadCard({ lead, onChange }) {
         </div>
       </div>
 
-      <div className="flex items-start gap-1.5 text-xs text-gray-600 leading-relaxed">
+      <div className="flex items-start gap-1.5 text-xs text-muted leading-relaxed">
         <Sparkles size={12} className="text-accent mt-0.5 flex-shrink-0" />
         <span className="line-clamp-2">{state.recommendation}</span>
       </div>
 
-      <div className="flex items-center justify-between text-xs text-gray-400">
+      <div className="flex items-center justify-between text-xs text-muted">
         <div className="flex items-center gap-1.5">
           <Clock size={11} />
           <span>{timeAgo(lead.created_at)}</span>
@@ -90,25 +90,25 @@ export default function HomeServicesLeadCard({ lead, onChange }) {
         <HomeServicesStatusBadge status={lead.status} />
       </div>
 
-      <div className="flex items-center gap-1.5 pt-1 border-t border-gray-100">
+      <div className="flex items-center gap-1.5 pt-1 border-t border-divider">
         <button
           onClick={markBooked}
           disabled={busy}
-          className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 px-2 py-1.5 rounded-md transition-colors"
+          className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-success bg-success/10 hover:bg-success/10 disabled:opacity-50 px-2 py-1.5 rounded-md transition-colors"
         >
           <CheckCircle2 size={12} /> Booked
         </button>
         <button
           onClick={setFollowUp}
           disabled={busy}
-          className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 px-2 py-1.5 rounded-md transition-colors"
+          className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-warning bg-warning/10 hover:bg-warning/10 disabled:opacity-50 px-2 py-1.5 rounded-md transition-colors"
         >
           <Clock size={12} /> Follow Up
         </button>
         <button
           onClick={markLost}
           disabled={busy}
-          className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 disabled:opacity-50 px-2 py-1.5 rounded-md transition-colors"
+          className="flex-1 flex items-center justify-center gap-1 text-xs font-medium text-muted bg-surface-2 hover:bg-surface-2 disabled:opacity-50 px-2 py-1.5 rounded-md transition-colors"
         >
           <XCircle size={12} /> Lost
         </button>

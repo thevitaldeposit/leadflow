@@ -44,7 +44,7 @@ export default function ResetPasswordPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-app-bg p-4">
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm p-8">
+      <div className="w-full max-w-sm bg-surface rounded-2xl shadow-sm p-8">
         <div className="flex items-center justify-center gap-2 mb-6">
           <Zap size={24} className="text-accent" />
           <span className="font-bold text-xl tracking-tight">Stream</span>
@@ -52,26 +52,26 @@ export default function ResetPasswordPage() {
 
         {done ? (
           <>
-            <h1 className="text-lg font-semibold text-center text-gray-900">
+            <h1 className="text-lg font-semibold text-center text-content">
               Your password has been reset.
             </h1>
             <Link
               to="/login"
-              className="mt-6 block w-full py-2.5 rounded-lg bg-accent text-white font-medium text-sm text-center hover:opacity-90 transition-opacity"
+              className="mt-6 block w-full py-2.5 rounded-lg bg-accent text-content font-medium text-sm text-center hover:opacity-90 transition-opacity"
             >
               Go to login
             </Link>
           </>
         ) : (
           <>
-            <h1 className="text-lg font-semibold text-center text-gray-900">Choose a new password</h1>
-            <p className="text-sm text-gray-500 text-center mb-6">
+            <h1 className="text-lg font-semibold text-center text-content">Choose a new password</h1>
+            <p className="text-sm text-muted text-center mb-6">
               Enter a new password for your account.
             </p>
 
             <form onSubmit={onSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">New password</label>
+                <label className="block text-sm font-medium text-content mb-1">New password</label>
                 <input
                   type="password"
                   required
@@ -79,11 +79,11 @@ export default function ResetPasswordPage() {
                   minLength={8}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                  className="w-full px-3 py-2 border border-divider rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-content mb-1">
                   Confirm new password
                 </label>
                 <input
@@ -92,12 +92,12 @@ export default function ResetPasswordPage() {
                   minLength={8}
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                  className="w-full px-3 py-2 border border-divider rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
 
               {error && (
-                <div className="text-sm text-red-600">
+                <div className="text-sm text-danger">
                   {error}{' '}
                   <Link to="/forgot-password" className="font-medium underline hover:opacity-80">
                     Request a new link
@@ -108,7 +108,7 @@ export default function ResetPasswordPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-2.5 rounded-lg bg-accent text-white font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+                className="w-full py-2.5 rounded-lg bg-accent text-content font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
               >
                 {submitting ? 'Resetting…' : 'Reset Password'}
               </button>

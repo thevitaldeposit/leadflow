@@ -68,25 +68,25 @@ export default function BillingPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-4">
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-6">
         <div className="flex items-center gap-2 mb-1">
           <CreditCard size={18} className="text-accent" />
-          <h2 className="text-base font-semibold text-gray-800">Billing &amp; Subscription</h2>
+          <h2 className="text-base font-semibold text-content">Billing &amp; Subscription</h2>
         </div>
-        <p className="text-xs text-gray-500 mb-6">
+        <p className="text-xs text-muted mb-6">
           Stream is {PRICE_LABEL}. Manage your subscription and payment method here.
         </p>
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-gray-400 py-8 justify-center">
+          <div className="flex items-center gap-2 text-sm text-muted py-8 justify-center">
             <Loader2 size={16} className="animate-spin" />
             Loading subscription…
           </div>
         ) : (
           <div className="space-y-5">
             {/* Current status */}
-            <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
-              <span className="text-sm font-medium text-gray-600">Status</span>
+            <div className="flex items-center justify-between rounded-lg border border-divider bg-surface-2 px-4 py-3">
+              <span className="text-sm font-medium text-muted">Status</span>
               <StatusPill status={status} label={statusLabel} />
             </div>
 
@@ -103,7 +103,7 @@ export default function BillingPage() {
                   />
                 )}
                 {sub?.cancelAtPeriodEnd && (
-                  <p className="text-xs text-amber-600">
+                  <p className="text-xs text-warning">
                     Your subscription is set to cancel at the end of the current period.
                   </p>
                 )}
@@ -112,15 +112,15 @@ export default function BillingPage() {
 
             {/* Past-due warning */}
             {isPastDue && (
-              <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                <AlertTriangle size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-amber-700">
+              <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
+                <AlertTriangle size={18} className="text-warning flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-warning">
                   Your last payment failed. Update your payment method to keep using Stream.
                 </p>
               </div>
             )}
 
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && <p className="text-sm text-danger">{error}</p>}
 
             {/* Actions */}
             <div className="pt-1">
@@ -128,7 +128,7 @@ export default function BillingPage() {
                 <button
                   onClick={() => runAction(openBillingPortal)}
                   disabled={busy}
-                  className="text-sm font-medium bg-accent text-white rounded-lg px-4 py-2.5 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-sm font-medium bg-accent text-content rounded-lg px-4 py-2.5 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {busy ? 'Opening…' : 'Manage Subscription'}
                 </button>
@@ -136,7 +136,7 @@ export default function BillingPage() {
                 <button
                   onClick={() => runAction(openBillingPortal)}
                   disabled={busy}
-                  className="text-sm font-medium bg-amber-500 text-white rounded-lg px-4 py-2.5 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-sm font-medium bg-warning text-background rounded-lg px-4 py-2.5 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {busy ? 'Opening…' : 'Update Payment Method'}
                 </button>
@@ -144,7 +144,7 @@ export default function BillingPage() {
                 <button
                   onClick={() => runAction(startCheckout)}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 text-sm font-semibold bg-accent text-white rounded-lg px-5 py-2.5 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 text-sm font-semibold bg-accent text-content rounded-lg px-5 py-2.5 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {busy ? 'Redirecting…' : `Subscribe — ${PRICE_LABEL}`}
                 </button>
@@ -155,8 +155,8 @@ export default function BillingPage() {
       </div>
 
       {/* What's included */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-        <p className="text-sm font-semibold text-gray-800 mb-3">What's included</p>
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-6">
+        <p className="text-sm font-semibold text-content mb-3">What's included</p>
         <ul className="space-y-2">
           {[
             'AI lead capture from every call & voicemail',
@@ -164,8 +164,8 @@ export default function BillingPage() {
             'Action Queue, opportunities & job pipeline',
             'Unlimited leads',
           ].map((item) => (
-            <li key={item} className="flex items-center gap-2 text-sm text-gray-600">
-              <CheckCircle2 size={16} className="text-green-500 flex-shrink-0" />
+            <li key={item} className="flex items-center gap-2 text-sm text-muted">
+              <CheckCircle2 size={16} className="text-success flex-shrink-0" />
               {item}
             </li>
           ))}
@@ -173,7 +173,7 @@ export default function BillingPage() {
       </div>
 
       {business?.id === 1 && (
-        <p className="text-xs text-gray-400 text-center">
+        <p className="text-xs text-muted text-center">
           This is the Stream admin account and always has full access regardless of subscription status.
         </p>
       )}
@@ -184,8 +184,8 @@ export default function BillingPage() {
 function DetailRow({ label, value }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-gray-500">{label}</span>
-      <span className="font-medium text-gray-800">{value}</span>
+      <span className="text-muted">{label}</span>
+      <span className="font-medium text-content">{value}</span>
     </div>
   );
 }
@@ -193,12 +193,12 @@ function DetailRow({ label, value }) {
 function StatusPill({ status, label }) {
   const styles =
     status === 'active'
-      ? 'bg-green-50 text-green-700'
+      ? 'bg-success/10 text-success'
       : status === 'trialing'
-        ? 'bg-blue-50 text-blue-700'
+        ? 'bg-brand/10 text-brand'
         : status === 'past_due'
-          ? 'bg-amber-50 text-amber-700'
-          : 'bg-gray-100 text-gray-500';
+          ? 'bg-warning/10 text-warning'
+          : 'bg-surface-2 text-muted';
   return (
     <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${styles}`}>{label}</span>
   );

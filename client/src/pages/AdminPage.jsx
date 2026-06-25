@@ -12,11 +12,11 @@ function formatDate(dateStr) {
 // Subscription badge palette: green = active, yellow = trialing, red = anything
 // that blocks the dashboard (past_due / canceled / inactive).
 const SUB_STYLES = {
-  active: 'bg-green-100 text-green-700 border-green-200',
-  trialing: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  past_due: 'bg-red-100 text-red-700 border-red-200',
-  canceled: 'bg-red-100 text-red-700 border-red-200',
-  inactive: 'bg-red-100 text-red-700 border-red-200',
+  active: 'bg-success/10 text-success border-success/30',
+  trialing: 'bg-warning/10 text-warning border-warning/30',
+  past_due: 'bg-danger/10 text-danger border-danger/30',
+  canceled: 'bg-danger/10 text-danger border-danger/30',
+  inactive: 'bg-danger/10 text-danger border-danger/30',
 };
 
 const SUB_LABELS = {
@@ -53,11 +53,11 @@ function SubBadge({ status }) {
 // Compact text button used for the per-row actions.
 function ActionButton({ onClick, disabled, color = 'gray', children }) {
   const colors = {
-    green: 'text-green-700 border-green-200 hover:bg-green-50',
-    blue: 'text-blue-700 border-blue-200 hover:bg-blue-50',
-    yellow: 'text-yellow-700 border-yellow-200 hover:bg-yellow-50',
-    gray: 'text-gray-600 border-gray-200 hover:bg-gray-50',
-    red: 'text-red-700 border-red-200 hover:bg-red-50',
+    green: 'text-success border-success/30 hover:bg-success/10',
+    blue: 'text-brand border-brand/30 hover:bg-brand/10',
+    yellow: 'text-warning border-warning/30 hover:bg-warning/10',
+    gray: 'text-muted border-divider hover:bg-surface-2',
+    red: 'text-danger border-danger/30 hover:bg-danger/10',
   };
   return (
     <button
@@ -82,34 +82,34 @@ function DeleteAccountModal({ business, busy, onCancel, onConfirm }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
-        <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
+      <div className="w-full max-w-md rounded-xl bg-surface shadow-xl">
+        <div className="flex items-start justify-between border-b border-divider px-5 py-4">
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-600">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-danger/10 text-danger">
               <Trash2 size={16} />
             </div>
-            <h3 className="text-base font-semibold text-gray-800">Delete account</h3>
+            <h3 className="text-base font-semibold text-content">Delete account</h3>
           </div>
-          <button onClick={onCancel} disabled={busy} className="text-gray-400 hover:text-gray-600 disabled:opacity-50">
+          <button onClick={onCancel} disabled={busy} className="text-muted hover:text-muted disabled:opacity-50">
             <X size={18} />
           </button>
         </div>
 
-        <div className="space-y-3 px-5 py-4 text-sm text-gray-600">
+        <div className="space-y-3 px-5 py-4 text-sm text-muted">
           <p>
             You're about to permanently delete{' '}
-            <span className="font-semibold text-gray-900">{business.name || 'this account'}</span>
+            <span className="font-semibold text-content">{business.name || 'this account'}</span>
             {business.owner_email ? ` (${business.owner_email})` : ''}.
           </p>
           <p>
-            This <span className="font-semibold text-red-600">cannot be undone</span>. It cancels
+            This <span className="font-semibold text-danger">cannot be undone</span>. It cancels
             the account's Stripe subscription and removes all of its data — leads, calls, timeline,
             inventory, settings — along with its login. No other account is affected.
           </p>
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-500">
+            <label className="mb-1 block text-xs font-medium text-muted">
               Type{' '}
-              <span className="font-mono font-semibold text-gray-700">
+              <span className="font-mono font-semibold text-content">
                 {expected || 'DELETE'}
               </span>{' '}
               to confirm
@@ -120,24 +120,24 @@ function DeleteAccountModal({ business, busy, onCancel, onConfirm }) {
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               disabled={busy}
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-red-400 focus:outline-none disabled:bg-gray-50"
+              className="w-full rounded border border-divider px-3 py-2 text-sm focus:border-danger focus:outline-none disabled:bg-surface-2"
               placeholder={expected || 'DELETE'}
             />
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-3">
+        <div className="flex justify-end gap-2 border-t border-divider px-5 py-3">
           <button
             onClick={onCancel}
             disabled={busy}
-            className="rounded border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded border border-divider px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface-2 disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={!ready || busy}
-            className="inline-flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded bg-danger px-3 py-1.5 text-sm font-medium text-content hover:bg-danger disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
             {busy ? 'Deleting…' : 'Delete permanently'}
@@ -234,7 +234,7 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-6 text-sm text-gray-400">
+      <div className="flex items-center gap-2 p-6 text-sm text-muted">
         <Loader2 size={16} className="animate-spin" />
         Loading admin data…
       </div>
@@ -242,7 +242,7 @@ export default function AdminPage() {
   }
 
   if (error) {
-    return <div className="p-6 text-sm text-red-500">Error: {error}</div>;
+    return <div className="p-6 text-sm text-danger">Error: {error}</div>;
   }
 
   const bookedCount = signups.filter((s) => s.call_booked).length;
@@ -260,12 +260,12 @@ export default function AdminPage() {
 
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand/10 text-brand">
           <Shield size={18} />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">Admin</h2>
-          <p className="text-sm text-gray-400">Manage Stream customer accounts</p>
+          <h2 className="text-lg font-semibold text-content">Admin</h2>
+          <p className="text-sm text-muted">Manage Stream customer accounts</p>
         </div>
       </div>
 
@@ -274,8 +274,8 @@ export default function AdminPage() {
         <div
           className={`flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm ${
             notice.type === 'success'
-              ? 'border-green-200 bg-green-50 text-green-700'
-              : 'border-red-200 bg-red-50 text-red-700'
+              ? 'border-success/30 bg-success/10 text-success'
+              : 'border-danger/30 bg-danger/10 text-danger'
           }`}
         >
           {notice.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
@@ -286,27 +286,27 @@ export default function AdminPage() {
       {/* ── Section 1: Businesses ──────────────────────────────────────────── */}
       <section>
         <div className="mb-3">
-          <h3 className="text-base font-semibold text-gray-800">All Businesses</h3>
-          <p className="text-xs text-gray-400">
+          <h3 className="text-base font-semibold text-content">All Businesses</h3>
+          <p className="text-xs text-muted">
             {businesses.length} {businesses.length === 1 ? 'account' : 'accounts'}
           </p>
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <div className="overflow-x-auto rounded-lg border border-divider">
           <table className="w-full text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50">
+            <thead className="border-b border-divider bg-surface-2">
               <tr>
                 {BIZ_HEADERS.map((h) => (
                   <th
                     key={h}
-                    className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                    className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted"
                   >
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-divider">
               {businesses.map((b) => {
                 const status = b.subscription_status || 'inactive';
                 const rowBusy = busyKey != null && busyKey.startsWith(`${b.id}:`);
@@ -315,14 +315,14 @@ export default function AdminPage() {
                 const canActivate = ['inactive', 'canceled', 'past_due'].includes(status);
                 const onboarded = !!b.onboarding_complete;
                 return (
-                  <tr key={b.id} className="align-top transition-colors hover:bg-gray-50">
-                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-800">
+                  <tr key={b.id} className="align-top transition-colors hover:bg-surface-2">
+                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-content">
                       {b.name || '—'}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">{ownerName}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-600">
+                    <td className="whitespace-nowrap px-4 py-2.5 text-content">{ownerName}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-muted">
                       {b.owner_email ? (
-                        <a href={`mailto:${b.owner_email}`} className="hover:text-blue-600">
+                        <a href={`mailto:${b.owner_email}`} className="hover:text-brand">
                           {b.owner_email}
                         </a>
                       ) : (
@@ -330,26 +330,26 @@ export default function AdminPage() {
                       )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5">
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                      <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
                         {b.industry_type || '—'}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400">
+                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted">
                       {formatDate(b.created_at)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5">
                       <SubBadge status={status} />
                       {status === 'trialing' && b.trial_end_date && (
-                        <span className="ml-2 text-xs text-gray-400">
+                        <span className="ml-2 text-xs text-muted">
                           ends {formatDate(b.trial_end_date)}
                         </span>
                       )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5">
                       {onboarded ? (
-                        <span className="text-xs font-medium text-green-600">Yes</span>
+                        <span className="text-xs font-medium text-success">Yes</span>
                       ) : (
-                        <span className="text-xs text-gray-400">No</span>
+                        <span className="text-xs text-muted">No</span>
                       )}
                     </td>
                     <td className="px-4 py-2.5">
@@ -444,10 +444,10 @@ export default function AdminPage() {
                             min="1"
                             value={trialDays}
                             onChange={(e) => setTrialDays(e.target.value)}
-                            className="w-20 rounded border border-gray-300 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                            className="w-20 rounded border border-divider px-2 py-1 text-xs focus:border-brand focus:outline-none"
                             placeholder="Days"
                           />
-                          <span className="text-xs text-gray-400">days (starts today)</span>
+                          <span className="text-xs text-muted">days (starts today)</span>
                           <ActionButton
                             color="green"
                             disabled={rowBusy}
@@ -472,10 +472,10 @@ export default function AdminPage() {
       {/* ── Section 2: Stream Signups ──────────────────────────────────────── */}
       <section>
         <div className="mb-3 flex items-center gap-2">
-          <Radio size={16} className="text-blue-500" />
+          <Radio size={16} className="text-brand" />
           <div>
-            <h3 className="text-base font-semibold text-gray-800">Stream Signups</h3>
-            <p className="text-xs text-gray-400">
+            <h3 className="text-base font-semibold text-content">Stream Signups</h3>
+            <p className="text-xs text-muted">
               {signups.length} {signups.length === 1 ? 'prospect' : 'prospects'}
               {signups.length > 0 && ` · ${bookedCount} booked a call`}
             </p>
@@ -483,66 +483,66 @@ export default function AdminPage() {
         </div>
 
         {signups.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-200 py-12 text-center text-sm text-gray-400">
+          <div className="rounded-lg border border-dashed border-divider py-12 text-center text-sm text-muted">
             No signups yet. New prospects from the Stream landing page will appear here.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <div className="overflow-x-auto rounded-lg border border-divider">
             <table className="w-full text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50">
+              <thead className="border-b border-divider bg-surface-2">
                 <tr>
                   {SIGNUP_HEADERS.map((h) => (
                     <th
                       key={h}
-                      className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                      className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted"
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-divider">
                 {signups.map((s) => (
-                  <tr key={s.id} className="transition-colors hover:bg-gray-50">
-                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-800">
+                  <tr key={s.id} className="transition-colors hover:bg-surface-2">
+                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-content">
                       {s.first_name || '—'}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">
+                    <td className="whitespace-nowrap px-4 py-2.5 text-content">
                       {s.business_name || '—'}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5">
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                      <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
                         {s.business_type || '—'}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-600">
+                    <td className="whitespace-nowrap px-4 py-2.5 text-muted">
                       {s.email ? (
-                        <a href={`mailto:${s.email}`} className="hover:text-blue-600">
+                        <a href={`mailto:${s.email}`} className="hover:text-brand">
                           {s.email}
                         </a>
                       ) : (
                         '—'
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-600">
+                    <td className="whitespace-nowrap px-4 py-2.5 text-muted">
                       {s.phone ? (
-                        <a href={`tel:${s.phone}`} className="hover:text-blue-600">
+                        <a href={`tel:${s.phone}`} className="hover:text-brand">
                           {s.phone}
                         </a>
                       ) : (
                         '—'
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400">
+                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-muted">
                       {formatDate(s.created_at)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5">
                       {s.call_booked ? (
-                        <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
+                        <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
                           Booked
                         </span>
                       ) : (
-                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+                        <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
                           Not yet
                         </span>
                       )}

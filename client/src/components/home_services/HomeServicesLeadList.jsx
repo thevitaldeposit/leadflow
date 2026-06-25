@@ -36,18 +36,18 @@ export default function HomeServicesLeadList() {
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3 flex-wrap">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-4 flex items-center gap-3 flex-wrap">
         <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-48">
           <div className="relative flex-1">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search by name or phone..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full pl-8 pr-3 py-2 text-sm border border-divider rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
-          <button type="submit" className="bg-accent text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
+          <button type="submit" className="bg-accent text-content px-3 py-2 rounded-lg text-sm hover:bg-brand transition-colors">
             Search
           </button>
         </form>
@@ -55,7 +55,7 @@ export default function HomeServicesLeadList() {
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent text-gray-600"
+          className="text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent text-muted"
         >
           <option value="">All Statuses</option>
           {HOME_SERVICES_STATUSES.map(s => (
@@ -63,17 +63,17 @@ export default function HomeServicesLeadList() {
           ))}
         </select>
 
-        <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer select-none">
+        <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">
           <input
             type="checkbox"
             checked={showDiscarded}
             onChange={e => setShowDiscarded(e.target.checked)}
-            className="rounded border-gray-300 text-accent focus:ring-accent"
+            className="rounded border-divider text-accent focus:ring-accent"
           />
           Show discarded
         </label>
 
-        <span className="text-xs text-gray-400 ml-auto">{leads.length} leads</span>
+        <span className="text-xs text-muted ml-auto">{leads.length} leads</span>
       </div>
 
       {/* Card grid */}
@@ -82,8 +82,8 @@ export default function HomeServicesLeadList() {
           <div className="animate-spin w-6 h-6 border-2 border-accent border-t-transparent rounded-full" />
         </div>
       ) : leads.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center text-gray-400">
-          <Wrench size={32} className="mx-auto mb-3 text-gray-300" />
+        <div className="bg-surface rounded-xl border border-divider shadow-sm p-12 text-center text-muted">
+          <Wrench size={32} className="mx-auto mb-3 text-muted" />
           <p className="text-sm">No Home Services leads found.</p>
         </div>
       ) : (

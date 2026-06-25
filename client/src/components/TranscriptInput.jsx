@@ -71,15 +71,15 @@ export default function TranscriptInput() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <FileText size={18} className="text-accent" />
-            <h2 className="text-base font-semibold text-gray-800">Paste Call Transcript</h2>
+            <h2 className="text-base font-semibold text-content">Paste Call Transcript</h2>
           </div>
           <button
             onClick={() => setTranscript(SAMPLE_TRANSCRIPT)}
-            className="flex items-center gap-1.5 text-xs text-accent hover:text-blue-700 font-medium border border-accent/30 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+            className="flex items-center gap-1.5 text-xs text-accent hover:text-brand font-medium border border-accent/30 px-3 py-1.5 rounded-lg hover:bg-brand/10 transition-colors"
           >
             <FlaskConical size={13} />
             Load Sample
@@ -90,19 +90,19 @@ export default function TranscriptInput() {
           value={transcript}
           onChange={e => setTranscript(e.target.value)}
           placeholder="Paste your call transcript here...&#10;&#10;The AI will extract: customer name, phone, email, vehicle of interest, trade-in details, budget, appointment, and more."
-          className="w-full h-72 text-sm text-gray-700 border border-gray-200 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent placeholder:text-gray-300 font-mono leading-relaxed"
+          className="w-full h-72 text-sm text-content border border-divider rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent placeholder:text-muted font-mono leading-relaxed"
           disabled={loading}
         />
 
         <div className="flex items-center justify-between mt-4">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-muted">
             {transcript.length > 0 ? `${transcript.split(/\s+/).filter(Boolean).length} words` : 'No transcript pasted'}
           </p>
           <div className="flex gap-3">
             {transcript && (
               <button
                 onClick={() => setTranscript('')}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+                className="text-sm text-muted hover:text-muted px-4 py-2 rounded-lg hover:bg-surface-2 transition-colors"
               >
                 Clear
               </button>
@@ -110,7 +110,7 @@ export default function TranscriptInput() {
             <button
               onClick={handleExtract}
               disabled={!transcript.trim() || loading}
-              className="flex items-center gap-2 bg-accent text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-2 bg-accent text-content px-5 py-2 rounded-lg text-sm font-medium hover:bg-brand disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? (
                 <>
@@ -126,17 +126,17 @@ export default function TranscriptInput() {
       </div>
 
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+        <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger px-4 py-3 rounded-lg text-sm">
           <AlertCircle size={15} />
           {error}
         </div>
       )}
 
       {loading && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center">
+        <div className="bg-brand/10 border border-brand/30 rounded-xl p-6 text-center">
           <Loader2 size={28} className="animate-spin text-accent mx-auto mb-3" />
-          <p className="text-sm font-medium text-blue-700">AI is analyzing your transcript...</p>
-          <p className="text-xs text-blue-500 mt-1">Extracting customer info, vehicle details, deal structure, and more</p>
+          <p className="text-sm font-medium text-brand">AI is analyzing your transcript...</p>
+          <p className="text-xs text-brand mt-1">Extracting customer info, vehicle details, deal structure, and more</p>
         </div>
       )}
     </div>

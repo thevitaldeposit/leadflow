@@ -140,43 +140,43 @@ export default function FilteredLeadsPage({ mode }) {
   return (
     <div className="max-w-4xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold text-gray-900">{config.title}</h1>
-        <span className="text-sm text-gray-400">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
+        <h1 className="text-lg font-bold text-content">{config.title}</h1>
+        <span className="text-sm text-muted">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center text-sm text-gray-400">
+        <div className="bg-surface rounded-xl border border-divider shadow-sm p-10 text-center text-sm text-muted">
           {config.emptyMsg}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
+            <thead className="bg-surface-2 border-b border-divider">
               <tr>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Service</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Intent</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">AI Recommendation</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Customer</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Service</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Status</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Intent</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">AI Recommendation</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Date</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-divider">
               {filtered.map(({ lead, state, vd }) => {
                 const jobStatus = lead.job_status || 'inquiry';
-                const statusStyle = JOB_STATUS_STYLES[jobStatus] || 'bg-gray-100 text-gray-500';
+                const statusStyle = JOB_STATUS_STYLES[jobStatus] || 'bg-surface-2 text-muted';
                 const deliveryDate = lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate || null;
                 return (
                   <tr
                     key={lead.id}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    className="hover:bg-surface-2 cursor-pointer transition-colors"
                     onClick={() => navigate(`/leads/${lead.id}`)}
                   >
                     <td className="px-5 py-3">
-                      <p className="font-medium text-gray-900">{getLeadName(lead)}</p>
-                      {lead.phone && <p className="text-xs text-gray-400">{lead.phone}</p>}
+                      <p className="font-medium text-content">{getLeadName(lead)}</p>
+                      {lead.phone && <p className="text-xs text-muted">{lead.phone}</p>}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{getLeadService(lead)}</td>
+                    <td className="px-4 py-3 text-muted">{getLeadService(lead)}</td>
                     <td className="px-4 py-3">
                       <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${statusStyle}`}>
                         {getJobStatusLabel(jobStatus)}
@@ -185,8 +185,8 @@ export default function FilteredLeadsPage({ mode }) {
                     <td className="px-4 py-3">
                       <IntentBadge value={state.intent} size="sm" />
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 max-w-[220px] truncate">{state.recommendation || '—'}</td>
-                    <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+                    <td className="px-4 py-3 text-xs text-muted max-w-[220px] truncate">{state.recommendation || '—'}</td>
+                    <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">
                       {deliveryDate || new Date(lead.created_at).toLocaleDateString()}
                     </td>
                   </tr>

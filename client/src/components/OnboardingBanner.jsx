@@ -36,10 +36,10 @@ export default function OnboardingBanner() {
   };
 
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
       <div className="flex items-center gap-2.5">
-        <CalendarClock size={18} className="text-amber-500 flex-shrink-0" />
-        <p className="text-sm text-amber-800">
+        <CalendarClock size={18} className="text-warning flex-shrink-0" />
+        <p className="text-sm text-warning">
           Your advanced booking and extraction features will be activated during your setup call.
         </p>
       </div>
@@ -48,14 +48,14 @@ export default function OnboardingBanner() {
           href={CALENDLY_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg bg-warning px-4 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-90"
         >
           Schedule Now <ArrowRight size={14} />
         </a>
         <button
           onClick={dismiss}
           aria-label="Dismiss"
-          className="p-1.5 text-amber-500 transition-colors hover:text-amber-700"
+          className="p-1.5 text-warning transition-colors hover:text-warning"
         >
           <X size={16} />
         </button>

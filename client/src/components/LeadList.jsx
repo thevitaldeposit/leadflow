@@ -5,9 +5,9 @@ import StatusBadge from './StatusBadge';
 import { api } from '../utils/api';
 
 const INTENT_STYLES = {
-  hot: 'text-red-600 bg-red-50 px-2 py-0.5 rounded-full font-medium',
-  warm: 'text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full font-medium',
-  cold: 'text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-medium',
+  hot: 'text-danger bg-danger/10 px-2 py-0.5 rounded-full font-medium',
+  warm: 'text-warning bg-warning/10 px-2 py-0.5 rounded-full font-medium',
+  cold: 'text-brand bg-brand/10 px-2 py-0.5 rounded-full font-medium',
 };
 
 function SortHeader({ label, sortKey, current, dir, onClick }) {
@@ -15,13 +15,13 @@ function SortHeader({ label, sortKey, current, dir, onClick }) {
   return (
     <button
       onClick={() => onClick(sortKey)}
-      className="flex items-center gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:text-gray-700 transition-colors"
+      className="flex items-center gap-1 text-xs font-semibold text-muted uppercase tracking-wide hover:text-content transition-colors"
     >
       {label}
       {active ? (
         dir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />
       ) : (
-        <ChevronDown size={12} className="text-gray-300" />
+        <ChevronDown size={12} className="text-muted" />
       )}
     </button>
   );
@@ -84,18 +84,18 @@ export default function LeadList() {
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3 flex-wrap">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-4 flex items-center gap-3 flex-wrap">
         <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-48">
           <div className="relative flex-1">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search by name or phone..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full pl-8 pr-3 py-2 text-sm border border-divider rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
-          <button type="submit" className="bg-accent text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
+          <button type="submit" className="bg-accent text-content px-3 py-2 rounded-lg text-sm hover:bg-brand transition-colors">
             Search
           </button>
         </form>
@@ -103,7 +103,7 @@ export default function LeadList() {
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent text-gray-600"
+          className="text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent text-muted"
         >
           <option value="">All Statuses</option>
           {['new', 'contacted', 'appointment_set', 'sold', 'lost'].map(s => (
@@ -114,7 +114,7 @@ export default function LeadList() {
         <select
           value={intentFilter}
           onChange={e => setIntentFilter(e.target.value)}
-          className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent text-gray-600"
+          className="text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent text-muted"
         >
           <option value="">All Intent</option>
           {['hot', 'warm', 'cold', 'service', 'other'].map(i => (
@@ -122,47 +122,47 @@ export default function LeadList() {
           ))}
         </select>
 
-        <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer select-none">
+        <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">
           <input
             type="checkbox"
             checked={showDiscarded}
             onChange={e => setShowDiscarded(e.target.checked)}
-            className="rounded border-gray-300 text-accent focus:ring-accent"
+            className="rounded border-divider text-accent focus:ring-accent"
           />
           Show discarded
         </label>
 
-        <span className="text-xs text-gray-400 ml-auto">{leads.length} leads</span>
+        <span className="text-xs text-muted ml-auto">{leads.length} leads</span>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
+              <tr className="border-b border-divider bg-surface-2">
                 <th className="text-left px-4 py-3">
                   <SortHeader label="Date" sortKey="created_at" current={sort} dir={dir} onClick={handleSort} />
                 </th>
                 <th className="text-left px-4 py-3">
                   <SortHeader label="Customer" sortKey="customer_last_name" current={sort} dir={dir} onClick={handleSort} />
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Phone</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Vehicle of Interest</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Phone</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Vehicle of Interest</th>
                 <th className="text-left px-4 py-3">
                   <SortHeader label="Intent" sortKey="customer_intent" current={sort} dir={dir} onClick={handleSort} />
                 </th>
                 <th className="text-left px-4 py-3">
                   <SortHeader label="Status" sortKey="status" current={sort} dir={dir} onClick={handleSort} />
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Salesperson</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Salesperson</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-sm text-gray-400">
+                  <td colSpan={8} className="text-center py-12 text-sm text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <div className="animate-spin w-4 h-4 border-2 border-accent border-t-transparent rounded-full" />
                       Loading leads...
@@ -171,7 +171,7 @@ export default function LeadList() {
                 </tr>
               ) : leads.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-sm text-gray-400">
+                  <td colSpan={8} className="text-center py-12 text-sm text-muted">
                     No leads found
                   </td>
                 </tr>
@@ -183,20 +183,20 @@ export default function LeadList() {
                     <tr
                       key={lead.id}
                       onClick={() => navigate(`/leads/${lead.id}`)}
-                      className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors ${lead.discarded ? 'opacity-50' : ''}`}
+                      className={`border-b border-divider hover:bg-surface-2 cursor-pointer transition-colors ${lead.discarded ? 'opacity-50' : ''}`}
                     >
-                      <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{timeAgo(lead.created_at)}</td>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-800 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm text-muted whitespace-nowrap">{timeAgo(lead.created_at)}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-content whitespace-nowrap">
                         {name}
                         {lead.discarded ? (
-                          <span className="ml-2 text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">discarded</span>
+                          <span className="ml-2 text-xs text-muted bg-surface-2 px-1.5 py-0.5 rounded">discarded</span>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{lead.phone || '—'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{voi}</td>
+                      <td className="px-4 py-3 text-sm text-muted whitespace-nowrap">{lead.phone || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-muted">{voi}</td>
                       <td className="px-4 py-3">
                         {lead.customer_intent ? (
-                          <span className={`text-xs capitalize ${INTENT_STYLES[lead.customer_intent] || 'text-gray-500'}`}>
+                          <span className={`text-xs capitalize ${INTENT_STYLES[lead.customer_intent] || 'text-muted'}`}>
                             {lead.customer_intent}
                           </span>
                         ) : '—'}
@@ -204,11 +204,11 @@ export default function LeadList() {
                       <td className="px-4 py-3">
                         <StatusBadge status={lead.status} />
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">{lead.salesperson_name || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-muted">{lead.salesperson_name || '—'}</td>
                       <td className="px-4 py-3">
                         <button
                           onClick={e => handleDelete(e, lead.id)}
-                          className="p-1.5 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors"
+                          className="p-1.5 rounded hover:bg-danger/10 text-muted hover:text-danger transition-colors"
                         >
                           <Trash2 size={13} />
                         </button>

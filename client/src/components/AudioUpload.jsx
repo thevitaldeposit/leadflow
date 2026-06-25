@@ -20,7 +20,7 @@ function formatSize(bytes) {
 
 function ProgressSteps({ step }) {
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+    <div className="bg-brand/10 border border-brand/30 rounded-xl p-6">
       <div className="space-y-3">
         {STEPS.map((s, i) => {
           const done = i < step;
@@ -28,18 +28,18 @@ function ProgressSteps({ step }) {
           return (
             <div key={i} className="flex items-center gap-3">
               <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                done ? 'bg-green-500' : active ? 'bg-accent' : 'bg-gray-200'
+                done ? 'bg-success' : active ? 'bg-accent' : 'bg-surface-2'
               }`}>
                 {done ? (
-                  <Check size={12} className="text-white" />
+                  <Check size={12} className="text-background" />
                 ) : active ? (
-                  <Loader2 size={12} className="text-white animate-spin" />
+                  <Loader2 size={12} className="text-content animate-spin" />
                 ) : (
-                  <span className="text-xs text-gray-400 font-medium">{i + 1}</span>
+                  <span className="text-xs text-muted font-medium">{i + 1}</span>
                 )}
               </div>
               <span className={`text-sm ${
-                done ? 'text-green-700 line-through' : active ? 'text-blue-700 font-medium' : 'text-gray-400'
+                done ? 'text-success line-through' : active ? 'text-brand font-medium' : 'text-muted'
               }`}>
                 {s.label}
               </span>
@@ -48,7 +48,7 @@ function ProgressSteps({ step }) {
         })}
       </div>
       {step === 1 && (
-        <p className="text-xs text-blue-500 mt-4">
+        <p className="text-xs text-brand mt-4">
           Transcription typically takes 10–30 seconds depending on call length.
         </p>
       )}
@@ -121,10 +121,10 @@ export default function AudioUpload() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-6">
         <div className="flex items-center gap-2 mb-4">
           <Mic size={18} className="text-accent" />
-          <h2 className="text-base font-semibold text-gray-800">Upload Call Recording</h2>
+          <h2 className="text-base font-semibold text-content">Upload Call Recording</h2>
         </div>
 
         {!file ? (
@@ -135,15 +135,15 @@ export default function AudioUpload() {
             onClick={() => !loading && inputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${
               dragging
-                ? 'border-accent bg-blue-50'
-                : 'border-gray-200 hover:border-accent hover:bg-blue-50/50'
+                ? 'border-accent bg-brand/10'
+                : 'border-divider hover:border-accent hover:bg-brand/10'
             }`}
           >
-            <Upload size={32} className={`mx-auto mb-3 ${dragging ? 'text-accent' : 'text-gray-300'}`} />
-            <p className="text-sm font-medium text-gray-600">
+            <Upload size={32} className={`mx-auto mb-3 ${dragging ? 'text-accent' : 'text-muted'}`} />
+            <p className="text-sm font-medium text-muted">
               Drop your call recording here, or <span className="text-accent">browse</span>
             </p>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-muted mt-1">
               MP3, M4A, WAV, OGG, WebM, MP4 · Max {MAX_SIZE_MB}MB
             </p>
             <input
@@ -155,18 +155,18 @@ export default function AudioUpload() {
             />
           </div>
         ) : (
-          <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
+          <div className="flex items-center gap-3 bg-surface-2 rounded-xl px-4 py-3 border border-divider">
             <Mic size={18} className="text-accent flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-800 truncate">{file.name}</p>
-              <p className="text-xs text-gray-400">{formatSize(file.size)}</p>
+              <p className="text-sm font-medium text-content truncate">{file.name}</p>
+              <p className="text-xs text-muted">{formatSize(file.size)}</p>
             </div>
             {!loading && (
               <button
                 onClick={clear}
-                className="flex-shrink-0 p-1 rounded hover:bg-gray-200 transition-colors"
+                className="flex-shrink-0 p-1 rounded hover:bg-surface-2 transition-colors"
               >
-                <X size={14} className="text-gray-500" />
+                <X size={14} className="text-muted" />
               </button>
             )}
           </div>
@@ -176,13 +176,13 @@ export default function AudioUpload() {
           <div className="flex items-center justify-end gap-3 mt-4">
             <button
               onClick={clear}
-              className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+              className="text-sm text-muted hover:text-muted px-4 py-2 rounded-lg hover:bg-surface-2 transition-colors"
             >
               Remove
             </button>
             <button
               onClick={handleExtract}
-              className="flex items-center gap-2 bg-accent text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors"
+              className="flex items-center gap-2 bg-accent text-content px-5 py-2 rounded-lg text-sm font-medium hover:bg-brand transition-colors"
             >
               <Mic size={15} />
               Extract Lead
@@ -192,7 +192,7 @@ export default function AudioUpload() {
       </div>
 
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+        <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger px-4 py-3 rounded-lg text-sm">
           <AlertCircle size={15} />
           {error}
         </div>

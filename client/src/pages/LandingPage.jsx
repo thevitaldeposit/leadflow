@@ -45,7 +45,7 @@ const INDUSTRIES = [
 function Wordmark({ className = '' }) {
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <AudioLines className="text-blue-500" size={26} strokeWidth={2.5} />
+      <AudioLines className="text-brand" size={26} strokeWidth={2.5} />
       <span className="font-bold text-xl tracking-tight">Stream</span>
     </div>
   );
@@ -57,13 +57,13 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <div className="h-screen w-full overflow-y-auto bg-white text-slate-900 scroll-smooth">
+    <div className="h-screen w-full overflow-y-auto bg-surface text-content scroll-smooth">
       {/* ── Hero (dark) ─────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-slate-950 text-white">
+      <section className="relative overflow-hidden bg-well text-content">
         {/* ambient blue glow */}
         <div
           aria-hidden
-          className="pointer-events-none absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-blue-600/25 blur-[120px]"
+          className="pointer-events-none absolute -top-40 left-1/2 h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-brand/25 blur-[120px]"
         />
         <div
           aria-hidden
@@ -82,19 +82,19 @@ export default function LandingPage() {
             <div className="flex items-center gap-3 sm:gap-5">
               <Link
                 to="/contact"
-                className="hidden text-sm font-medium text-slate-300 transition-colors hover:text-white sm:inline"
+                className="hidden text-sm font-medium text-muted transition-colors hover:text-content sm:inline"
               >
                 Contact
               </Link>
               <Link
                 to="/login"
-                className="text-sm font-medium text-slate-300 transition-colors hover:text-white"
+                className="text-sm font-medium text-muted transition-colors hover:text-content"
               >
                 Sign in
               </Link>
               <Link
                 to="/signup"
-                className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-200"
+                className="rounded-lg bg-surface px-4 py-2 text-sm font-semibold text-content transition-colors hover:bg-surface-2"
               >
                 Get Started
               </Link>
@@ -103,29 +103,29 @@ export default function LandingPage() {
 
           {/* hero content */}
           <div className="mx-auto max-w-4xl px-6 pb-28 pt-16 text-center sm:pt-24">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs font-medium text-slate-300 backdrop-blur">
-              <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs font-medium text-muted backdrop-blur">
+              <span className="h-1.5 w-1.5 rounded-full bg-brand" />
               AI call capture for service businesses
             </div>
             <h1 className="text-balance text-5xl font-bold leading-[1.05] tracking-tight sm:text-6xl md:text-7xl">
               Never miss a
               <br className="hidden sm:block" /> customer again
             </h1>
-            <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-slate-300 sm:text-xl">
+            <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted sm:text-xl">
               Stream captures every call, extracts lead data automatically, and manages your
               follow-ups — so you can focus on the job.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
                 to="/signup"
-                className="group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-7 py-3.5 text-base font-semibold text-white shadow-lg shadow-blue-600/30 transition-all hover:bg-blue-500 hover:shadow-blue-500/40 sm:w-auto"
+                className="group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-7 py-3.5 text-base font-semibold text-content shadow-lg shadow-blue-600/30 transition-all hover:bg-brand hover:shadow-blue-500/40 sm:w-auto"
               >
                 Get Started
                 <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" />
               </Link>
               <a
                 href="#how-it-works"
-                className="inline-flex w-full items-center justify-center rounded-xl border border-white/15 px-7 py-3.5 text-base font-semibold text-white transition-colors hover:bg-white/5 sm:w-auto"
+                className="inline-flex w-full items-center justify-center rounded-xl border border-white/15 px-7 py-3.5 text-base font-semibold text-content transition-colors hover:bg-white/5 sm:w-auto"
               >
                 See how it works
               </a>
@@ -135,16 +135,16 @@ export default function LandingPage() {
       </section>
 
       {/* ── How it works ────────────────────────────────────────────── */}
-      <section id="how-it-works" className="border-b border-slate-100 bg-white py-24">
+      <section id="how-it-works" className="border-b border-divider bg-surface py-24">
         <div className="mx-auto max-w-6xl px-6">
           <div className="mx-auto max-w-2xl text-center">
-            <p className="text-sm font-semibold uppercase tracking-widest text-blue-600">
+            <p className="text-sm font-semibold uppercase tracking-widest text-brand">
               How it works
             </p>
-            <h2 className="mt-3 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
+            <h2 className="mt-3 text-4xl font-bold tracking-tight text-content sm:text-5xl">
               From ring to revenue, automatically
             </h2>
-            <p className="mt-4 text-lg text-slate-600">
+            <p className="mt-4 text-lg text-muted">
               Three steps. Zero spreadsheets. Every lead accounted for.
             </p>
           </div>
@@ -155,20 +155,20 @@ export default function LandingPage() {
               return (
                 <div
                   key={step.title}
-                  className="relative rounded-2xl border border-slate-200 bg-white p-8 transition-shadow hover:shadow-lg hover:shadow-slate-200/60"
+                  className="relative rounded-2xl border border-divider bg-surface p-8 transition-shadow hover:shadow-lg hover:shadow-slate-200/60"
                 >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand/10 text-brand">
                     <Icon size={24} />
                   </div>
                   <div className="mt-5 flex items-baseline gap-2">
-                    <span className="text-sm font-semibold text-blue-600">
+                    <span className="text-sm font-semibold text-brand">
                       {String(i + 1).padStart(2, '0')}
                     </span>
-                    <h3 className="text-xl font-semibold tracking-tight text-slate-900">
+                    <h3 className="text-xl font-semibold tracking-tight text-content">
                       {step.title}
                     </h3>
                   </div>
-                  <p className="mt-3 leading-relaxed text-slate-600">{step.body}</p>
+                  <p className="mt-3 leading-relaxed text-muted">{step.body}</p>
                 </div>
               );
             })}
@@ -177,25 +177,25 @@ export default function LandingPage() {
       </section>
 
       {/* ── Who it's for ────────────────────────────────────────────── */}
-      <section className="bg-slate-50 py-24">
+      <section className="bg-surface-2 py-24">
         <div className="mx-auto max-w-6xl px-6">
           <div className="grid items-center gap-12 lg:grid-cols-2">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-widest text-blue-600">
+              <p className="text-sm font-semibold uppercase tracking-widest text-brand">
                 Built for the trades
               </p>
-              <h2 className="mt-3 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
+              <h2 className="mt-3 text-4xl font-bold tracking-tight text-content sm:text-5xl">
                 If your business runs on phone calls, Stream is for you
               </h2>
-              <p className="mt-4 text-lg leading-relaxed text-slate-600">
+              <p className="mt-4 text-lg leading-relaxed text-muted">
                 Stream is purpose-built for service businesses where every missed call is a missed
                 job. The moment the phone rings, you're covered.
               </p>
               <ul className="mt-6 space-y-3">
                 {['Capture every inbound call', 'Never lose a lead to a voicemail', 'One place for follow-ups, bookings, and payments'].map(
                   (item) => (
-                    <li key={item} className="flex items-center gap-3 text-slate-700">
-                      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+                    <li key={item} className="flex items-center gap-3 text-content">
+                      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-brand text-content">
                         <Check size={13} strokeWidth={3} />
                       </span>
                       {item}
@@ -211,10 +211,10 @@ export default function LandingPage() {
                 return (
                   <div
                     key={ind.label}
-                    className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-7 text-center transition-colors hover:border-blue-200"
+                    className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-divider bg-surface px-4 py-7 text-center transition-colors hover:border-brand/30"
                   >
-                    <Icon size={26} className="text-blue-600" />
-                    <span className="text-sm font-medium text-slate-700">{ind.label}</span>
+                    <Icon size={26} className="text-brand" />
+                    <span className="text-sm font-medium text-content">{ind.label}</span>
                   </div>
                 );
               })}
@@ -224,21 +224,21 @@ export default function LandingPage() {
       </section>
 
       {/* ── Bottom CTA ──────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-slate-950 text-white">
+      <section className="relative overflow-hidden bg-well text-content">
         <div
           aria-hidden
-          className="pointer-events-none absolute left-1/2 top-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-600/25 blur-[120px]"
+          className="pointer-events-none absolute left-1/2 top-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/25 blur-[120px]"
         />
         <div className="relative mx-auto max-w-3xl px-6 py-24 text-center">
           <h2 className="text-4xl font-bold tracking-tight sm:text-5xl">
             Ready to stop missing leads?
           </h2>
-          <p className="mx-auto mt-4 max-w-xl text-lg text-slate-300">
+          <p className="mx-auto mt-4 max-w-xl text-lg text-muted">
             Get set up in minutes. We'll walk you through everything on a quick call.
           </p>
           <Link
             to="/signup"
-            className="group mt-9 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-blue-600/30 transition-all hover:bg-blue-500"
+            className="group mt-9 inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-8 py-4 text-base font-semibold text-content shadow-lg shadow-blue-600/30 transition-all hover:bg-brand"
           >
             Get Started
             <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" />
@@ -247,20 +247,20 @@ export default function LandingPage() {
       </section>
 
       {/* ── Footer ──────────────────────────────────────────────────── */}
-      <footer className="border-t border-slate-100 bg-white">
+      <footer className="border-t border-divider bg-surface">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 sm:flex-row">
-          <Wordmark className="text-slate-900" />
+          <Wordmark className="text-content" />
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-6">
-            <Link to="/contact" className="text-sm text-slate-500 transition-colors hover:text-slate-900">
+            <Link to="/contact" className="text-sm text-muted transition-colors hover:text-content">
               Contact
             </Link>
-            <Link to="/privacy" className="text-sm text-slate-500 transition-colors hover:text-slate-900">
+            <Link to="/privacy" className="text-sm text-muted transition-colors hover:text-content">
               Privacy Policy
             </Link>
-            <Link to="/terms" className="text-sm text-slate-500 transition-colors hover:text-slate-900">
+            <Link to="/terms" className="text-sm text-muted transition-colors hover:text-content">
               Terms of Service
             </Link>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-muted">
               © {new Date().getFullYear()} Stream. All rights reserved.
             </p>
           </div>

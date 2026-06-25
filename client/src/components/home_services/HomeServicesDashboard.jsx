@@ -316,9 +316,9 @@ function getAttentionTier(e, now = new Date()) {
 // Left-border accent communicating tier urgency.
 function tierBorderClass(tier) {
   if (tier === 1) return ''; // Critical badge already signals urgency; no redundant red bar
-  if (tier <= 3) return 'border-l-4 border-orange-400';
-  if (tier <= 5) return 'border-l-4 border-yellow-400';
-  return 'border-l-4 border-gray-200';
+  if (tier <= 3) return 'border-l-4 border-warning';
+  if (tier <= 5) return 'border-l-4 border-warning';
+  return 'border-l-4 border-divider';
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
@@ -362,7 +362,7 @@ function MorningBrief() {
   if (loading || !show) return null;
 
   return (
-    <section className="rounded-xl bg-sidebar text-white shadow-sm overflow-hidden">
+    <section className="rounded-xl bg-sidebar text-content shadow-sm overflow-hidden">
       <div className="px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-2.5">
@@ -371,13 +371,13 @@ function MorningBrief() {
             </div>
             <div className="leading-tight">
               <p className="text-sm font-bold tracking-tight">Morning Brief</p>
-              <p className="text-[10px] uppercase tracking-widest text-gray-400">Stream</p>
+              <p className="text-[10px] uppercase tracking-widest text-muted">Stream</p>
             </div>
           </div>
           <button
             onClick={dismiss}
             aria-label="Dismiss morning brief"
-            className="text-gray-400 hover:text-white transition-colors p-1 -m-1 flex-shrink-0"
+            className="text-muted hover:text-content transition-colors p-1 -m-1 flex-shrink-0"
           >
             <X size={16} />
           </button>
@@ -385,7 +385,7 @@ function MorningBrief() {
 
         <ul className="mt-3.5 space-y-2">
           {bullets.map((b, i) => (
-            <li key={i} className="flex gap-2.5 text-sm text-gray-200 leading-snug">
+            <li key={i} className="flex gap-2.5 text-sm text-content leading-snug">
               <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
               <span>{b}</span>
             </li>
@@ -395,7 +395,7 @@ function MorningBrief() {
         <div className="mt-3.5 flex justify-end">
           <button
             onClick={() => navigate('/insights')}
-            className="text-xs font-medium text-accent hover:text-white transition-colors inline-flex items-center gap-1"
+            className="text-xs font-medium text-accent hover:text-content transition-colors inline-flex items-center gap-1"
           >
             View all insights <ArrowRight size={13} />
           </button>
@@ -407,13 +407,13 @@ function MorningBrief() {
 
 // Clean, neutral top-banner metric tile. Only the icon carries color; the tile
 // background stays neutral. iconColor defaults to gray when not supplied.
-function MetricTile({ icon: Icon, label, value, iconColor = 'text-gray-400' }) {
+function MetricTile({ icon: Icon, label, value, iconColor = 'text-muted' }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3.5 flex items-center gap-3">
+    <div className="bg-surface rounded-xl border border-divider shadow-sm px-4 py-3.5 flex items-center gap-3">
       {Icon && <Icon size={18} className={`${iconColor} flex-shrink-0`} />}
       <div className="min-w-0">
-        <p className="text-2xl font-bold text-gray-900 leading-tight">{value}</p>
-        <p className="text-xs text-gray-500 leading-tight mt-0.5 truncate">{label}</p>
+        <p className="text-2xl font-bold text-content leading-tight">{value}</p>
+        <p className="text-xs text-muted leading-tight mt-0.5 truncate">{label}</p>
       </div>
     </div>
   );
@@ -422,24 +422,24 @@ function MetricTile({ icon: Icon, label, value, iconColor = 'text-gray-400' }) {
 // Bottom-row summary tile: label, primary value, and a small secondary line.
 function SummaryTile({ icon: Icon, label, value, sub }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3.5">
+    <div className="bg-surface rounded-xl border border-divider shadow-sm px-4 py-3.5">
       <div className="flex items-center gap-1.5 mb-1.5">
-        {Icon && <Icon size={14} className="text-gray-400 flex-shrink-0" />}
-        <p className="text-xs font-medium text-gray-500 truncate">{label}</p>
+        {Icon && <Icon size={14} className="text-muted flex-shrink-0" />}
+        <p className="text-xs font-medium text-muted truncate">{label}</p>
       </div>
-      <p className="text-xl font-bold text-gray-900 leading-tight">{value}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>}
+      <p className="text-xl font-bold text-content leading-tight">{value}</p>
+      {sub && <p className="text-xs text-muted mt-0.5 truncate">{sub}</p>}
     </div>
   );
 }
 
 // Small up/down trend indicator. Null value renders a muted dash (no baseline).
 function TrendBadge({ value }) {
-  if (value == null) return <span className="text-xs text-gray-300">—</span>;
+  if (value == null) return <span className="text-xs text-muted">—</span>;
   const up = value >= 0;
   const Icon = up ? ArrowUpRight : ArrowDownRight;
   return (
-    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${up ? 'text-emerald-600' : 'text-red-500'}`}>
+    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${up ? 'text-success' : 'text-danger'}`}>
       <Icon size={12} />
       {up ? '+' : ''}{value}%
     </span>
@@ -500,8 +500,8 @@ function CallButton({ lead, name }) {
         disabled={busy}
         className={`p-1.5 rounded-lg transition-colors ${
           busy
-            ? 'text-gray-300 cursor-not-allowed'
-            : 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50'
+            ? 'text-muted cursor-not-allowed'
+            : 'text-muted hover:text-success hover:bg-success/10'
         }`}
         title={busy ? 'Calling…' : 'Call'}
       >
@@ -510,7 +510,7 @@ function CallButton({ lead, name }) {
       {toast && (
         <div
           className={`fixed bottom-4 right-4 z-50 max-w-xs px-4 py-3 rounded-xl shadow-lg text-sm font-medium animate-slide-in ${
-            toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-gray-900 text-white'
+            toast.type === 'error' ? 'bg-danger text-content' : 'bg-well text-content'
           }`}
         >
           {toast.text}
@@ -545,19 +545,19 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
 
   return (
     <div
-      className={`flex items-center gap-2.5 px-3 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors ${tierBorderClass(tier)}`}
+      className={`flex items-center gap-2.5 px-3 py-2.5 hover:bg-surface-2 cursor-pointer transition-colors ${tierBorderClass(tier)}`}
       onClick={() => (isMissedCall ? onMissedCallClick(lead) : navigate(`/leads/${lead.id}`))}
     >
       {tier === 1 ? <CriticalBadge size="sm" /> : <IntentBadge value={state.intent} size="sm" />}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-semibold text-gray-900 truncate">{displayName}</span>
-          {showPhone && <span className="text-xs text-gray-400 flex-shrink-0">{lead.phone}</span>}
+          <span className="text-sm font-semibold text-content truncate">{displayName}</span>
+          {showPhone && <span className="text-xs text-muted flex-shrink-0">{lead.phone}</span>}
           {lead.call_type === 'voicemail' && <VoicemailBadge />}
           {isMissedCall && <MissedCallBadge />}
         </div>
         {reasonText && (
-          <p className={`text-xs font-medium truncate mt-0.5 ${reasonIsCritical ? 'text-red-600' : 'text-accent'}`}>
+          <p className={`text-xs font-medium truncate mt-0.5 ${reasonIsCritical ? 'text-danger' : 'text-accent'}`}>
             {reasonText}
           </p>
         )}
@@ -565,14 +565,14 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
       {followUpLabel && (
         <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
           followUpLabel === 'Overdue' || followUpLabel === 'Due now'
-            ? 'bg-red-100 text-red-700'
-            : 'bg-amber-100 text-amber-700'
+            ? 'bg-danger/10 text-danger'
+            : 'bg-warning/10 text-warning'
         }`}>
           {followUpLabel}
         </span>
       )}
       {elapsedLabel && (
-        <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 bg-orange-100 text-orange-700">
+        <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 bg-warning/10 text-warning">
           {elapsedLabel}
         </span>
       )}
@@ -583,7 +583,7 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
         {!isMissedCall && (
           <button
             onClick={handleDismissClick}
-            className="p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            className="p-1.5 rounded-lg text-muted hover:text-muted hover:bg-surface-2 transition-colors"
             title="Dismiss from Action Queue"
             aria-label="Dismiss from Action Queue"
           >
@@ -608,36 +608,36 @@ function MissedCallModal({ lead, onCreate, onDiscard, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2">
           <MissedCallBadge />
         </div>
-        <h3 className="text-lg font-bold text-gray-900 mt-3">Missed Call</h3>
-        <p className="text-sm text-gray-600 mt-1">
+        <h3 className="text-lg font-bold text-content mt-3">Missed Call</h3>
+        <p className="text-sm text-muted mt-1">
           <span className="font-semibold">{phone}</span>
-          {when && <span className="text-gray-400"> · {when}{elapsed ? ` (${elapsed})` : ''}</span>}
+          {when && <span className="text-muted"> · {when}{elapsed ? ` (${elapsed})` : ''}</span>}
         </p>
-        <p className="text-sm text-gray-500 mt-3">
+        <p className="text-sm text-muted mt-3">
           This caller didn't leave a voicemail, so there's no context yet. Create a lead to start
           tracking them, or discard if it wasn't a customer.
         </p>
         <div className="flex flex-col gap-2 mt-5">
           <button
             onClick={() => onCreate(lead)}
-            className="w-full text-sm font-medium text-white bg-accent hover:opacity-90 px-4 py-2.5 rounded-xl transition-colors"
+            className="w-full text-sm font-medium text-content bg-accent hover:opacity-90 px-4 py-2.5 rounded-xl transition-colors"
           >
             Create Lead
           </button>
           <button
             onClick={() => onDiscard(lead)}
-            className="w-full text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2.5 rounded-xl transition-colors"
+            className="w-full text-sm font-medium text-muted bg-surface-2 hover:bg-surface-2 px-4 py-2.5 rounded-xl transition-colors"
           >
             Discard
           </button>
         </div>
         <button
           onClick={onClose}
-          className="w-full mt-2 text-xs text-gray-400 hover:text-gray-600 py-1 transition-colors"
+          className="w-full mt-2 text-xs text-muted hover:text-muted py-1 transition-colors"
         >
           Cancel
         </button>
@@ -647,8 +647,8 @@ function MissedCallModal({ lead, onCreate, onDiscard, onClose }) {
 }
 
 const SCHEDULE_TYPE_BADGE = {
-  DROP: 'bg-emerald-100 text-emerald-700',
-  PICK: 'bg-blue-100 text-blue-700',
+  DROP: 'bg-success/10 text-success',
+  PICK: 'bg-brand/10 text-brand',
 };
 
 function ScheduleItem({ item, onClick }) {
@@ -658,18 +658,18 @@ function ScheduleItem({ item, onClick }) {
   const address = vd.deliveryAddress || null;
 
   return (
-    <div onClick={onClick} className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors">
+    <div onClick={onClick} className="px-4 py-3 hover:bg-surface-2 cursor-pointer transition-colors">
       <div className="flex items-center gap-3">
-        <div className={`w-20 flex-shrink-0 text-xs font-semibold ${time ? 'text-gray-700' : 'text-gray-400'}`}>{time ? formatTime12(time) : 'Flexible'}</div>
+        <div className={`w-20 flex-shrink-0 text-xs font-semibold ${time ? 'text-content' : 'text-muted'}`}>{time ? formatTime12(time) : 'Flexible'}</div>
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 ${SCHEDULE_TYPE_BADGE[type]}`}>
           {label || type}
         </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
-            {size && <span className="text-xs text-gray-500 flex-shrink-0">{size}</span>}
+            <span className="text-sm font-semibold text-content truncate">{name}</span>
+            {size && <span className="text-xs text-muted flex-shrink-0">{size}</span>}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-gray-400 truncate">
+          <div className="flex items-center gap-1.5 text-xs text-muted truncate">
             {lead.phone && <span className="flex-shrink-0">{lead.phone}</span>}
             {address && <span className="truncate">{lead.phone ? '· ' : ''}{address}</span>}
           </div>
@@ -684,26 +684,26 @@ function TodaysSchedule({ items }) {
   const todayLabel = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   return (
-    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col min-h-[440px]">
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+    <section className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden flex flex-col min-h-[440px]">
+      <div className="px-4 py-3 border-b border-divider flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
           <Calendar size={15} className="text-accent" />
-          <h2 className="text-sm font-bold text-gray-900">Today's Schedule</h2>
+          <h2 className="text-sm font-bold text-content">Today's Schedule</h2>
         </div>
-        <span className="text-xs text-gray-400">{todayLabel}</span>
+        <span className="text-xs text-muted">{todayLabel}</span>
       </div>
 
       {items.length === 0 ? (
-        <div className="px-4 py-10 text-center text-sm text-gray-400">Nothing scheduled for today.</div>
+        <div className="px-4 py-10 text-center text-sm text-muted">Nothing scheduled for today.</div>
       ) : (
-        <div className="divide-y divide-gray-100 overflow-y-auto max-h-[360px] scrollbar-subtle">
+        <div className="divide-y divide-divider overflow-y-auto max-h-[360px] scrollbar-subtle">
           {items.map((it, i) => (
             <ScheduleItem key={`${it.lead.id}-${it.type}-${i}`} item={it} onClick={() => navigate(`/leads/${it.lead.id}`)} />
           ))}
         </div>
       )}
 
-      <div className="px-4 py-2.5 border-t border-gray-100 mt-auto flex-shrink-0">
+      <div className="px-4 py-2.5 border-t border-divider mt-auto flex-shrink-0">
         <button
           onClick={() => navigate('/schedule')}
           className="text-xs font-medium text-accent hover:underline inline-flex items-center gap-1"
@@ -778,11 +778,11 @@ function RevenuePanel({ jobs }) {
   const primaryLabel = range === 'week' ? 'This Week' : range === 'year' ? 'This Year' : 'This Month';
 
   return (
-    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+    <section className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <DollarSign size={15} className="text-emerald-600" />
-          <h2 className="text-sm font-bold text-gray-900">Booked Revenue</h2>
+          <DollarSign size={15} className="text-success" />
+          <h2 className="text-sm font-bold text-content">Booked Revenue</h2>
         </div>
         <div className="flex items-center gap-1">
           {[['week', 'Week'], ['month', 'Month'], ['year', 'Year']].map(([val, label]) => (
@@ -790,7 +790,7 @@ function RevenuePanel({ jobs }) {
               key={val}
               onClick={() => setRange(val)}
               className={`text-[10px] font-semibold tracking-wide px-2 py-1 rounded transition-colors ${
-                range === val ? 'bg-emerald-100 text-emerald-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                range === val ? 'bg-success/10 text-success' : 'text-muted hover:text-muted hover:bg-surface-2'
               }`}
             >
               {label}
@@ -802,28 +802,28 @@ function RevenuePanel({ jobs }) {
       <div className="px-5 py-4">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="text-3xl font-bold text-gray-900 leading-none">{formatMoney(primary)}</p>
-            <p className="text-xs text-gray-500 mt-1">Booked revenue · {primaryLabel}</p>
+            <p className="text-3xl font-bold text-content leading-none">{formatMoney(primary)}</p>
+            <p className="text-xs text-muted mt-1">Booked revenue · {primaryLabel}</p>
           </div>
-          <div className="text-emerald-500 flex-shrink-0">
+          <div className="text-success flex-shrink-0">
             <Sparkline data={data.spark} />
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-gray-100">
+        <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-divider">
           <div>
-            <p className="text-xs text-gray-500 mb-1">This Month</p>
-            <p className="text-base font-bold text-gray-900 leading-tight">{formatMoney(data.thisMonth)}</p>
+            <p className="text-xs text-muted mb-1">This Month</p>
+            <p className="text-base font-bold text-content leading-tight">{formatMoney(data.thisMonth)}</p>
             <TrendBadge value={pctChange(data.thisMonth, data.lastMonth)} />
           </div>
           <div>
-            <p className="text-xs text-gray-500 mb-1">Next 30 Days</p>
-            <p className="text-base font-bold text-gray-900 leading-tight">{formatMoney(data.next30)}</p>
+            <p className="text-xs text-muted mb-1">Next 30 Days</p>
+            <p className="text-base font-bold text-content leading-tight">{formatMoney(data.next30)}</p>
             <TrendBadge value={pctChange(data.next30, data.prev30)} />
           </div>
           <div>
-            <p className="text-xs text-gray-500 mb-1">This Year</p>
-            <p className="text-base font-bold text-gray-900 leading-tight">{formatMoney(data.thisYear)}</p>
+            <p className="text-xs text-muted mb-1">This Year</p>
+            <p className="text-base font-bold text-content leading-tight">{formatMoney(data.thisYear)}</p>
             <TrendBadge value={pctChange(data.thisYear, data.lastYear)} />
           </div>
         </div>
@@ -867,18 +867,18 @@ function sizeMatches(a, b) {
 
 function AvailabilityNote({ loading, availability, size }) {
   const label = size || 'this size';
-  if (loading) return <p className="text-xs text-gray-400">Checking availability…</p>;
+  if (loading) return <p className="text-xs text-muted">Checking availability…</p>;
   if (!availability) {
-    return <p className="text-xs text-amber-600">No {label} in inventory for the selected dates.</p>;
+    return <p className="text-xs text-warning">No {label} in inventory for the selected dates.</p>;
   }
   if (availability.available > 0) {
     return (
-      <p className="text-sm font-semibold text-emerald-700">
+      <p className="text-sm font-semibold text-success">
         {availability.available} of {availability.quantity} available for this date
       </p>
     );
   }
-  return <p className="text-sm font-semibold text-red-600">No {label} available for selected dates</p>;
+  return <p className="text-sm font-semibold text-danger">No {label} available for selected dates</p>;
 }
 
 function BookedModal({ lead, onConfirm, onClose }) {
@@ -935,18 +935,18 @@ function BookedModal({ lead, onConfirm, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-        <h3 className="text-lg font-bold text-gray-900 mb-1">Confirm Booking</h3>
-        <p className="text-sm text-gray-500 mb-5">{name}{size ? ` · ${size}` : ''}</p>
+      <div className="bg-surface rounded-2xl shadow-xl w-full max-w-md p-6">
+        <h3 className="text-lg font-bold text-content mb-1">Confirm Booking</h3>
+        <p className="text-sm text-muted mb-5">{name}{size ? ` · ${size}` : ''}</p>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              {t.jobUnit} Size <span className="text-red-500">*</span>
+            <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
+              {t.jobUnit} Size <span className="text-danger">*</span>
             </label>
             <select
               value={size}
               onChange={e => setSize(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+              className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-surface"
             >
               {!size && <option value="">Select a size…</option>}
               {sizeOptions.map(s => (
@@ -955,19 +955,19 @@ function BookedModal({ lead, onConfirm, onClose }) {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              {t.startDate} <span className="text-red-500">*</span>
+            <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
+              {t.startDate} <span className="text-danger">*</span>
             </label>
             <input
               type="date"
               value={date}
               onChange={e => setDate(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-              {t.durationLabel} (days) <span className="text-red-500">*</span>
+            <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
+              {t.durationLabel} (days) <span className="text-danger">*</span>
             </label>
             <input
               type="number"
@@ -975,22 +975,22 @@ function BookedModal({ lead, onConfirm, onClose }) {
               value={rentalDays}
               onChange={e => setRentalDays(e.target.value)}
               placeholder="e.g. 7"
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             />
             {pickupISO ? (
-              <p className="text-xs text-gray-500 mt-1">{t.endAction}: {formatPickupDate(pickupISO)}</p>
+              <p className="text-xs text-muted mt-1">{t.endAction}: {formatPickupDate(pickupISO)}</p>
             ) : (
-              <p className="text-xs text-gray-400 mt-1">Enter duration to calculate {t.endAction.toLowerCase()} date</p>
+              <p className="text-xs text-muted mt-1">Enter duration to calculate {t.endAction.toLowerCase()} date</p>
             )}
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+            <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
               Availability
             </label>
             {isValid ? (
               <AvailabilityNote loading={loadingAvail} availability={availability} size={size} />
             ) : (
-              <p className="text-xs text-gray-400">Enter a delivery date and duration to check availability.</p>
+              <p className="text-xs text-muted">Enter a delivery date and duration to check availability.</p>
             )}
           </div>
         </div>
@@ -998,13 +998,13 @@ function BookedModal({ lead, onConfirm, onClose }) {
           <button
             onClick={() => onConfirm({ date, rentalDays: daysNum, size })}
             disabled={!isValid}
-            className="flex-1 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
+            className="flex-1 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
           >
             Confirm Booking
           </button>
           <button
             onClick={onClose}
-            className="px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 rounded-xl transition-colors"
+            className="px-4 py-2.5 text-sm text-muted hover:text-content rounded-xl transition-colors"
           >
             Cancel
           </button>
@@ -1059,43 +1059,43 @@ function QuickAvailabilityCheck() {
   };
 
   return (
-    <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100">
+    <section className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-divider">
         <div className="flex items-center gap-2">
           <CalendarSearch size={15} className="text-accent" />
-          <h2 className="text-sm font-bold text-gray-900">Quick Availability Check</h2>
+          <h2 className="text-sm font-bold text-content">Quick Availability Check</h2>
         </div>
-        <p className="text-xs text-gray-500 mt-0.5">Check dumpster availability in seconds</p>
+        <p className="text-xs text-muted mt-0.5">Check dumpster availability in seconds</p>
       </div>
 
       <div className="px-4 py-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+            <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
               Dumpster Size
             </label>
             <select
               value={size}
               onChange={e => setSize(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full text-sm border border-divider rounded-lg px-3 py-2 bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
             >
               <option value="">Select size…</option>
               {sizes.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+            <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
               Delivery Date
             </label>
             <input
               type="date"
               value={date}
               onChange={e => setDate(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+            <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
               Rental Duration (days)
             </label>
             <input
@@ -1105,7 +1105,7 @@ function QuickAvailabilityCheck() {
               placeholder="e.g. 7"
               value={duration}
               onChange={e => setDuration(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
         </div>
@@ -1113,7 +1113,7 @@ function QuickAvailabilityCheck() {
         <button
           onClick={handleCheck}
           disabled={loading}
-          className="w-full mt-3 text-sm font-medium text-white bg-accent hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2.5 rounded-lg transition-opacity"
+          className="w-full mt-3 text-sm font-medium text-content bg-accent hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2.5 rounded-lg transition-opacity"
         >
           {loading ? 'Checking…' : 'Check Availability'}
         </button>
@@ -1121,20 +1121,20 @@ function QuickAvailabilityCheck() {
         {result && (
           <div className="mt-3">
             {result.status === 'incomplete' && (
-              <p className="text-sm text-gray-500">Please fill in all fields</p>
+              <p className="text-sm text-muted">Please fill in all fields</p>
             )}
             {result.status === 'available' && (
-              <p className="text-sm font-semibold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
+              <p className="text-sm font-semibold text-success bg-success/10 rounded-lg px-3 py-2">
                 {result.available} of {result.owned} available for {size} on {formatDeliveryDate(date)}
               </p>
             )}
             {result.status === 'none' && (
-              <p className="text-sm font-semibold text-red-600 bg-red-50 rounded-lg px-3 py-2">
+              <p className="text-sm font-semibold text-danger bg-danger/10 rounded-lg px-3 py-2">
                 No {size} available for selected dates
               </p>
             )}
             {result.status === 'error' && (
-              <p className="text-sm text-amber-600">Could not check availability — please try again.</p>
+              <p className="text-sm text-warning">Could not check availability — please try again.</p>
             )}
           </div>
         )}
@@ -1452,10 +1452,10 @@ export default function HomeServicesDashboard() {
       {/* Greeting */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{greeting}, {settings.ownerFirstName || 'there'}! 👋</h1>
-          <p className="text-sm text-gray-500 mt-1">Here's what's happening with your business today.</p>
+          <h1 className="text-2xl font-bold text-content">{greeting}, {settings.ownerFirstName || 'there'}! 👋</h1>
+          <p className="text-sm text-muted mt-1">Here's what's happening with your business today.</p>
         </div>
-        <p className="text-sm text-gray-400 mt-1 flex-shrink-0">{today}</p>
+        <p className="text-sm text-muted mt-1 flex-shrink-0">{today}</p>
       </div>
 
       {/* Morning Brief banner — renders only in the morning, until dismissed */}
@@ -1466,11 +1466,11 @@ export default function HomeServicesDashboard() {
 
       {/* Top metric tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <MetricTile icon={AlertTriangle} label="Action Queue" value={metrics.needsAttentionCount} iconColor="text-red-500" />
-        <MetricTile icon={UserPlus} label="New Leads" value={metrics.newLeads7d} iconColor="text-blue-500" />
-        <MetricTile icon={CalendarCheck2} label="Booked This Week" value={metrics.bookedThisWeek} iconColor="text-emerald-500" />
-        <MetricTile icon={Truck} label="On Schedule" value={metrics.onSchedule} iconColor="text-purple-500" />
-        <MetricTile icon={CheckCircle2} label="Completed This Month" value={metrics.completedMonth} iconColor="text-teal-600" />
+        <MetricTile icon={AlertTriangle} label="Action Queue" value={metrics.needsAttentionCount} iconColor="text-danger" />
+        <MetricTile icon={UserPlus} label="New Leads" value={metrics.newLeads7d} iconColor="text-brand" />
+        <MetricTile icon={CalendarCheck2} label="Booked This Week" value={metrics.bookedThisWeek} iconColor="text-success" />
+        <MetricTile icon={Truck} label="On Schedule" value={metrics.onSchedule} iconColor="text-brand" />
+        <MetricTile icon={CheckCircle2} label="Completed This Month" value={metrics.completedMonth} iconColor="text-success" />
       </div>
 
       {/* Action Queue (left 50%) | Today's Schedule (right 50%).
@@ -1478,24 +1478,24 @@ export default function HomeServicesDashboard() {
           each scrolls its own list internally instead of growing the page. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
         {/* Action Queue */}
-        <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col min-h-[440px]">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+        <section className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden flex flex-col min-h-[440px]">
+          <div className="px-4 py-3 border-b border-divider flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2">
-              <AlertTriangle size={15} className="text-red-500" />
-              <h2 className="text-sm font-bold text-gray-900">Action Queue</h2>
+              <AlertTriangle size={15} className="text-danger" />
+              <h2 className="text-sm font-bold text-content">Action Queue</h2>
             </div>
             {needsAttention.length > 0 && (
-              <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">
+              <span className="text-xs bg-danger/10 text-danger px-2 py-0.5 rounded-full font-medium">
                 {needsAttention.length} action{needsAttention.length !== 1 ? 's' : ''}
               </span>
             )}
           </div>
           {needsAttention.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-gray-400">
+            <div className="px-4 py-8 text-center text-sm text-muted">
               Inbox clear — great work! 🎉
             </div>
           ) : (
-            <div className="divide-y divide-gray-50 overflow-y-auto max-h-[360px] scrollbar-subtle">
+            <div className="divide-y divide-divider overflow-y-auto max-h-[360px] scrollbar-subtle">
               {needsAttention.map(({ lead, state, tier, bookedReason }) => (
                 <AttentionRow
                   key={lead.id}

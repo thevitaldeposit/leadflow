@@ -21,18 +21,18 @@ function Toast({ toast, onDismiss }) {
   return (
     <div
       onClick={handleClick}
-      className="flex items-start gap-3 bg-white border border-gray-200 rounded-xl shadow-lg p-4 cursor-pointer hover:shadow-xl transition-shadow max-w-sm w-full animate-slide-in"
+      className="flex items-start gap-3 bg-surface border border-divider rounded-xl shadow-lg p-4 cursor-pointer hover:shadow-xl transition-shadow max-w-sm w-full animate-slide-in"
     >
-      <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${toast.autoBooked ? 'bg-emerald-500' : 'bg-accent'}`}>
-        <Zap size={15} className="text-white" />
+      <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${toast.autoBooked ? 'bg-success' : 'bg-accent'}`}>
+        <Zap size={15} className={toast.autoBooked ? 'text-background' : 'text-content'} />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-gray-900 truncate">{toast.title}</p>
-        {toast.sub && <p className="text-xs text-gray-500 mt-0.5 truncate">{toast.sub}</p>}
+        <p className="text-sm font-semibold text-content truncate">{toast.title}</p>
+        {toast.sub && <p className="text-xs text-muted mt-0.5 truncate">{toast.sub}</p>}
       </div>
       <button
         onClick={e => { e.stopPropagation(); onDismiss(toast.id); }}
-        className="flex-shrink-0 text-gray-300 hover:text-gray-500 transition-colors"
+        className="flex-shrink-0 text-muted hover:text-muted transition-colors"
       >
         <X size={14} />
       </button>

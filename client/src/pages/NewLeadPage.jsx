@@ -11,14 +11,14 @@ export default function NewLeadPage() {
   const tabClass = (t) =>
     `flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors ${
       type === t
-        ? 'bg-accent text-white shadow-sm'
-        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+        ? 'bg-accent text-content shadow-sm'
+        : 'text-muted hover:text-content hover:bg-surface-2'
     }`;
 
   return (
     <div className="space-y-5">
       {/* Tab switcher */}
-      <div className="flex items-center gap-2 bg-white rounded-xl border border-gray-100 shadow-sm p-2 w-fit">
+      <div className="flex items-center gap-2 bg-surface rounded-xl border border-divider shadow-sm p-2 w-fit">
         <NavLink to="/new/manual" className={tabClass('manual')}>
           <PencilLine size={15} />
           Manual Entry

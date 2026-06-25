@@ -130,8 +130,8 @@ export default function Layout({ children }) {
   const linkClass = ({ isActive }) =>
     `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
       isActive
-        ? 'bg-sidebar-active text-white'
-        : 'text-gray-400 hover:bg-sidebar-hover hover:text-white'
+        ? 'bg-sidebar-active text-content'
+        : 'text-muted hover:bg-sidebar-hover hover:text-content'
     }`;
 
   return (
@@ -152,7 +152,7 @@ export default function Layout({ children }) {
 
           {/* Home Services nav group */}
           <div className="pt-2 pb-1">
-            <p className="px-4 text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1">Home Services</p>
+            <p className="px-4 text-[10px] font-bold text-muted uppercase tracking-widest mb-1">Home Services</p>
           </div>
 
           <NavLink to="/customers" className={linkClass}>
@@ -186,14 +186,14 @@ export default function Layout({ children }) {
           </NavLink>
 
           <div className="pt-2 pb-1">
-            <p className="px-4 text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1">Tools</p>
+            <p className="px-4 text-[10px] font-bold text-muted uppercase tracking-widest mb-1">Tools</p>
           </div>
 
           {/* New Lead with sub-items */}
           <div>
             <button
               onClick={() => setNewOpen(v => !v)}
-              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-sidebar-hover hover:text-white transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-muted hover:bg-sidebar-hover hover:text-content transition-colors"
             >
               <PlusCircle size={18} />
               <span className="flex-1 text-left">New Lead</span>
@@ -243,16 +243,16 @@ export default function Layout({ children }) {
         {/* Footer */}
         <div className="px-4 py-3 border-t border-white/10 space-y-2">
           {business?.name && (
-            <p className="text-xs text-gray-400 truncate" title={business.name}>{business.name}</p>
+            <p className="text-xs text-muted truncate" title={business.name}>{business.name}</p>
           )}
           <button
             onClick={logout}
-            className="flex items-center gap-2 text-xs text-gray-500 hover:text-white transition-colors"
+            className="flex items-center gap-2 text-xs text-muted hover:text-content transition-colors"
           >
             <LogOut size={14} />
             Sign out
           </button>
-          <p className="text-[10px] text-gray-600">Stream v1.0</p>
+          <p className="text-[10px] text-muted">Stream v1.0</p>
         </div>
       </aside>
 

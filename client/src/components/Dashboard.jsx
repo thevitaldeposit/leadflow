@@ -6,14 +6,14 @@ import socket from '../socket';
 
 function StatCard({ label, value, sub, icon: Icon, color }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
+    <div className="bg-surface rounded-xl border border-divider shadow-sm p-5 flex items-center gap-4">
       <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${color}`}>
-        <Icon size={20} className="text-white" />
+        <Icon size={20} className="text-content" />
       </div>
       <div>
-        <p className="text-2xl font-bold text-gray-900">{value ?? '—'}</p>
-        <p className="text-sm text-gray-500">{label}</p>
-        {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+        <p className="text-2xl font-bold text-content">{value ?? '—'}</p>
+        <p className="text-sm text-muted">{label}</p>
+        {sub && <p className="text-xs text-muted mt-0.5">{sub}</p>}
       </div>
     </div>
   );
@@ -21,11 +21,11 @@ function StatCard({ label, value, sub, icon: Icon, color }) {
 
 function IntentPill({ intent, count }) {
   const styles = {
-    hot: { bg: 'bg-red-100', text: 'text-red-700', icon: Flame },
-    warm: { bg: 'bg-amber-100', text: 'text-amber-700', icon: Thermometer },
-    cold: { bg: 'bg-blue-100', text: 'text-blue-600', icon: Snowflake },
+    hot: { bg: 'bg-danger/10', text: 'text-danger', icon: Flame },
+    warm: { bg: 'bg-warning/10', text: 'text-warning', icon: Thermometer },
+    cold: { bg: 'bg-brand/10', text: 'text-brand', icon: Snowflake },
   };
-  const s = styles[intent] || { bg: 'bg-gray-100', text: 'text-gray-600', icon: BarChart2 };
+  const s = styles[intent] || { bg: 'bg-surface-2', text: 'text-muted', icon: BarChart2 };
   const Icon = s.icon;
   return (
     <div className={`flex items-center gap-2 px-4 py-3 rounded-xl ${s.bg}`}>
@@ -88,34 +88,34 @@ export default function Dashboard() {
       {/* Stat cards row */}
       <div className="grid grid-cols-4 gap-4">
         <StatCard label="Leads Today" value={stats?.totals?.today} icon={Users} color="bg-accent" />
-        <StatCard label="Leads This Week" value={stats?.totals?.week} icon={TrendingUp} color="bg-indigo-500" />
-        <StatCard label="Leads This Month" value={stats?.totals?.month} icon={BarChart2} color="bg-violet-500" />
+        <StatCard label="Leads This Week" value={stats?.totals?.week} icon={TrendingUp} color="bg-brand" />
+        <StatCard label="Leads This Month" value={stats?.totals?.month} icon={BarChart2} color="bg-brand" />
         <StatCard
           label="Appointments Set"
           value={stats?.appointments?.week}
           sub="this week"
           icon={Calendar}
-          color="bg-green-500"
+          color="bg-success"
         />
       </div>
 
       {/* Intent + status row */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-          <p className="text-sm font-semibold text-gray-700 mb-3">Lead Intent</p>
+        <div className="bg-surface rounded-xl border border-divider shadow-sm p-4">
+          <p className="text-sm font-semibold text-content mb-3">Lead Intent</p>
           <div className="flex gap-3">
             <IntentPill intent="hot" count={intentMap.hot || 0} />
             <IntentPill intent="warm" count={intentMap.warm || 0} />
             <IntentPill intent="cold" count={intentMap.cold || 0} />
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-          <p className="text-sm font-semibold text-gray-700 mb-3">Pipeline Status</p>
+        <div className="bg-surface rounded-xl border border-divider shadow-sm p-4">
+          <p className="text-sm font-semibold text-content mb-3">Pipeline Status</p>
           <div className="flex flex-wrap gap-2">
             {['new', 'contacted', 'appointment_set', 'sold', 'lost'].map(s => (
-              <div key={s} className="text-center px-3 py-2 bg-gray-50 rounded-lg">
-                <p className="text-lg font-bold text-gray-800">{statusMap[s] || 0}</p>
-                <p className="text-xs text-gray-500 capitalize">{s.replace('_', ' ')}</p>
+              <div key={s} className="text-center px-3 py-2 bg-surface-2 rounded-lg">
+                <p className="text-lg font-bold text-content">{statusMap[s] || 0}</p>
+                <p className="text-xs text-muted capitalize">{s.replace('_', ' ')}</p>
               </div>
             ))}
           </div>
@@ -125,12 +125,12 @@ export default function Dashboard() {
       {/* Recent leads */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-gray-800">Recent Leads</h2>
-          <span className="text-xs text-gray-400">{leads.length} shown</span>
+          <h2 className="text-base font-semibold text-content">Recent Leads</h2>
+          <span className="text-xs text-muted">{leads.length} shown</span>
         </div>
         {leads.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center text-gray-400">
-            <Users size={32} className="mx-auto mb-3 text-gray-300" />
+          <div className="bg-surface rounded-xl border border-divider shadow-sm p-12 text-center text-muted">
+            <Users size={32} className="mx-auto mb-3 text-muted" />
             <p className="text-sm">No leads yet. Submit a transcript or up sheet to get started.</p>
           </div>
         ) : (

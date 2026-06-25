@@ -53,10 +53,10 @@ export default function UpsheetUpload() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-6">
         <div className="flex items-center gap-2 mb-4">
           <Image size={18} className="text-accent" />
-          <h2 className="text-base font-semibold text-gray-800">Upload Up Sheet Photo</h2>
+          <h2 className="text-base font-semibold text-content">Upload Up Sheet Photo</h2>
         </div>
 
         {!file ? (
@@ -67,15 +67,15 @@ export default function UpsheetUpload() {
             onClick={() => inputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${
               dragging
-                ? 'border-accent bg-blue-50'
-                : 'border-gray-200 hover:border-accent hover:bg-blue-50/50'
+                ? 'border-accent bg-brand/10'
+                : 'border-divider hover:border-accent hover:bg-brand/10'
             }`}
           >
-            <Upload size={32} className={`mx-auto mb-3 ${dragging ? 'text-accent' : 'text-gray-300'}`} />
-            <p className="text-sm font-medium text-gray-600">
+            <Upload size={32} className={`mx-auto mb-3 ${dragging ? 'text-accent' : 'text-muted'}`} />
+            <p className="text-sm font-medium text-muted">
               Drop your up sheet photo here, or <span className="text-accent">browse</span>
             </p>
-            <p className="text-xs text-gray-400 mt-1">Supports JPG, PNG, HEIC (phone photos)</p>
+            <p className="text-xs text-muted mt-1">Supports JPG, PNG, HEIC (phone photos)</p>
             <input
               ref={inputRef}
               type="file"
@@ -90,16 +90,16 @@ export default function UpsheetUpload() {
               <img
                 src={preview}
                 alt="Up sheet preview"
-                className="max-h-80 rounded-xl border border-gray-200 shadow-sm"
+                className="max-h-80 rounded-xl border border-divider shadow-sm"
               />
               <button
                 onClick={clear}
-                className="absolute top-2 right-2 bg-white rounded-full p-1 shadow-md hover:bg-red-50 transition-colors"
+                className="absolute top-2 right-2 bg-surface rounded-full p-1 shadow-md hover:bg-danger/10 transition-colors"
               >
-                <X size={14} className="text-gray-600" />
+                <X size={14} className="text-muted" />
               </button>
             </div>
-            <p className="text-xs text-gray-500">{file.name} ({(file.size / 1024).toFixed(0)} KB)</p>
+            <p className="text-xs text-muted">{file.name} ({(file.size / 1024).toFixed(0)} KB)</p>
           </div>
         )}
 
@@ -107,14 +107,14 @@ export default function UpsheetUpload() {
           <div className="flex items-center justify-end gap-3 mt-4">
             <button
               onClick={clear}
-              className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+              className="text-sm text-muted hover:text-muted px-4 py-2 rounded-lg hover:bg-surface-2 transition-colors"
             >
               Remove
             </button>
             <button
               onClick={handleExtract}
               disabled={loading}
-              className="flex items-center gap-2 bg-accent text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-2 bg-accent text-content px-5 py-2 rounded-lg text-sm font-medium hover:bg-brand disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? (
                 <>
@@ -133,17 +133,17 @@ export default function UpsheetUpload() {
       </div>
 
       {error && (
-        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+        <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger px-4 py-3 rounded-lg text-sm">
           <AlertCircle size={15} />
           {error}
         </div>
       )}
 
       {loading && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center">
+        <div className="bg-brand/10 border border-brand/30 rounded-xl p-6 text-center">
           <Loader2 size={28} className="animate-spin text-accent mx-auto mb-3" />
-          <p className="text-sm font-medium text-blue-700">AI is reading your up sheet...</p>
-          <p className="text-xs text-blue-500 mt-1">Interpreting handwriting, extracting fields, scoring confidence</p>
+          <p className="text-sm font-medium text-brand">AI is reading your up sheet...</p>
+          <p className="text-xs text-brand mt-1">Interpreting handwriting, extracting fields, scoring confidence</p>
         </div>
       )}
     </div>

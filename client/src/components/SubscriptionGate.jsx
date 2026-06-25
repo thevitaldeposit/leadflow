@@ -49,14 +49,14 @@ export default function SubscriptionGate({ children }) {
 
   const content = isPastDue
     ? {
-        icon: <AlertTriangle size={28} className="text-amber-500" />,
+        icon: <AlertTriangle size={28} className="text-warning" />,
         heading: 'Payment Failed',
         message:
           "We weren't able to process your last payment. Please update your payment method to continue using Stream.",
         button: busy ? 'Redirecting…' : 'Update Payment Method',
       }
     : {
-        icon: <Lock size={28} className="text-gray-400" />,
+        icon: <Lock size={28} className="text-muted" />,
         heading: 'Subscription Ended',
         message:
           'Your Stream subscription is no longer active. Resubscribe to get back to work.',
@@ -65,7 +65,7 @@ export default function SubscriptionGate({ children }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-app-bg p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-sm p-8 text-center">
+      <div className="w-full max-w-md bg-surface rounded-2xl shadow-sm p-8 text-center">
         <div className="flex items-center justify-center gap-2 mb-6">
           <Zap size={22} className="text-accent" />
           <span className="font-bold text-lg tracking-tight">Stream</span>
@@ -73,20 +73,20 @@ export default function SubscriptionGate({ children }) {
 
         <div className="flex justify-center mb-4">{content.icon}</div>
 
-        <h1 className="text-xl font-semibold text-gray-900">{content.heading}</h1>
-        <p className="mt-2 text-sm text-gray-500 leading-relaxed">{content.message}</p>
+        <h1 className="text-xl font-semibold text-content">{content.heading}</h1>
+        <p className="mt-2 text-sm text-muted leading-relaxed">{content.message}</p>
 
         <button
           onClick={handleAction}
           disabled={busy}
-          className="mt-6 w-full py-2.5 rounded-lg bg-accent text-white font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+          className="mt-6 w-full py-2.5 rounded-lg bg-accent text-content font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
           {content.button}
         </button>
 
         <a
           href="mailto:support@joinstream.app"
-          className="mt-4 inline-block text-sm text-gray-500 hover:text-gray-700"
+          className="mt-4 inline-block text-sm text-muted hover:text-content"
         >
           Contact Support
         </a>

@@ -29,28 +29,29 @@ export const JOB_STATUSES = [
 ];
 
 export const JOB_STATUS_STYLES = {
-  inquiry: 'bg-blue-100 text-blue-700 border-blue-200',
-  opportunity: 'bg-amber-100 text-amber-700 border-amber-200',
-  booked: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  scheduled: 'bg-cyan-100 text-cyan-700 border-cyan-200',
-  delivered: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-  active_rental: 'bg-violet-100 text-violet-700 border-violet-200',
-  picked_up: 'bg-teal-100 text-teal-700 border-teal-200',
-  completed: 'bg-gray-100 text-gray-700 border-gray-200',
-  lost: 'bg-red-100 text-red-500 border-red-200',
-  spam: 'bg-gray-100 text-gray-400 border-gray-200',
+  inquiry: 'bg-brand/10 text-brand border-brand/30',
+  opportunity: 'bg-warning/10 text-warning border-warning/30',
+  booked: 'bg-success/10 text-success border-success/30',
+  scheduled: 'bg-info/10 text-info border-info/30',
+  // Job is live or done → green (success), per the product's status color language.
+  delivered: 'bg-success/10 text-success border-success/30',
+  active_rental: 'bg-success/10 text-success border-success/30',
+  picked_up: 'bg-success/10 text-success border-success/30',
+  completed: 'bg-success/10 text-success border-success/30',
+  lost: 'bg-danger/10 text-danger border-danger/30',
+  spam: 'bg-surface-2 text-muted border-divider',
 };
 
 export const HOME_SERVICES_STATUS_STYLES = {
-  new: 'bg-blue-100 text-blue-700 border-blue-200',
-  needs_follow_up: 'bg-amber-100 text-amber-700 border-amber-200',
-  waiting_on_customer: 'bg-purple-100 text-purple-700 border-purple-200',
-  booked: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  lost: 'bg-gray-100 text-gray-500 border-gray-200',
-  spam: 'bg-gray-100 text-gray-400 border-gray-200',
+  new: 'bg-brand/10 text-brand border-brand/30',
+  needs_follow_up: 'bg-warning/10 text-warning border-warning/30',
+  waiting_on_customer: 'bg-brand/10 text-brand border-brand/30',
+  booked: 'bg-success/10 text-success border-success/30',
+  lost: 'bg-surface-2 text-muted border-divider',
+  spam: 'bg-surface-2 text-muted border-divider',
   // Legacy values still in DB
-  contacted: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  quote_sent: 'bg-purple-100 text-purple-700 border-purple-200',
+  contacted: 'bg-warning/10 text-warning border-warning/30',
+  quote_sent: 'bg-brand/10 text-brand border-brand/30',
 };
 
 // Returns the display label for a job_status value
@@ -73,10 +74,10 @@ export const HOME_SERVICES_OUTCOMES = [
 export const URGENCY_VALUES = ['ASAP', 'This Week', 'Next Week', 'Flexible'];
 
 export const URGENCY_STYLES = {
-  'ASAP': 'bg-red-100 text-red-700 border-red-200',
-  'This Week': 'bg-orange-100 text-orange-700 border-orange-200',
-  'Next Week': 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  'Flexible': 'bg-green-100 text-green-700 border-green-200',
+  'ASAP': 'bg-danger/10 text-danger border-danger/30',
+  'This Week': 'bg-warning/10 text-warning border-warning/30',
+  'Next Week': 'bg-warning/10 text-warning border-warning/30',
+  'Flexible': 'bg-success/10 text-success border-success/30',
 };
 
 // Replaces the numerical confidence score. High/Warm/Cold are derived in the AI
@@ -84,9 +85,9 @@ export const URGENCY_STYLES = {
 export const INTENT_VALUES = ['high', 'warm', 'cold'];
 export const INTENT_LABELS = { high: 'High Intent', warm: 'Warm', cold: 'Cold' };
 export const INTENT_STYLES = {
-  high: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  warm: 'bg-amber-100 text-amber-700 border-amber-200',
-  cold: 'bg-gray-100 text-gray-500 border-gray-200',
+  high: 'bg-success/10 text-success border-success/30',
+  warm: 'bg-warning/10 text-warning border-warning/30',
+  cold: 'bg-surface-2 text-muted border-divider',
 };
 
 // Sub-verticals that share the home_services dashboard.
@@ -110,12 +111,12 @@ export const CUSTOMER_STATUSES = [
 ];
 
 export const CUSTOMER_STATUS_STYLES = {
-  lead: 'bg-blue-100 text-blue-700 border-blue-200',
-  opportunity: 'bg-amber-100 text-amber-700 border-amber-200',
-  booked: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  customer: 'bg-violet-100 text-violet-700 border-violet-200',
-  repeat: 'bg-teal-100 text-teal-700 border-teal-200',
-  inactive: 'bg-gray-100 text-gray-500 border-gray-200',
+  lead: 'bg-brand/10 text-brand border-brand/30',
+  opportunity: 'bg-warning/10 text-warning border-warning/30',
+  booked: 'bg-success/10 text-success border-success/30',
+  customer: 'bg-brand/10 text-brand border-brand/30',
+  repeat: 'bg-success/10 text-success border-success/30',
+  inactive: 'bg-surface-2 text-muted border-divider',
 };
 
 export function getCustomerStatusLabel(value) {
@@ -134,11 +135,11 @@ export const INVOICE_STATUSES = [
 ];
 
 export const INVOICE_STATUS_STYLES = {
-  draft: 'bg-gray-100 text-gray-600 border-gray-200',
-  sent: 'bg-blue-100 text-blue-700 border-blue-200',
-  signed: 'bg-violet-100 text-violet-700 border-violet-200',
-  paid: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  void: 'bg-gray-100 text-gray-400 border-gray-200',
+  draft: 'bg-surface-2 text-muted border-divider',
+  sent: 'bg-brand/10 text-brand border-brand/30',
+  signed: 'bg-brand/10 text-brand border-brand/30',
+  paid: 'bg-success/10 text-success border-success/30',
+  void: 'bg-surface-2 text-muted border-divider',
 };
 
 export function getInvoiceStatusLabel(value) {

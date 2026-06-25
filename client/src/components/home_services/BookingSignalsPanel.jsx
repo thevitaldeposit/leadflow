@@ -24,16 +24,16 @@ export default function BookingSignalsPanel({ autoBooked, bookingSignals, bookin
 
   if (autoBooked) {
     return (
-      <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-        <Zap size={16} className="text-emerald-600 flex-shrink-0" />
+      <div className="flex items-center gap-3 bg-success/10 border border-success/30 rounded-xl px-4 py-3">
+        <Zap size={16} className="text-success flex-shrink-0" />
         <div>
-          <p className="text-sm font-bold text-emerald-800">Auto-Booked</p>
-          <p className="text-xs text-emerald-600">All 5 booking signals detected — job was automatically confirmed from the call.</p>
+          <p className="text-sm font-bold text-success">Auto-Booked</p>
+          <p className="text-xs text-success">All 5 booking signals detected — job was automatically confirmed from the call.</p>
         </div>
         {signals.length > 0 && (
           <div className="ml-auto flex flex-wrap gap-1 justify-end">
             {signals.map(s => (
-              <span key={s} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+              <span key={s} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/30">
                 {SIGNAL_LABELS[s] || s}
               </span>
             ))}
@@ -45,12 +45,12 @@ export default function BookingSignalsPanel({ autoBooked, bookingSignals, bookin
 
   if (bookingConfidence && bookingConfidence !== 'none' && signals.length > 0) {
     return (
-      <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-        <Zap size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+      <div className="flex items-start gap-3 bg-warning/10 border border-warning/30 rounded-xl px-4 py-3">
+        <Zap size={16} className="text-warning flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-semibold text-amber-800">
+          <p className="text-sm font-semibold text-warning">
             Booking signals detected
-            <span className="ml-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300">
+            <span className="ml-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-warning/10 border border-warning/30">
               {bookingConfidence}
             </span>
           </p>
@@ -58,8 +58,8 @@ export default function BookingSignalsPanel({ autoBooked, bookingSignals, bookin
             {ALL_SIGNALS.map(s => (
               <span key={s} className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
                 signals.includes(s)
-                  ? 'bg-amber-100 text-amber-700 border-amber-300'
-                  : 'bg-gray-100 text-gray-400 border-gray-200 line-through'
+                  ? 'bg-warning/10 text-warning border-warning/30'
+                  : 'bg-surface-2 text-muted border-divider line-through'
               }`}>
                 {SIGNAL_LABELS[s]}
               </span>

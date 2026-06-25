@@ -38,7 +38,7 @@ function EditableText({ label, value, onSave, multiline = false }) {
 
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      <span className="text-xs font-medium text-muted uppercase tracking-wide">{label}</span>
       {editing ? (
         multiline ? (
           <textarea
@@ -62,9 +62,9 @@ function EditableText({ label, value, onSave, multiline = false }) {
       ) : (
         <button
           onClick={() => { setDraft(value || ''); setEditing(true); }}
-          className="text-sm text-left text-gray-800 hover:text-accent hover:bg-blue-50 px-1 py-0.5 rounded transition-colors min-h-[26px] whitespace-pre-wrap"
+          className="text-sm text-left text-content hover:text-accent hover:bg-brand/10 px-1 py-0.5 rounded transition-colors min-h-[26px] whitespace-pre-wrap"
         >
-          {value || <span className="text-gray-300 italic">—</span>}
+          {value || <span className="text-muted italic">—</span>}
         </button>
       )}
     </div>
@@ -74,12 +74,12 @@ function EditableText({ label, value, onSave, multiline = false }) {
 function EditableBool({ label, value, onSave }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      <span className="text-xs font-medium text-muted uppercase tracking-wide">{label}</span>
       <div className="flex items-center gap-2">
         <button
           onClick={() => onSave(value === true ? null : true)}
           className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-            value === true ? 'bg-green-100 text-green-700' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+            value === true ? 'bg-success/10 text-success' : 'bg-surface-2 text-muted hover:bg-surface-2'
           }`}
         >
           <Check size={12} /> Yes
@@ -87,7 +87,7 @@ function EditableBool({ label, value, onSave }) {
         <button
           onClick={() => onSave(value === false ? null : false)}
           className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-            value === false ? 'bg-red-100 text-red-700' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+            value === false ? 'bg-danger/10 text-danger' : 'bg-surface-2 text-muted hover:bg-surface-2'
           }`}
         >
           <X size={12} /> No
@@ -100,11 +100,11 @@ function EditableBool({ label, value, onSave }) {
 function EditableEnum({ label, value, options, onSave }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      <span className="text-xs font-medium text-muted uppercase tracking-wide">{label}</span>
       <select
         value={value || ''}
         onChange={e => onSave(e.target.value || null)}
-        className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+        className="text-sm border border-divider rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-surface"
       >
         <option value="">—</option>
         {options.map(opt => (
@@ -117,11 +117,11 @@ function EditableEnum({ label, value, options, onSave }) {
 
 function SectionHeader({ title, icon: Icon, badge }) {
   return (
-    <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2 bg-gray-50">
-      <Icon size={15} className="text-gray-500" />
-      <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+    <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
+      <Icon size={15} className="text-muted" />
+      <h3 className="text-sm font-semibold text-content">{title}</h3>
       {badge && (
-        <span className="ml-auto text-[10px] font-medium uppercase tracking-wide text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">
+        <span className="ml-auto text-[10px] font-medium uppercase tracking-wide text-muted bg-surface border border-divider px-2 py-0.5 rounded-full">
           {badge}
         </span>
       )}
@@ -183,7 +183,7 @@ function DateField({ label, value, rawValue, onSave, showTBDWhenEmpty = false })
 
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      <span className="text-xs font-medium text-muted uppercase tracking-wide">{label}</span>
       {editing ? (
         <input
           autoFocus
@@ -198,27 +198,27 @@ function DateField({ label, value, rawValue, onSave, showTBDWhenEmpty = false })
       ) : (
         <button
           onClick={() => { setDraft(isISO ? value : ''); setEditing(true); }}
-          className="text-sm text-left text-gray-800 hover:text-accent hover:bg-blue-50 px-1 py-0.5 rounded transition-colors min-h-[26px]"
+          className="text-sm text-left text-content hover:text-accent hover:bg-brand/10 px-1 py-0.5 rounded transition-colors min-h-[26px]"
         >
           {formatted
             ? formatted
             : showTBDWhenEmpty
-              ? <span className="text-gray-400 italic">TBD</span>
-              : <span className="text-gray-300 italic">Not specified</span>
+              ? <span className="text-muted italic">TBD</span>
+              : <span className="text-muted italic">Not specified</span>
           }
         </button>
       )}
       {unconfirmed && !editing && (
         <div className="flex flex-col gap-0.5 mt-0.5">
-          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-xs font-medium w-fit">
+          <span className="inline-flex items-center gap-1 bg-warning/10 text-warning border border-warning/30 rounded px-1.5 py-0.5 text-xs font-medium w-fit">
             <AlertCircle size={11} />
             Unconfirmed — update before scheduling
           </span>
-          <span className="text-xs text-gray-500 px-1">Customer said: &ldquo;{effectiveRaw}&rdquo;</span>
+          <span className="text-xs text-muted px-1">Customer said: &ldquo;{effectiveRaw}&rdquo;</span>
         </div>
       )}
       {showRawNote && !editing && (
-        <span className="text-xs text-gray-400 px-1">Customer said: &ldquo;{rawValue}&rdquo;</span>
+        <span className="text-xs text-muted px-1">Customer said: &ldquo;{rawValue}&rdquo;</span>
       )}
     </div>
   );
@@ -233,7 +233,7 @@ function TimeField({ label, value, onSave }) {
 
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      <span className="text-xs font-medium text-muted uppercase tracking-wide">{label}</span>
       {editing ? (
         <input
           autoFocus
@@ -246,9 +246,9 @@ function TimeField({ label, value, onSave }) {
       ) : (
         <button
           onClick={() => setEditing(true)}
-          className="text-sm text-left text-gray-800 hover:text-accent hover:bg-blue-50 px-1 py-0.5 rounded transition-colors min-h-[26px]"
+          className="text-sm text-left text-content hover:text-accent hover:bg-brand/10 px-1 py-0.5 rounded transition-colors min-h-[26px]"
         >
-          {formatted || <span className="text-gray-300 italic">No specific time</span>}
+          {formatted || <span className="text-muted italic">No specific time</span>}
         </button>
       )}
     </div>
@@ -313,12 +313,12 @@ function fromLocalInput(str) {
 function FollowUpEditor({ value, onSave }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Follow-Up Date</span>
+      <span className="text-xs font-medium text-muted uppercase tracking-wide">Follow-Up Date</span>
       <input
         type="datetime-local"
         value={toLocalInput(value)}
         onChange={(e) => onSave(fromLocalInput(e.target.value))}
-        className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-white"
+        className="text-sm border border-divider rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent bg-surface"
       />
     </div>
   );
@@ -372,12 +372,12 @@ function PaymentLinkSection({ lead, onUpdate }) {
     : null;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
       <SectionHeader title="Payment Link" icon={Link} />
       <div className="p-4 space-y-3">
         {/* URL */}
         <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Payment URL</p>
+          <p className="text-xs font-medium text-muted uppercase tracking-wide mb-1">Payment URL</p>
           <a
             href={paymentUrl}
             target="_blank"
@@ -391,15 +391,15 @@ function PaymentLinkSection({ lead, onUpdate }) {
         {/* SMS status */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">SMS Status</p>
+            <p className="text-xs font-medium text-muted uppercase tracking-wide mb-1">SMS Status</p>
             {smsSentDate
-              ? <p className="text-sm text-gray-700">Sent on {smsSentDate}</p>
-              : <p className="text-sm text-gray-400 italic">Not sent yet</p>}
+              ? <p className="text-sm text-content">Sent on {smsSentDate}</p>
+              : <p className="text-sm text-muted italic">Not sent yet</p>}
           </div>
           <button
             onClick={handleResend}
             disabled={resending}
-            className="flex items-center gap-1.5 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 text-sm font-medium text-brand bg-brand/10 hover:bg-brand/10 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
           >
             <Send size={13} />
             {resending ? 'Sending…' : smsSentDate ? 'Resend Payment Link' : 'Send Payment Link'}
@@ -407,16 +407,16 @@ function PaymentLinkSection({ lead, onUpdate }) {
         </div>
 
         {resendMsg && (
-          <p className={`text-xs px-2 py-1.5 rounded-lg ${resendMsg.includes('success') ? 'text-green-700 bg-green-50' : 'text-red-600 bg-red-50'}`}>
+          <p className={`text-xs px-2 py-1.5 rounded-lg ${resendMsg.includes('success') ? 'text-success bg-success/10' : 'text-danger bg-danger/10'}`}>
             {resendMsg}
           </p>
         )}
 
         {/* Payment status toggle */}
-        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+        <div className="flex items-center justify-between pt-2 border-t border-divider">
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-0.5">Payment Status</p>
-            <p className={`text-sm font-semibold ${isPaid ? 'text-green-700' : 'text-amber-600'}`}>
+            <p className="text-xs font-medium text-muted uppercase tracking-wide mb-0.5">Payment Status</p>
+            <p className={`text-sm font-semibold ${isPaid ? 'text-success' : 'text-warning'}`}>
               {isPaid ? `Paid ${new Date(lead.paid_at).toLocaleDateString()}` : 'Unpaid'}
             </p>
           </div>
@@ -424,8 +424,8 @@ function PaymentLinkSection({ lead, onUpdate }) {
             onClick={togglePaid}
             className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg transition-colors ${
               isPaid
-                ? 'text-gray-600 bg-gray-100 hover:bg-gray-200'
-                : 'text-green-700 bg-green-50 hover:bg-green-100'
+                ? 'text-muted bg-surface-2 hover:bg-surface-2'
+                : 'text-success bg-success/10 hover:bg-success/10'
             }`}
           >
             {isPaid ? <><X size={13} /> Mark Unpaid</> : <><Check size={13} /> Mark Paid</>}
@@ -480,22 +480,22 @@ function ActivityTimeline({ leadId }) {
   }, [leadId]);
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
       <SectionHeader title="Activity Timeline" icon={Clock} />
       <div className="p-4">
         {loading ? (
-          <p className="text-sm text-gray-400">Loading activity…</p>
+          <p className="text-sm text-muted">Loading activity…</p>
         ) : activity.length === 0 ? (
-          <p className="text-sm text-gray-400 italic">No activity recorded yet</p>
+          <p className="text-sm text-muted italic">No activity recorded yet</p>
         ) : (
-          <ol className="relative border-l border-gray-200 ml-3">
+          <ol className="relative border-l border-divider ml-3">
             {activity.map(entry => (
               <li key={entry.id} className="mb-5 last:mb-0 ml-6">
-                <span className="absolute -left-3 flex items-center justify-center w-6 h-6 bg-white rounded-full ring-4 ring-white text-base leading-none">
+                <span className="absolute -left-3 flex items-center justify-center w-6 h-6 bg-surface rounded-full ring-4 ring-content text-base leading-none">
                   {ACTIVITY_ICONS[entry.activity_type] || '•'}
                 </span>
-                <p className="text-sm text-gray-800">{entry.description}</p>
-                <time className="text-xs text-gray-400">{formatActivityTime(entry.created_at)}</time>
+                <p className="text-sm text-content">{entry.description}</p>
+                <time className="text-xs text-muted">{formatActivityTime(entry.created_at)}</time>
               </li>
             ))}
           </ol>
@@ -592,14 +592,14 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       />
 
       {/* Job Status + Outcome + Follow-up controls */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm p-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Job Status</p>
+            <p className="text-xs text-muted uppercase tracking-wide font-medium mb-1">Job Status</p>
             <select
               value={lead.job_status || 'inquiry'}
               onChange={e => applyUpdate({ job_status: e.target.value })}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
+              className="text-sm border border-divider rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-surface"
             >
               {JOB_STATUSES.map(s => (
                 <option key={s.value} value={s.value}>{s.label}</option>
@@ -607,11 +607,11 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
             </select>
           </div>
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Outcome</p>
+            <p className="text-xs text-muted uppercase tracking-wide font-medium mb-1">Outcome</p>
             <select
               value={lead.outcome || ''}
               onChange={e => applyUpdate({ outcome: e.target.value || null })}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
+              className="text-sm border border-divider rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-surface"
             >
               <option value="">—</option>
               {HOME_SERVICES_OUTCOMES.map(o => (
@@ -620,22 +620,22 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
             </select>
           </div>
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Urgency</p>
+            <p className="text-xs text-muted uppercase tracking-wide font-medium mb-1">Urgency</p>
             <select
               value={vd.urgency || ''}
               onChange={e => saveVertical('urgency')(e.target.value || null)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
+              className="text-sm border border-divider rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-surface"
             >
               <option value="">—</option>
               {URGENCY_VALUES.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
           </div>
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Intent</p>
+            <p className="text-xs text-muted uppercase tracking-wide font-medium mb-1">Intent</p>
             <select
               value={vd.intentLevel || ''}
               onChange={e => saveVertical('intentLevel')(e.target.value || null)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-white"
+              className="text-sm border border-divider rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent w-full bg-surface"
             >
               <option value="">—</option>
               {INTENT_VALUES.map(i => <option key={i} value={i}>{INTENT_LABELS[i]}</option>)}
@@ -644,14 +644,14 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
           <div className="col-span-2">
             <FollowUpEditor value={vd.followUpDate} onSave={saveVertical('followUpDate')} />
             {vd.followUpReason && (
-              <p className="text-xs text-gray-500 mt-1 italic">Reason: {vd.followUpReason}</p>
+              <p className="text-xs text-muted mt-1 italic">Reason: {vd.followUpReason}</p>
             )}
           </div>
         </div>
       </div>
 
       {/* Contact */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
         <SectionHeader title="Contact" icon={User} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
           <div className="col-span-2">
@@ -663,7 +663,7 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       </div>
 
       {/* Industry Details — field pack driven */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
         <SectionHeader title="Industry Details" icon={Wrench} badge={pack.label} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
           {pack.industryFields.map(field => (
@@ -681,7 +681,7 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       </div>
 
       {/* Quote / Payment — field pack driven */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
         <SectionHeader title="Quote / Payment" icon={DollarSign} />
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-4">
           {pack.quoteFields.map(field => (
@@ -696,7 +696,7 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       )}
 
       {/* Notes */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
         <SectionHeader title="Notes" icon={AlertCircle} />
         <div className="p-4">
           <EditableText label="Internal Notes" value={vd.notes} onSave={saveVertical('notes')} multiline />
@@ -709,17 +709,17 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       {/* AI Summary — confidence score replaced by inline follow-up flags on the
           server side, so this section just shows the augmented summary. */}
       {lead.call_summary && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
           <SectionHeader title="AI Summary" icon={Sparkles} />
           <div className="p-4">
-            <p className="text-sm text-gray-700 leading-relaxed bg-blue-50 px-3 py-2 rounded-lg">
+            <p className="text-sm text-content leading-relaxed bg-brand/10 px-3 py-2 rounded-lg">
               {lead.call_summary}
             </p>
           </div>
         </div>
       )}
 
-      {saving && <p className="text-xs text-center text-gray-400">Saving...</p>}
+      {saving && <p className="text-xs text-center text-muted">Saving...</p>}
       {/* Transcript / Recording sections live in LeadDetailPage's AudioSection. */}
       {/* Debug hint for sub_vertical, only visible in dev tools. */}
       <span className="sr-only" data-sub-vertical={subVertical} />

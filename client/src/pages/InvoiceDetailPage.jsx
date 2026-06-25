@@ -26,10 +26,10 @@ function fmtDateTime(d) {
 
 function Card({ title, children, action }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
       {title && (
-        <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-gray-800">{title}</h2>
+        <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between">
+          <h2 className="text-sm font-bold text-content">{title}</h2>
           {action}
         </div>
       )}
@@ -97,7 +97,7 @@ export default function InvoiceDetailPage() {
     return (
       <div className="max-w-3xl mx-auto">
         <Link to="/invoices" className="text-sm text-accent inline-flex items-center gap-1"><ArrowLeft size={14} /> Invoices</Link>
-        <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-sm text-gray-400 mt-4">{error || 'Invoice not found'}</div>
+        <div className="bg-surface rounded-xl border border-divider p-10 text-center text-sm text-muted mt-4">{error || 'Invoice not found'}</div>
       </div>
     );
   }
@@ -122,65 +122,65 @@ export default function InvoiceDetailPage() {
       <Link to="/invoices" className="text-sm text-accent inline-flex items-center gap-1 hover:underline"><ArrowLeft size={14} /> Invoices</Link>
 
       {/* Header */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+      <div className="bg-surface rounded-xl border border-divider shadow-sm px-5 py-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-gray-900">{inv.invoice_number}</h1>
+              <h1 className="text-xl font-bold text-content">{inv.invoice_number}</h1>
               <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${statusStyle}`}>{getInvoiceStatusLabel(inv.status)}</span>
               {Number(inv.amount_refunded) > 0 && (
-                <span className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Refunded</span>
+                <span className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border bg-warning/10 text-warning border-warning/30">Refunded</span>
               )}
             </div>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-muted mt-1">
               {inv.customer_id ? <Link to={`/customers/${inv.customer_id}`} className="text-accent hover:underline">{inv.bill_to_name || 'Customer'}</Link> : (inv.bill_to_name || '—')}
               {' · '}Issued {fmtDate(inv.issue_date)}{inv.due_date ? ` · Due ${fmtDate(inv.due_date)}` : ''}
             </p>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-extrabold text-gray-900">{money(inv.total, inv.currency)}</p>
-            <p className="text-[11px] text-gray-400">Total</p>
+            <p className="text-2xl font-extrabold text-content">{money(inv.total, inv.currency)}</p>
+            <p className="text-[11px] text-muted">Total</p>
           </div>
         </div>
 
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-2 mt-4">
           {!locked && !isVoid && (
-            <Link to={`/invoices/${inv.id}/edit`} className="flex items-center gap-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg"><Edit2 size={14} /> Edit</Link>
+            <Link to={`/invoices/${inv.id}/edit`} className="flex items-center gap-1.5 text-sm font-medium text-content bg-surface-2 hover:bg-surface-2 px-3 py-2 rounded-lg"><Edit2 size={14} /> Edit</Link>
           )}
           {!isVoid && (
             <>
-              <button onClick={() => send('both')} disabled={busy} className="flex items-center gap-1.5 text-sm font-medium text-white bg-accent hover:bg-accent/90 disabled:opacity-50 px-3 py-2 rounded-lg">
+              <button onClick={() => send('both')} disabled={busy} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-3 py-2 rounded-lg">
                 <Send size={14} /> {inv.sent_at ? 'Resend' : 'Send'}
               </button>
-              <button onClick={copyLink} className="flex items-center gap-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg">
+              <button onClick={copyLink} className="flex items-center gap-1.5 text-sm font-medium text-content bg-surface-2 hover:bg-surface-2 px-3 py-2 rounded-lg">
                 <LinkIcon size={14} /> {copied ? 'Copied!' : 'Copy link'}
               </button>
-              <a href={publicLink} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg"><ExternalLink size={14} /> Preview</a>
+              <a href={publicLink} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-sm font-medium text-content bg-surface-2 hover:bg-surface-2 px-3 py-2 rounded-lg"><ExternalLink size={14} /> Preview</a>
             </>
           )}
           {inv.status !== 'paid' && !isVoid && (
-            <button onClick={markPaid} disabled={busy} className="flex items-center gap-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 px-3 py-2 rounded-lg"><CheckCircle2 size={14} /> Mark paid</button>
+            <button onClick={markPaid} disabled={busy} className="flex items-center gap-1.5 text-sm font-medium text-success bg-success/10 hover:bg-success/10 disabled:opacity-50 px-3 py-2 rounded-lg"><CheckCircle2 size={14} /> Mark paid</button>
           )}
           {!locked && (
-            <button onClick={remove} className="flex items-center gap-1.5 text-sm font-medium text-gray-400 hover:text-red-500 px-3 py-2 rounded-lg ml-auto"><Trash2 size={14} /> Delete</button>
+            <button onClick={remove} className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-danger px-3 py-2 rounded-lg ml-auto"><Trash2 size={14} /> Delete</button>
           )}
         </div>
 
         {/* Send channel hints + flash */}
         {!isVoid && (
-          <div className="flex items-center gap-3 mt-3 text-xs text-gray-400">
+          <div className="flex items-center gap-3 mt-3 text-xs text-muted">
             <span className="flex items-center gap-1"><Mail size={12} /> {hasEmail ? inv.bill_to_email : 'no email'}</span>
             <span className="flex items-center gap-1"><MessageSquare size={12} /> {hasPhone ? inv.bill_to_phone : 'no phone'}</span>
           </div>
         )}
         {flash && (
-          <p className={`text-sm mt-3 ${flash.type === 'ok' ? 'text-emerald-600' : flash.type === 'warn' ? 'text-amber-600' : 'text-red-500'}`}>{flash.msg}</p>
+          <p className={`text-sm mt-3 ${flash.type === 'ok' ? 'text-success' : flash.type === 'warn' ? 'text-warning' : 'text-danger'}`}>{flash.msg}</p>
         )}
       </div>
 
       {locked && (
-        <div className="bg-violet-50 border border-violet-200 rounded-xl px-5 py-3 text-sm text-violet-800">
+        <div className="bg-brand/10 border border-brand/30 rounded-xl px-5 py-3 text-sm text-brand">
           This invoice is {inv.status} and locked as a record. To change it, create a new invoice.
         </div>
       )}
@@ -188,40 +188,40 @@ export default function InvoiceDetailPage() {
       {/* Line items */}
       <Card title="Line Items">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-100">
+          <thead className="bg-surface-2 border-b border-divider">
             <tr>
-              <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
-              <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Qty</th>
-              <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Rate</th>
-              <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+              <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Description</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Qty</th>
+              <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Rate</th>
+              <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted uppercase tracking-wide">Amount</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody className="divide-y divide-divider">
             {inv.line_items.map((it) => (
               <tr key={it.id}>
-                <td className="px-5 py-3 text-gray-800">
+                <td className="px-5 py-3 text-content">
                   {it.description}
-                  {it.line_type && it.line_type !== 'service' && <span className="ml-2 text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{it.line_type}</span>}
-                  {it.unit ? <span className="text-gray-400 text-xs"> / {it.unit}</span> : null}
+                  {it.line_type && it.line_type !== 'service' && <span className="ml-2 text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-surface-2 text-muted">{it.line_type}</span>}
+                  {it.unit ? <span className="text-muted text-xs"> / {it.unit}</span> : null}
                 </td>
-                <td className="px-3 py-3 text-right text-gray-600">{it.quantity}</td>
-                <td className="px-3 py-3 text-right text-gray-600">{money(it.unit_rate, inv.currency)}</td>
-                <td className="px-5 py-3 text-right text-gray-900 font-medium">{money(it.amount, inv.currency)}</td>
+                <td className="px-3 py-3 text-right text-muted">{it.quantity}</td>
+                <td className="px-3 py-3 text-right text-muted">{money(it.unit_rate, inv.currency)}</td>
+                <td className="px-5 py-3 text-right text-content font-medium">{money(it.amount, inv.currency)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="border-t border-gray-100 px-5 py-4">
+        <div className="border-t border-divider px-5 py-4">
           <div className="ml-auto w-full max-w-xs space-y-1.5">
-            <div className="flex justify-between text-sm text-gray-500"><span>Subtotal</span><span>{money(inv.subtotal, inv.currency)}</span></div>
-            {inv.tax_amount > 0 && <div className="flex justify-between text-sm text-gray-500"><span>Tax ({inv.tax_rate}%)</span><span>{money(inv.tax_amount, inv.currency)}</span></div>}
-            <div className="flex justify-between text-base font-bold text-gray-900 pt-2 border-t border-gray-100"><span>Total</span><span>{money(inv.total, inv.currency)}</span></div>
+            <div className="flex justify-between text-sm text-muted"><span>Subtotal</span><span>{money(inv.subtotal, inv.currency)}</span></div>
+            {inv.tax_amount > 0 && <div className="flex justify-between text-sm text-muted"><span>Tax ({inv.tax_rate}%)</span><span>{money(inv.tax_amount, inv.currency)}</span></div>}
+            <div className="flex justify-between text-base font-bold text-content pt-2 border-t border-divider"><span>Total</span><span>{money(inv.total, inv.currency)}</span></div>
           </div>
         </div>
       </Card>
 
       {inv.notes && (
-        <Card title="Note to Customer"><div className="px-5 py-4 text-sm text-gray-700 whitespace-pre-wrap">{inv.notes}</div></Card>
+        <Card title="Note to Customer"><div className="px-5 py-4 text-sm text-content whitespace-pre-wrap">{inv.notes}</div></Card>
       )}
 
       {/* No inline Terms & Contract here: the agreement the customer reads + signs
@@ -233,15 +233,15 @@ export default function InvoiceDetailPage() {
         <Card title="Signature (dispute evidence)">
           <div className="px-5 py-4">
             {inv.signature_type === 'drawn' && inv.signature_data?.startsWith('data:image') ? (
-              <img src={inv.signature_data} alt="Signature" className="h-20 border border-gray-200 rounded-lg bg-white" />
+              <img src={inv.signature_data} alt="Signature" className="h-20 border border-divider rounded-lg bg-surface" />
             ) : (
-              <span className="text-3xl text-gray-900" style={{ fontFamily: '"Brush Script MT","Segoe Script",cursive' }}>{inv.signature_data}</span>
+              <span className="text-3xl text-content" style={{ fontFamily: '"Brush Script MT","Segoe Script",cursive' }}>{inv.signature_data}</span>
             )}
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 mt-4 text-sm">
-              <div><span className="text-gray-400">Signed by</span> <span className="text-gray-800 font-medium">{inv.signer_name}</span></div>
-              <div><span className="text-gray-400">When</span> <span className="text-gray-800">{fmtDateTime(inv.signed_at)}</span></div>
-              <div><span className="text-gray-400">Method</span> <span className="text-gray-800 capitalize">{inv.signature_type}</span></div>
-              {inv.signer_ip && <div><span className="text-gray-400">IP</span> <span className="text-gray-800">{inv.signer_ip}</span></div>}
+              <div><span className="text-muted">Signed by</span> <span className="text-content font-medium">{inv.signer_name}</span></div>
+              <div><span className="text-muted">When</span> <span className="text-content">{fmtDateTime(inv.signed_at)}</span></div>
+              <div><span className="text-muted">Method</span> <span className="text-content capitalize">{inv.signature_type}</span></div>
+              {inv.signer_ip && <div><span className="text-muted">IP</span> <span className="text-content">{inv.signer_ip}</span></div>}
             </div>
           </div>
         </Card>
@@ -250,14 +250,14 @@ export default function InvoiceDetailPage() {
       {/* Activity timeline */}
       {timeline.length > 0 && (
         <Card title="History">
-          <ul className="divide-y divide-gray-50">
+          <ul className="divide-y divide-divider">
             {timeline.map((t, i) => {
               const Icon = t.icon;
               return (
                 <li key={i} className="px-5 py-3 flex items-center gap-3">
-                  <Icon size={15} className="text-gray-400 flex-shrink-0" />
-                  <span className="text-sm text-gray-700 flex-1">{t.label}</span>
-                  <span className="text-xs text-gray-400">{fmtDateTime(t.at)}</span>
+                  <Icon size={15} className="text-muted flex-shrink-0" />
+                  <span className="text-sm text-content flex-1">{t.label}</span>
+                  <span className="text-xs text-muted">{fmtDateTime(t.at)}</span>
                 </li>
               );
             })}
