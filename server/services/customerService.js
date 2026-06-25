@@ -218,6 +218,15 @@ function toJob(lead) {
     pickup_date: lead.pickup_date || null,
     estimated_revenue: leadRevenue(lead),
     paid_at: lead.paid_at || null,
+    // Lightweight call-intelligence so the profile can render the booking-signals
+    // panel (most recent call) and per-row hints without a second round-trip. The
+    // heavy bits (recording, transcript, full summary) are lazy-loaded per call
+    // via GET /leads/:id. Read-only — surfacing these never re-evaluates booking.
+    auto_booked: lead.auto_booked === 1,
+    booking_signals: Array.isArray(vd.bookingSignalsDetected) ? vd.bookingSignalsDetected : [],
+    booking_confidence: vd.bookingConfidence || null,
+    intent_level: vd.intentLevel || null,
+    urgency: vd.urgency || null,
     created_at: lead.created_at,
     updated_at: lead.updated_at,
   };

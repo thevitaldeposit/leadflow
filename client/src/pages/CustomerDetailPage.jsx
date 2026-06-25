@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Fragment } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Phone, PhoneMissed, PhoneOutgoing, MessageSquare, Voicemail,
   StickyNote, RefreshCw, MapPin, Edit2, Trash2, Check, X, FileText, DollarSign, Plus,
+  ChevronDown, ChevronRight, Zap,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
@@ -10,6 +11,8 @@ import {
   JOB_STATUS_STYLES, getJobStatusLabel,
   INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
 } from '../utils/verticalConfig';
+import BookingSignalsPanel from '../components/home_services/BookingSignalsPanel';
+import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
 
 const money = (n, c = 'USD') => {
   const v = Number(n);
@@ -110,6 +113,13 @@ export default function CustomerDetailPage() {
   const [priceDrafts, setPriceDrafts] = useState({});
   const [savingNotes, setSavingNotes] = useState(false);
   const [savingTerms, setSavingTerms] = useState(false);
+  const [expandedJobs, setExpandedJobs] = useState(() => new Set());
+
+  const toggleJob = (jobId) => setExpandedJobs(prev => {
+    const next = new Set(prev);
+    if (next.has(jobId)) next.delete(jobId); else next.add(jobId);
+    return next;
+  });
 
   const load = useCallback(() => {
     return Promise.all([api.getCustomer(id), api.getPricing(), api.getInvoices({ customer_id: id })]).then(([c, p, inv]) => {
@@ -234,6 +244,17 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
+      {/* Booking signals — reflects the customer's most recent call (jobs are
+          returned newest-first). Display-only; rendering these never re-evaluates
+          booking. Self-hides when the latest call has no signals. */}
+      {c.jobs.length > 0 && (
+        <BookingSignalsPanel
+          autoBooked={c.jobs[0].auto_booked}
+          bookingSignals={c.jobs[0].booking_signals}
+          bookingConfidence={c.jobs[0].booking_confidence}
+        />
+      )}
+
       {/* Contact / profile */}
       <Card
         title="Contact"
@@ -263,8 +284,12 @@ export default function CustomerDetailPage() {
         )}
       </Card>
 
-      {/* Job history */}
-      <Card title={`Job History (${c.jobs.length})`}>
+      {/* Job history — each row expands to show that call's intelligence
+          (AI summary, recording, transcript, booking signals, key dates). */}
+      <Card
+        title={`Job History (${c.jobs.length})`}
+        action={c.jobs.length > 0 && <span className="text-[11px] text-gray-400">Tap a job for call details</span>}
+      >
         {c.jobs.length === 0 ? (
           <div className="px-5 py-8 text-center text-sm text-gray-400">No jobs yet.</div>
         ) : (
@@ -278,18 +303,45 @@ export default function CustomerDetailPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {c.jobs.map(j => (
-                <tr key={j.id} className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => navigate(`/leads/${j.id}`)}>
-                  <td className="px-5 py-3 text-gray-800">{j.service}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${JOB_STATUS_STYLES[j.job_status] || 'bg-gray-100 text-gray-500'}`}>
-                      {getJobStatusLabel(j.job_status)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{j.delivery_date ? fmtDate(j.delivery_date) : fmtDate(j.created_at)}</td>
-                  <td className="px-4 py-3 text-gray-700">{j.estimated_revenue ? `$${Math.round(j.estimated_revenue).toLocaleString()}` : '—'}</td>
-                </tr>
-              ))}
+              {c.jobs.map(j => {
+                const open = expandedJobs.has(j.id);
+                return (
+                  <Fragment key={j.id}>
+                    <tr
+                      className="hover:bg-gray-50 cursor-pointer transition-colors"
+                      onClick={() => toggleJob(j.id)}
+                    >
+                      <td className="px-5 py-3 text-gray-800">
+                        <div className="flex items-center gap-2">
+                          {open
+                            ? <ChevronDown size={14} className="text-gray-400 flex-shrink-0" />
+                            : <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />}
+                          <span>{j.service}</span>
+                          {j.auto_booked && (
+                            <span title="Auto-booked from the call" className="inline-flex items-center text-emerald-500">
+                              <Zap size={12} />
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${JOB_STATUS_STYLES[j.job_status] || 'bg-gray-100 text-gray-500'}`}>
+                          {getJobStatusLabel(j.job_status)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{j.delivery_date ? fmtDate(j.delivery_date) : fmtDate(j.created_at)}</td>
+                      <td className="px-4 py-3 text-gray-700">{j.estimated_revenue ? `$${Math.round(j.estimated_revenue).toLocaleString()}` : '—'}</td>
+                    </tr>
+                    {open && (
+                      <tr>
+                        <td colSpan={4} className="p-0 border-t border-gray-100">
+                          <CustomerCallIntelligence jobId={j.id} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         )}
