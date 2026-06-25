@@ -50,7 +50,7 @@ export default function InvoiceEditorPage() {
   const [form, setForm] = useState({
     issue_date: '', due_date: '', tax_rate: '0',
     bill_to_name: '', bill_to_email: '', bill_to_phone: '', bill_to_address: '',
-    notes: '', terms: '', lead_id: null,
+    notes: '', lead_id: null,
   });
   const [lines, setLines] = useState([emptyLine()]);
 
@@ -75,7 +75,7 @@ export default function InvoiceEditorPage() {
             tax_rate: String(inv.tax_rate ?? 0),
             bill_to_name: inv.bill_to_name || '', bill_to_email: inv.bill_to_email || '',
             bill_to_phone: inv.bill_to_phone || '', bill_to_address: inv.bill_to_address || '',
-            notes: inv.notes || '', terms: inv.terms || '', lead_id: inv.lead_id || null,
+            notes: inv.notes || '', lead_id: inv.lead_id || null,
           });
           setLines(inv.line_items.length ? inv.line_items.map((it) => ({
             description: it.description || '', line_type: it.line_type || 'service',
@@ -99,7 +99,7 @@ export default function InvoiceEditorPage() {
             tax_rate: String(pf.tax_rate ?? 0),
             bill_to_name: pf.bill_to_name || '', bill_to_email: pf.bill_to_email || '',
             bill_to_phone: pf.bill_to_phone || '', bill_to_address: pf.bill_to_address || '',
-            notes: '', terms: pf.terms || '', lead_id: pf.lead_id || null,
+            notes: '', lead_id: pf.lead_id || null,
           });
           setRates(pf.available_rates || []);
           const suggested = (pf.suggested_items || []).map((it) => ({
@@ -283,19 +283,16 @@ export default function InvoiceEditorPage() {
         </div>
       </Card>
 
-      {/* Notes + terms */}
+      {/* Note to customer */}
       <Card title="Note to Customer (optional)">
         <div className="px-5 py-4">
           <textarea rows={2} className={inputCls + ' resize-y'} value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="A short message shown on the invoice…" />
         </div>
       </Card>
 
-      <Card title="Terms & Contract">
-        <div className="px-5 py-4">
-          <textarea rows={6} className={inputCls + ' resize-y font-mono text-xs leading-relaxed'} value={form.terms} onChange={(e) => set('terms', e.target.value)} placeholder="Terms the customer agrees to when signing…" />
-          <p className="text-[11px] text-gray-400 mt-1.5">Prefilled from this customer's terms or your business default. Edit your default in <Link to="/invoices" className="text-accent hover:underline">Invoices → defaults</Link>.</p>
-        </div>
-      </Card>
+      {/* No per-invoice Terms & Contract editor: the agreement the customer reads
+          and signs is resolved by business type on the public invoice page (see
+          server getEffectiveContractText), so there's nothing to enter per invoice. */}
 
       {error && <p className="text-sm text-red-500">{error}</p>}
 

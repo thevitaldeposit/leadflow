@@ -224,9 +224,10 @@ export default function InvoiceDetailPage() {
         <Card title="Note to Customer"><div className="px-5 py-4 text-sm text-gray-700 whitespace-pre-wrap">{inv.notes}</div></Card>
       )}
 
-      {/* Terms */}
+      {/* Terms — the business-type contract the customer reads + signs (resolved
+          server-side as effective_terms), not a per-invoice entry. */}
       <Card title="Terms & Contract">
-        <div className="px-5 py-4 text-sm text-gray-700 whitespace-pre-wrap max-h-56 overflow-y-auto leading-relaxed">{inv.terms || 'No terms attached.'}</div>
+        <div className="px-5 py-4 text-sm text-gray-700 whitespace-pre-wrap max-h-56 overflow-y-auto leading-relaxed">{inv.effective_terms || inv.terms || 'No terms attached.'}</div>
       </Card>
 
       {/* Signature evidence */}

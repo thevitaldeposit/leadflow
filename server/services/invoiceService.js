@@ -198,11 +198,15 @@ function getCustomerRow(businessId, customerId) {
   return db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId);
 }
 
-// Full invoice (with line items) scoped to a business, or null.
+// Full invoice (with line items) scoped to a business, or null. `effective_terms`
+// is the contract the customer actually reads + signs, resolved by business type
+// (getEffectiveContractText) — owner-side views show this, not the raw `terms`
+// column, which is no longer the source of the displayed contract.
 function getInvoice(businessId, id) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ? AND business_id = ?').get(id, businessId);
   if (!inv) return null;
   inv.line_items = getLineItems(inv.id);
+  inv.effective_terms = getEffectiveContractText(inv);
   return inv;
 }
 
@@ -330,9 +334,13 @@ function createInvoice(businessId, body = {}) {
   const dueDate = body.due_date !== undefined ? (body.due_date || null) : addDays(issue, defaults.dueDays);
   const invoiceNumber = (body.invoice_number && String(body.invoice_number).trim()) || consumeNumber(businessId);
   const taxRate = body.tax_rate !== undefined ? num(body.tax_rate, defaults.taxRate) : defaults.taxRate;
-  const terms = body.terms !== undefined
-    ? String(body.terms || '')
-    : ((customer.contract_terms && customer.contract_terms.trim()) || defaults.terms);
+  // Per-invoice contract text was removed from the editor. The contract a customer
+  // reads + signs is resolved by business type at display/sign time
+  // (getEffectiveContractText), so we no longer seed the per-invoice `terms` column
+  // from the customer/business default — leaving it null lets the type-based
+  // contract be the sole source. The column is kept (no migration) and an explicit
+  // `body.terms` is still honored as the future "build your contract" seam.
+  const terms = body.terms !== undefined ? String(body.terms || '') : null;
 
   const items = normalizeLineItems(body.line_items ?? body.lineItems ?? body.items);
   const totals = computeTotals(items, taxRate);
