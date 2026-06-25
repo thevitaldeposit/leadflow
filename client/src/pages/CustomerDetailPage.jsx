@@ -64,7 +64,7 @@ function Card({ id, title, icon: Icon, children, action }) {
     <div id={id} className={`bg-surface rounded-xl border border-divider shadow-sm overflow-hidden ${id ? 'scroll-mt-6' : ''}`}>
       <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {Icon && <Icon size={15} className="text-muted" />}
+          {Icon && <Icon size={15} className="text-brand" />}
           <h2 className="text-sm font-bold text-content">{title}</h2>
         </div>
         {action}
@@ -126,7 +126,7 @@ function ContactLine({ icon: Icon, value }) {
   if (!value) return null;
   return (
     <p className="flex items-center gap-2">
-      <Icon size={14} className="text-subtle flex-shrink-0" />
+      <Icon size={14} className="text-brand flex-shrink-0" />
       <span className="text-content truncate">{value}</span>
     </p>
   );
@@ -164,7 +164,7 @@ function ActivityFeed({ activity }) {
     <div className="bg-surface rounded-xl border border-divider shadow-sm flex flex-col lg:max-h-[calc(100vh-7rem)]">
       <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
-          <Activity size={15} className="text-muted" />
+          <Activity size={15} className="text-brand" />
           <h2 className="text-sm font-bold text-content">Activity Feed</h2>
         </div>
         <span className="text-[11px] text-muted">{activity.length}</span>
@@ -259,6 +259,7 @@ export default function CustomerDetailPage() {
   const [savingNote, setSavingNote] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState({});
   const [savingTerms, setSavingTerms] = useState(false);
+  const [activeSection, setActiveSection] = useState(JUMP_LINKS[0].id);
 
   const load = useCallback(() => {
     return Promise.all([api.getCustomer(id), api.getPricing(), api.getInvoices({ customer_id: id })]).then(([c, p, inv]) => {
@@ -273,6 +274,26 @@ export default function CustomerDetailPage() {
     setLoading(true);
     load().catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [load]);
+
+  // Scroll-spy: highlight the jump link whose inline section is currently in
+  // view. Read-only observer — it tracks the topmost visible section and never
+  // touches data or layout. Re-runs once the sections exist (after load).
+  useEffect(() => {
+    if (loading) return;
+    const els = JUMP_LINKS.map(l => document.getElementById(l.id)).filter(Boolean);
+    if (els.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter(en => en.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible.length > 0) setActiveSection(visible[0].target.id);
+      },
+      { rootMargin: '-15% 0px -70% 0px', threshold: 0 }
+    );
+    els.forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, [loading]);
 
   const patch = async (body) => {
     await api.updateCustomer(id, body);
@@ -335,6 +356,7 @@ export default function CustomerDetailPage() {
 
   const scrollToId = (sectionId) => (e) => {
     e.preventDefault();
+    setActiveSection(sectionId);
     const el = document.getElementById(sectionId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
@@ -448,7 +470,12 @@ export default function CustomerDetailPage() {
                 key={l.id}
                 href={`#${l.id}`}
                 onClick={scrollToId(l.id)}
-                className="px-3 py-1.5 rounded-lg text-muted hover:text-content hover:bg-surface-2 font-medium transition-colors"
+                aria-current={activeSection === l.id ? 'true' : undefined}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                  activeSection === l.id
+                    ? 'text-brand bg-brand/10'
+                    : 'text-muted hover:text-content hover:bg-surface-2'
+                }`}
               >
                 {l.label}
               </a>
@@ -699,7 +726,6 @@ function EngagementBody({ engagement: e }) {
 // inquiry) the manual Close / Mark Lost actions. Nothing here changes booking.
 function ActiveEngagement({ id, engagement: e, onClose }) {
   const [closing, setClosing] = useState(false);
-  const style = JOB_STATUS_STYLES[e.status] || JOB_STATUS_STYLES.inquiry;
   const close = async (reason) => {
     const msg = reason === 'lost'
       ? 'Mark this inquiry as Lost? It will close and leave the action queue.'
@@ -712,7 +738,6 @@ function ActiveEngagement({ id, engagement: e, onClose }) {
   return (
     <Card id={id} title={e.label} icon={e.status === 'booked' ? Briefcase : MessageSquare}>
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
-        <span className={`${badgeCls} ${style}`}>{e.label}</span>
         {e.stale && (
           <span className={`${badgeCls} bg-warning/10 text-warning border-warning/30`}>
             <Clock size={11} /> Stale
