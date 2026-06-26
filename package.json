@@ -12,7 +12,8 @@
     "server": "node server/index.js",
     "client": "cd client && npm run dev",
     "setup": "npm install && cd client && npm install && cd .. && node server/db/migrations.js",
-    "init-db": "node server/db/migrations.js"
+    "init-db": "node server/db/migrations.js",
+    "recover-recordings": "node server/scripts/recover-recordings.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
