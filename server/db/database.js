@@ -7,7 +7,14 @@ const FALLBACK_PATH = path.join(__dirname, 'leadflow.db');
 
 function resolveDbPath() {
   const raw = process.env.DATABASE_PATH;
-  return raw ? path.resolve(raw) : FALLBACK_PATH;
+  if (!raw) return FALLBACK_PATH;
+  // Anchor a RELATIVE DATABASE_PATH to the repo root, NOT process.cwd(). Otherwise
+  // launching the server from a subdirectory (e.g. `cd server && node index.js`)
+  // resolves `./server/db/leadflow.db` against the wrong CWD, opens a different,
+  // empty SQLite file, and every existing lead + recording appears to have
+  // vanished. Absolute paths (prod: /data/leadflow.db on the Railway volume) are
+  // used as-is. database.js lives at server/db/, so ../../ is the repo root.
+  return path.isAbsolute(raw) ? raw : path.resolve(__dirname, '../..', raw);
 }
 
 function ensureWritable(dir) {

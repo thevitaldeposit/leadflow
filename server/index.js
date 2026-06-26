@@ -64,8 +64,16 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 }
 
-// Serve uploaded files statically
+// Serve uploaded files (call recordings, images) statically.
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// A missing file under /uploads must return a clean 404 — NOT fall through to the
+// SPA catch-all below, which would answer with index.html (HTTP 200, text/html).
+// An <audio>/<img> src that receives that HTML body reports a generic, confusing
+// "error" instead of a diagnosable 404. This keeps the media-serving path honest
+// regardless of how the surrounding UI markup is edited.
+app.use('/uploads', (req, res) => {
+  res.status(404).json({ error: 'File not found' });
+});
 
 // Serve static public assets (e.g. the Twilio voicemail greeting) from the web
 // root so TwiML <Play> can reach them at https://<host>/<filename>.
