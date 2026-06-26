@@ -525,6 +525,7 @@ function CallButton({ lead, name }) {
 function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick }) {
   const navigate = useNavigate();
   const isMissedCall = lead.call_type === 'missed_call';
+  const isVoicemail = lead.call_type === 'voicemail';
   const name = getLeadName(lead);
   // Missed calls often have no name yet — fall back to the caller's number.
   const displayName = (isMissedCall && name === 'Unknown')
@@ -537,6 +538,15 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
   const reasonText = reason || state.recommendation;
   const reasonIsCritical = !!reason || tier === 1;
 
+  // Action Queue badges — DISPLAY ONLY. This reads `tier`/`intent`/`call_type`
+  // but never feeds the queue's sort (ordering is the `.sort()` on tier →
+  // followUpDate → revenue, computed upstream and untouched here).
+  // One priority badge by precedence: Critical > Voicemail > Missed Call.
+  // High Intent shows alongside a Voicemail (the lone exception), or on its own
+  // as the fallback when none of those three apply. "Warm"/"Cold" never render.
+  const priorityBadge = tier === 1 ? 'critical' : isVoicemail ? 'voicemail' : isMissedCall ? 'missed_call' : null;
+  const showHighIntent = state.intent === 'high' && (priorityBadge === 'voicemail' || priorityBadge === null);
+
   const handleDismissClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -548,13 +558,18 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
       className={`flex items-center gap-2.5 px-3 py-2.5 hover:bg-surface-2 cursor-pointer transition-colors ${tierBorderClass(tier)}`}
       onClick={() => (isMissedCall ? onMissedCallClick(lead) : navigate(`/leads/${lead.id}`))}
     >
-      {tier === 1 ? <CriticalBadge size="sm" /> : <IntentBadge value={state.intent} size="sm" />}
+      {(priorityBadge || showHighIntent) && (
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {priorityBadge === 'critical' && <CriticalBadge size="xs" />}
+          {priorityBadge === 'voicemail' && <VoicemailBadge size="xs" />}
+          {priorityBadge === 'missed_call' && <MissedCallBadge size="xs" />}
+          {showHighIntent && <IntentBadge value="high" size="xs" />}
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-semibold text-content truncate">{displayName}</span>
           {showPhone && <span className="text-xs text-muted flex-shrink-0">{lead.phone}</span>}
-          {lead.call_type === 'voicemail' && <VoicemailBadge />}
-          {isMissedCall && <MissedCallBadge />}
         </div>
         {reasonText && (
           <p className={`text-xs font-medium truncate mt-0.5 ${reasonIsCritical ? 'text-danger' : 'text-accent'}`}>
