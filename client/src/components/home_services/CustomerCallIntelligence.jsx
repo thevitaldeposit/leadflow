@@ -46,7 +46,7 @@ function ROField({ label, value }) {
 // AUTO-BOOK SAFETY: this only GETs the lead (api.getLead). It never writes and
 // never re-runs extraction or booking, so mounting it cannot trigger or change
 // auto-booking. Editing still happens on the full lead detail via the link below.
-export default function CustomerCallIntelligence({ jobId }) {
+export default function CustomerCallIntelligence({ jobId, compact = false }) {
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -68,6 +68,29 @@ export default function CustomerCallIntelligence({ jobId }) {
   const vd = parseVerticalData(lead);
   const t = getTerminology(lead.vertical, getSubVertical(lead));
   const intent = vd.intentLevel ? (INTENT_LABELS[vd.intentLevel] || vd.intentLevel) : null;
+
+  // Compact mode (earlier calls in an engagement): show ONLY the AI summary, the
+  // recording player, and the small Raw transcript link. The structured fields,
+  // booking signals, and key dates already live in the authoritative Active
+  // Inquiry section up top, so we don't repeat them per earlier call.
+  if (compact) {
+    return (
+      <div className="px-5 py-4 space-y-4 bg-surface-2/60">
+        {lead.call_summary && (
+          <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
+              <Sparkles size={15} className="text-muted" />
+              <h3 className="text-sm font-semibold text-content">AI Summary</h3>
+            </div>
+            <div className="p-4">
+              <p className="text-sm text-content leading-relaxed bg-brand/10 px-3 py-2 rounded-lg">{lead.call_summary}</p>
+            </div>
+          </div>
+        )}
+        <AudioSection lead={lead} />
+      </div>
+    );
+  }
 
   return (
     <div className="px-5 py-4 space-y-4 bg-surface-2/60">

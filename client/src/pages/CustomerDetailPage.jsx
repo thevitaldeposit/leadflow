@@ -13,6 +13,7 @@ import {
   INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
+import VoicemailBadge from '../components/home_services/VoicemailBadge';
 
 const money = (n, c = 'USD') => {
   const v = Number(n);
@@ -779,9 +780,12 @@ function EngagementBody({ engagement: e }) {
                       {open ? <ChevronDown size={13} className="text-muted" /> : <ChevronRight size={13} className="text-muted" />}
                       {fmtDateTime(call.created_at) || fmtDate(call.created_at)}
                     </span>
-                    <span className="text-xs text-muted">{call.service}</span>
+                    <span className="flex items-center gap-2 text-xs text-muted">
+                      {call.call_type === 'voicemail' && <VoicemailBadge size="xs" boxy />}
+                      {call.service}
+                    </span>
                   </button>
-                  {open && <CustomerCallIntelligence jobId={call.id} />}
+                  {open && <CustomerCallIntelligence jobId={call.id} compact />}
                 </Fragment>
               );
             })}
