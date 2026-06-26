@@ -558,18 +558,20 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
       className={`flex items-center gap-2.5 px-3 py-2.5 hover:bg-surface-2 cursor-pointer transition-colors ${tierBorderClass(tier)}`}
       onClick={() => (isMissedCall ? onMissedCallClick(lead) : navigate(`/leads/${lead.id}`))}
     >
-      {(priorityBadge || showHighIntent) && (
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {priorityBadge === 'critical' && <CriticalBadge size="xs" />}
-          {priorityBadge === 'voicemail' && <VoicemailBadge size="xs" />}
-          {priorityBadge === 'missed_call' && <MissedCallBadge size="xs" />}
-          {showHighIntent && <IntentBadge value="high" size="xs" />}
-        </div>
-      )}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm font-semibold text-content truncate">{displayName}</span>
+        {/* Line 1: name, phone, then the type badge (right of the phone). The
+            name truncates so this line never shoves the right-pinned status. */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-sm font-semibold text-content truncate min-w-0">{displayName}</span>
           {showPhone && <span className="text-xs text-muted flex-shrink-0">{lead.phone}</span>}
+          {(priorityBadge || showHighIntent) && (
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {priorityBadge === 'critical' && <CriticalBadge size="xs" boxy />}
+              {priorityBadge === 'voicemail' && <VoicemailBadge size="xs" boxy />}
+              {priorityBadge === 'missed_call' && <MissedCallBadge size="xs" boxy />}
+              {showHighIntent && <IntentBadge value="high" size="xs" boxy />}
+            </div>
+          )}
         </div>
         {reasonText && (
           <p className={`text-xs font-medium truncate mt-0.5 ${reasonIsCritical ? 'text-danger' : 'text-accent'}`}>
@@ -577,8 +579,11 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
           </p>
         )}
       </div>
+      {/* Status badge, pinned to a consistent right edge. The fixed-width action
+          slot below sits to its right on every row, so all Overdue badges line
+          up vertically regardless of name/description length (which truncate). */}
       {followUpLabel && (
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-md flex-shrink-0 ${
           followUpLabel === 'Overdue' || followUpLabel === 'Due now'
             ? 'bg-danger/10 text-danger'
             : 'bg-warning/10 text-warning'
@@ -587,11 +592,11 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
         </span>
       )}
       {elapsedLabel && (
-        <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 bg-warning/10 text-warning">
+        <span className="text-xs font-medium px-2 py-0.5 rounded-md flex-shrink-0 bg-warning/10 text-warning">
           {elapsedLabel}
         </span>
       )}
-      <div className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-end gap-0.5 flex-shrink-0 w-14" onClick={e => e.stopPropagation()}>
         {lead.phone && <CallButton lead={lead} name={name} />}
         {/* Missed calls are dismissed via the decision modal's Discard, not the
             quick-dismiss X, so the owner makes an explicit create/discard call. */}
