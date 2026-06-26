@@ -196,10 +196,71 @@ function ActivityFeed({ activity }) {
   );
 }
 
+// One discrete note in the Notes section, with inline edit + delete. Editing
+// and deleting are Notes-section-only — the Activity Feed has no such controls;
+// its note_added entry is derived from this note server-side, so an edit/delete
+// here flows through to the feed on reload automatically.
+function NoteItem({ note, onEdit, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(note.body);
+  const [busy, setBusy] = useState(false);
+
+  const startEdit = () => { setDraft(note.body); setEditing(true); };
+  const cancel = () => { setEditing(false); setDraft(note.body); };
+
+  const save = async () => {
+    const body = draft.trim();
+    if (!body) return;
+    if (body === note.body) { cancel(); return; } // unchanged — skip the round-trip
+    setBusy(true);
+    try { await onEdit(note.id, body); setEditing(false); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async () => {
+    if (!confirm('Delete this note? This cannot be undone.')) return;
+    setBusy(true);
+    try { await onDelete(note.id); }
+    finally { setBusy(false); }
+  };
+
+  if (editing) {
+    return (
+      <li className="rounded-lg border border-divider bg-surface-2 px-3 py-2">
+        <textarea
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          rows={3}
+          autoFocus
+          className={inputCls + ' resize-y'}
+        />
+        <div className="flex justify-end gap-2 mt-2">
+          <button onClick={cancel} disabled={busy} className="flex items-center gap-1.5 text-xs text-muted hover:text-content px-2.5 py-1.5 rounded-lg disabled:opacity-50"><X size={13} /> Cancel</button>
+          <button onClick={save} disabled={busy || !draft.trim()} className="flex items-center gap-1.5 text-xs font-medium text-content bg-brand hover:bg-brand-hover disabled:opacity-50 px-3 py-1.5 rounded-lg"><Check size={13} /> {busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </li>
+    );
+  }
+
+  return (
+    <li className="rounded-lg border border-divider bg-surface-2 px-3 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm text-content whitespace-pre-wrap flex-1 min-w-0">{note.body}</p>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button onClick={startEdit} disabled={busy} title="Edit note" className="p-1 rounded text-subtle hover:text-brand hover:bg-surface disabled:opacity-50"><Edit2 size={13} /></button>
+          <button onClick={remove} disabled={busy} title="Delete note" className="p-1 rounded text-subtle hover:text-danger hover:bg-danger/10 disabled:opacity-50"><Trash2 size={13} /></button>
+        </div>
+      </div>
+      <p className="text-xs text-muted mt-1">{fmtDateTime(note.created_at)}</p>
+    </li>
+  );
+}
+
 // Notes section — discrete notes the owner adds (important for outbound
 // interactions, e.g. a callback recap). Each added note also pushes to the
 // Activity Feed (the server merges customer_notes into the activity timeline).
-function NotesSection({ id, notes, legacyNote, draft, setDraft, onAdd, saving }) {
+// Edit/delete controls live here only, never in the Activity Feed.
+function NotesSection({ id, notes, legacyNote, draft, setDraft, onAdd, onEdit, onDelete, saving }) {
   const canAdd = draft.trim().length > 0 && !saving;
   return (
     <Card id={id} title="Notes" icon={StickyNote}>
@@ -233,10 +294,7 @@ function NotesSection({ id, notes, legacyNote, draft, setDraft, onAdd, saving })
         ) : (
           <ul className="space-y-2">
             {notes.map(n => (
-              <li key={n.id} className="rounded-lg border border-divider bg-surface-2 px-3 py-2">
-                <p className="text-sm text-content whitespace-pre-wrap">{n.body}</p>
-                <p className="text-xs text-muted mt-1">{fmtDateTime(n.created_at)}</p>
-              </li>
+              <NoteItem key={n.id} note={n} onEdit={onEdit} onDelete={onDelete} />
             ))}
           </ul>
         )}
@@ -329,6 +387,17 @@ export default function CustomerDetailPage() {
       setNoteDraft('');
       await load();
     } finally { setSavingNote(false); }
+  };
+
+  // Edit/delete a discrete note. Both reload so the Notes list AND the Activity
+  // Feed (which derives the note_added entry server-side) stay in sync.
+  const editNote = async (noteId, body) => {
+    await api.updateCustomerNote(id, noteId, body);
+    await load();
+  };
+  const deleteNote = async (noteId) => {
+    await api.deleteCustomerNote(id, noteId);
+    await load();
   };
 
   const saveOverride = async (key, label, unit) => {
@@ -662,6 +731,8 @@ export default function CustomerDetailPage() {
             draft={noteDraft}
             setDraft={setNoteDraft}
             onAdd={addNote}
+            onEdit={editNote}
+            onDelete={deleteNote}
             saving={savingNote}
           />
         </div>

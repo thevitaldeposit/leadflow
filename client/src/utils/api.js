@@ -104,6 +104,18 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
     }),
+  // Edit a discrete customer note's text (business-scoped server-side). The edit
+  // also updates the note's Activity Feed entry (derived from the note at read time).
+  updateCustomerNote: (id, noteId, body) =>
+    request(`/customers/${id}/notes/${noteId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    }),
+  // Delete a discrete customer note (business-scoped server-side). Its Activity
+  // Feed entry disappears too, since the feed is derived from the note row.
+  deleteCustomerNote: (id, noteId) =>
+    request(`/customers/${id}/notes/${noteId}`, { method: 'DELETE' }),
   getCustomerPricing: (id) => request(`/customers/${id}/pricing`),
   // Upsert (or clear, with custom_price = null) one per-customer rate override.
   setCustomerPricing: (id, body) =>

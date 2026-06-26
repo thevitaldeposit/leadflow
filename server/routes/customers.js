@@ -266,6 +266,67 @@ router.post('/:id/notes', (req, res) => {
   }
 });
 
+// PUT /api/customers/:id/notes/:noteId — edit a discrete note's text. Scoped by
+// business_id (and customer_id) so a business can only edit its own notes. The
+// edit reflects in the Activity Feed automatically: getCustomerDetail derives the
+// note_added entry from this row at read time, so there's no stored copy to sync.
+// created_at is left untouched — editing text doesn't change when the note was made.
+router.put('/:id/notes/:noteId', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?')
+      .get(req.params.id, businessId);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+    const body = (req.body?.body || req.body?.note || '').toString().trim();
+    if (!body) return res.status(400).json({ error: 'Note text is required' });
+
+    const existing = db.prepare('SELECT id FROM customer_notes WHERE id = ? AND customer_id = ? AND business_id = ?')
+      .get(req.params.noteId, customer.id, businessId);
+    if (!existing) return res.status(404).json({ error: 'Note not found' });
+
+    const now = new Date().toISOString();
+    db.prepare('UPDATE customer_notes SET body = ? WHERE id = ? AND customer_id = ? AND business_id = ?')
+      .run(body, existing.id, customer.id, businessId);
+    // Touch the customer so list ordering (last activity) reflects the edit.
+    db.prepare('UPDATE customers SET updated_at = ? WHERE id = ?').run(now, customer.id);
+
+    const note = db.prepare('SELECT id, body, created_at FROM customer_notes WHERE id = ?').get(existing.id);
+    res.json({ success: true, note });
+  } catch (err) {
+    console.error('PUT /customers/:id/notes/:noteId error:', err);
+    res.status(500).json({ error: 'Failed to update note' });
+  }
+});
+
+// DELETE /api/customers/:id/notes/:noteId — delete a discrete note. Scoped by
+// business_id (and customer_id) so a business can only delete its own notes.
+// Because the Activity Feed derives note_added entries from this table at read
+// time, removing the row also removes its feed entry — notes never write to
+// activity_log, so there's no orphaned timeline row to clean up.
+router.delete('/:id/notes/:noteId', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?')
+      .get(req.params.id, businessId);
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
+    const existing = db.prepare('SELECT id FROM customer_notes WHERE id = ? AND customer_id = ? AND business_id = ?')
+      .get(req.params.noteId, customer.id, businessId);
+    if (!existing) return res.status(404).json({ error: 'Note not found' });
+
+    db.prepare('DELETE FROM customer_notes WHERE id = ? AND customer_id = ? AND business_id = ?')
+      .run(existing.id, customer.id, businessId);
+    // Touch the customer so list ordering (last activity) reflects the removal.
+    db.prepare('UPDATE customers SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), customer.id);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /customers/:id/notes/:noteId error:', err);
+    res.status(500).json({ error: 'Failed to delete note' });
+  }
+});
+
 // GET /api/customers/:id/pricing — resolved effective pricing for this customer.
 router.get('/:id/pricing', (req, res) => {
   try {
