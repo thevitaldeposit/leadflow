@@ -58,13 +58,23 @@ app.post('/api/webhook/stripe/connect', express.raw({ type: 'application/json' }
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Ensure recordings directory exists
-const RECORDINGS_DIR = path.join(__dirname, 'uploads/recordings');
+// Ensure recordings directory exists. RECORDINGS_DIR resolves to the Railway
+// persistent volume in prod (/data/recordings) and to server/uploads/recordings
+// locally — see config/paths.js.
+const { RECORDINGS_DIR } = require('./config/paths');
 if (!fs.existsSync(RECORDINGS_DIR)) {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 }
 
-// Serve uploaded files (call recordings, images) statically.
+// Serve call recordings from RECORDINGS_DIR (the persistent volume in prod) so they
+// survive redeploys. Mounted BEFORE the general /uploads mount so
+// /uploads/recordings/<file> resolves from the volume, while everything else under
+// /uploads (e.g. upsheet images) still comes from server/uploads. The public URL
+// prefix stays exactly /uploads/recordings/... so DB-stored audio_file_path values
+// resolve unchanged. express.static blocks path traversal, so this exposes only
+// RECORDINGS_DIR, not the rest of /data.
+app.use('/uploads/recordings', express.static(RECORDINGS_DIR));
+// Serve other uploaded files (images) statically.
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // A missing file under /uploads must return a clean 404 — NOT fall through to the
 // SPA catch-all below, which would answer with index.html (HTTP 200, text/html).

@@ -35,7 +35,7 @@ const uploadImage = multer({
 });
 
 // Audio uploads
-const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
+const { RECORDINGS_DIR } = require('../config/paths');
 if (!fs.existsSync(RECORDINGS_DIR)) {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 }

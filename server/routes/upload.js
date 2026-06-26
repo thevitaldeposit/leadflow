@@ -15,7 +15,7 @@ const { attachBusiness } = require('../middleware/auth');
 // caller's business when a token is present, else to Valley Binz.
 router.use(attachBusiness);
 
-const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
+const { RECORDINGS_DIR } = require('../config/paths');
 if (!fs.existsSync(RECORDINGS_DIR)) {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 }

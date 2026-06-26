@@ -14,7 +14,7 @@ const { logActivity, formatDuration } = require('../services/activityLog');
 const { getTimezone } = require('../services/settingsService');
 const { getBusinessIdByTwilioNumber, getDefaultBusinessId } = require('../services/businesses');
 
-const RECORDINGS_DIR = path.join(__dirname, '../uploads/recordings');
+const { RECORDINGS_DIR } = require('../config/paths');
 
 // Ring timeouts (seconds) for the inbound <Dial>. The owner-cell value is the
 // original eSIM behavior, unchanged; the app-client value is a touch longer to
