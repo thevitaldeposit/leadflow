@@ -1,10 +1,10 @@
 import { Zap } from 'lucide-react';
 
 // Shared, display-only booking-signals panel. Renders either the green
-// "Auto-Booked" badge (all 5 signals detected on the call) or the amber
-// "booking signals detected" panel showing which of the 5 signals fired — or
-// nothing when there are no signals. Reused by the lead detail and the customer
-// profile so both render identical chrome.
+// "Auto-Booked" badge (all 5 signals detected on the call) or a neutral,
+// on-theme "booking signals detected" panel showing which of the 5 signals
+// fired — or nothing when there are no signals. Reused by the lead detail and
+// the customer profile so both render identical chrome.
 //
 // PURELY VISUAL: this reflects what the extraction already stored on the lead.
 // It never writes, and it never re-evaluates booking — rendering it cannot
@@ -45,12 +45,12 @@ export default function BookingSignalsPanel({ autoBooked, bookingSignals, bookin
 
   if (bookingConfidence && bookingConfidence !== 'none' && signals.length > 0) {
     return (
-      <div className="flex items-start gap-3 bg-warning/10 border border-warning/30 rounded-xl px-4 py-3">
-        <Zap size={16} className="text-warning flex-shrink-0 mt-0.5" />
+      <div className="flex items-start gap-3 bg-surface border border-divider rounded-xl px-4 py-3">
+        <Zap size={16} className="text-muted flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-semibold text-warning">
+          <p className="text-sm font-semibold text-content">
             Booking signals detected
-            <span className="ml-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-warning/10 border border-warning/30">
+            <span className="ml-2 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-surface-2 text-muted border border-divider">
               {bookingConfidence}
             </span>
           </p>
@@ -58,7 +58,7 @@ export default function BookingSignalsPanel({ autoBooked, bookingSignals, bookin
             {ALL_SIGNALS.map(s => (
               <span key={s} className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
                 signals.includes(s)
-                  ? 'bg-warning/10 text-warning border-warning/30'
+                  ? 'bg-brand/10 text-brand border-brand/30'
                   : 'bg-surface-2 text-muted border-divider line-through'
               }`}>
                 {SIGNAL_LABELS[s]}

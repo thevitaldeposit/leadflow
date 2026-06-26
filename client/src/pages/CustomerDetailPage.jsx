@@ -439,7 +439,7 @@ export default function CustomerDetailPage() {
                       <h1 className="text-2xl font-bold text-content leading-tight">{c.display_name}</h1>
                       <span className={`${badgeCls} ${statusStyle}`}>{getCustomerStatusLabel(c.status)}</span>
                     </div>
-                    <div className="mt-3 space-y-1.5 text-sm text-muted">
+                    <div className="mt-3 space-y-2.5 text-sm text-muted">
                       <ContactLine icon={Phone} value={c.phone} />
                       <ContactLine icon={Mail} value={c.email} />
                       <ContactLine icon={MapPin} value={primaryAddress} />
