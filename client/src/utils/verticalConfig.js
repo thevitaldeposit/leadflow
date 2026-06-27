@@ -232,6 +232,7 @@ const TERMINOLOGY = {
     startBadge: 'DROP',
     endBadge: 'PICK',
     jobUnit: 'Dumpster',
+    serviceType: 'Dumpster rental', // service TYPE label (e.g. Jobs-table Service column)
     jobUnitSize: true, // show size (10yd, 20yd etc)
     durationLabel: 'Rental Duration',
     // Extended labels for the manual lead form's dumpster-specific fields.
@@ -248,6 +249,7 @@ const TERMINOLOGY = {
     startBadge: 'JOB',
     endBadge: 'DONE',
     jobUnit: 'Job',
+    serviceType: 'HVAC service', // service TYPE label (e.g. Jobs-table Service column)
     jobUnitSize: false,
     durationLabel: 'Job Duration',
     // Extended labels for the manual lead form.

@@ -9,7 +9,7 @@ import {
 import { api } from '../utils/api';
 import {
   CUSTOMER_STATUSES, CUSTOMER_STATUS_STYLES, getCustomerStatusLabel,
-  JOB_STATUS_STYLES,
+  getTerminology,
   INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
@@ -971,7 +971,11 @@ function PastInquiries({ engagements }) {
 // expands the job's call intelligence in place — no separate page.
 function JobHistoryRow({ engagement: e }) {
   const [open, setOpen] = useState(false);
-  const style = JOB_STATUS_STYLES[e.status] || 'bg-surface-2 text-muted border-divider';
+  // Service column shows the service TYPE (e.g. "Dumpster rental") from the
+  // vertical config — the size lives in its own column. Status is display-only:
+  // a booked/open job reads "In progress", a completed one "Completed".
+  const serviceType = getTerminology(e.vertical, e.sub_vertical).serviceType;
+  const statusText = e.status === 'completed' ? 'Completed' : 'In progress';
   const toggle = () => setOpen(o => !o);
   return (
     <Fragment>
@@ -988,13 +992,13 @@ function JobHistoryRow({ engagement: e }) {
         <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">{fmtDate(e.delivery_date || e.created_at)}</td>
         <td className="px-4 py-3 text-content">
           <span className="inline-flex items-center gap-1.5">
-            {e.service}
+            {serviceType}
             {e.auto_booked && <Zap size={12} className="text-success" title="Auto-booked from the call" />}
           </span>
         </td>
         <td className="px-4 py-3 text-muted whitespace-nowrap">{e.dumpster_size || '—'}</td>
         <td className="px-4 py-3">
-          <span className={`${badgeCls} ${style}`}>{e.label}</span>
+          <span className="text-sm font-medium text-success">{statusText}</span>
         </td>
         <td className="px-5 py-3 text-right text-content font-medium whitespace-nowrap">{e.estimated_revenue ? money(e.estimated_revenue) : '—'}</td>
       </tr>
