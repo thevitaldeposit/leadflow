@@ -443,6 +443,7 @@ const ACTIVITY_ICONS = {
   outbound_call: '📞',
   sms_sent: '💬',
   status_change: '📋',
+  job_updated: '✏️',
   note_added: '📋',
   voicemail: '🎙️',
   missed_call: '📵',

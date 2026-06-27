@@ -14,7 +14,7 @@ import {
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
 import VoicemailBadge from '../components/home_services/VoicemailBadge';
-import { BookedModal } from '../components/home_services/HomeServicesStickyHeader';
+import { BookedModal, EditJobDetailsModal } from '../components/home_services/HomeServicesStickyHeader';
 import { buildBookingUpdates } from '../utils/booking';
 
 const money = (n, c = 'USD') => {
@@ -31,6 +31,7 @@ const ACTIVITY_ICONS = {
   voicemail: Voicemail,
   sms_sent: MessageSquare,
   status_change: RefreshCw,
+  job_updated: Edit2,
   note_added: StickyNote,
 };
 
@@ -321,6 +322,9 @@ export default function CustomerDetailPage() {
   const [priceDrafts, setPriceDrafts] = useState({});
   const [savingTerms, setSavingTerms] = useState(false);
   const [activeSection, setActiveSection] = useState(JUMP_LINKS[0].id);
+  // Bumped after a job-details edit so the read-only call-intelligence grid
+  // (which fetches its own lead) re-fetches and shows the new values immediately.
+  const [detailRefresh, setDetailRefresh] = useState(0);
 
   const load = useCallback(() => {
     return Promise.all([api.getCustomer(id), api.getPricing(), api.getInvoices({ customer_id: id })]).then(([c, p, inv]) => {
@@ -436,6 +440,18 @@ export default function CustomerDetailPage() {
   const handleBookEngagement = async (engagement, payload) => {
     await api.updateLead(engagement.representative_lead_id, buildBookingUpdates(payload));
     await load();
+  };
+
+  // Save manual edits to an open engagement's job details (size, delivery date,
+  // duration → recomputed pickup, delivery time, follow-up). The modal hands us a
+  // ready-to-send lead update carrying the change summary, which the server logs
+  // as ONE "Job details updated — …" activity event. Reload + bump the refresh
+  // key so both the engagement summary and the call-intelligence grid update now.
+  // No extraction, booking-signal, or auto-book logic runs here.
+  const handleEditEngagement = async (engagement, body) => {
+    await api.updateLead(engagement.representative_lead_id, body);
+    await load();
+    setDetailRefresh(n => n + 1);
   };
 
   const scrollToId = (sectionId) => (e) => {
@@ -573,7 +589,7 @@ export default function CustomerDetailPage() {
 
           {/* Active Inquiry — the current active engagement, expanded by default */}
           {activeEngagement ? (
-            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} onBook={handleBookEngagement} />
+            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} onBook={handleBookEngagement} onEdit={handleEditEngagement} refreshKey={detailRefresh} />
           ) : (
             <Card id="active-inquiry" title="Active Inquiry" icon={MessageSquare}>
               <div className="px-5 py-8 text-center text-sm text-muted">No active inquiry. A new call opens one automatically.</div>
@@ -776,7 +792,7 @@ export default function CustomerDetailPage() {
 // The body shared by the active engagement and an expanded history row: the
 // newest call's full intelligence (booking signals, dates, industry fields, AI
 // summary, recording) plus any earlier calls in the same engagement, expandable.
-function EngagementBody({ engagement: e }) {
+function EngagementBody({ engagement: e, refreshKey = 0 }) {
   const [openCalls, setOpenCalls] = useState(() => new Set());
   const toggle = (cid) => setOpenCalls(prev => {
     const next = new Set(prev);
@@ -787,7 +803,7 @@ function EngagementBody({ engagement: e }) {
 
   return (
     <>
-      <CustomerCallIntelligence jobId={e.representative_lead_id} />
+      <CustomerCallIntelligence jobId={e.representative_lead_id} refreshKey={refreshKey} />
       {earlier.length > 0 && (
         <div className="px-5 pb-4">
           <p className="text-[11px] font-semibold text-muted uppercase tracking-wide mb-1.5">
@@ -827,12 +843,16 @@ function EngagementBody({ engagement: e }) {
 // inquiry) the manual Close / Mark Lost actions plus the green "Mark Booked"
 // header action. Mark Booked reuses the lead-detail Confirm Booking modal and
 // its booking path verbatim; it never re-runs extraction or auto-book logic.
-function ActiveEngagement({ id, engagement: e, onClose, onBook }) {
+function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, refreshKey = 0 }) {
   const [closing, setClosing] = useState(false);
   // Manual booking is offered only while the inquiry is still open (status
   // 'inquiry'); once it's a booked Job or completed, the button is hidden.
   const [bookingLead, setBookingLead] = useState(null);
   const [loadingBooking, setLoadingBooking] = useState(false);
+  // Editing job details is available the whole time the engagement is open —
+  // an unbooked Active Inquiry or a booked Open Job alike.
+  const [editLead, setEditLead] = useState(null);
+  const [loadingEdit, setLoadingEdit] = useState(false);
   const canBook = e.status === 'inquiry';
 
   const close = async (reason) => {
@@ -870,6 +890,33 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook }) {
     }
   };
 
+  // Lazy-load the representative (newest) call so the Edit Job Details modal
+  // prefills from the real lead (size/date/duration/time/follow-up), mirroring
+  // the booking flow above. The modal builds the update + change summary itself.
+  const openEdit = async () => {
+    setLoadingEdit(true);
+    try {
+      const lead = await api.getLead(e.representative_lead_id);
+      setEditLead(lead);
+    } catch (err) {
+      console.error('Failed to load job for editing:', err);
+      alert('Could not load this job to edit it. Please try again.');
+    } finally {
+      setLoadingEdit(false);
+    }
+  };
+
+  const confirmEdit = async (body) => {
+    try {
+      await onEdit(e, body);
+      setEditLead(null);
+    } catch (err) {
+      console.error('Edit failed:', err);
+      alert('Could not save changes. Please try again.');
+      throw err; // let the modal clear its "Saving…" state and stay open for retry
+    }
+  };
+
   // Booking converts the engagement in place: the same open slot, now a Job. The
   // header flips from "Active Inquiry" to "Open Job" (the green BOOKED badge lives
   // on the top contact card). It only leaves this slot when the job completes.
@@ -880,14 +927,26 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook }) {
       id={id}
       title={headerTitle}
       icon={e.status === 'booked' ? Briefcase : MessageSquare}
-      action={canBook && (
-        <button
-          onClick={openBooking}
-          disabled={loadingBooking}
-          className="flex items-center gap-1.5 text-xs font-medium text-background bg-success hover:bg-success/90 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
-        >
-          <CheckCircle2 size={14} /> {loadingBooking ? 'Loading…' : 'Mark Booked'}
-        </button>
+      action={(
+        <div className="flex items-center gap-2">
+          <button
+            onClick={openEdit}
+            disabled={loadingEdit}
+            title="Edit job details"
+            className="flex items-center gap-1.5 text-xs font-medium text-content bg-surface-2 hover:bg-surface border border-divider disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <Edit2 size={14} /> {loadingEdit ? 'Loading…' : 'Edit'}
+          </button>
+          {canBook && (
+            <button
+              onClick={openBooking}
+              disabled={loadingBooking}
+              className="flex items-center gap-1.5 text-xs font-medium text-background bg-success hover:bg-success/90 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              <CheckCircle2 size={14} /> {loadingBooking ? 'Loading…' : 'Mark Booked'}
+            </button>
+          )}
+        </div>
       )}
     >
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
@@ -905,7 +964,7 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook }) {
         {e.estimated_revenue ? <span className="text-sm font-semibold text-content">${Math.round(e.estimated_revenue).toLocaleString()}</span> : null}
       </div>
 
-      <EngagementBody engagement={e} />
+      <EngagementBody engagement={e} refreshKey={refreshKey} />
 
       {e.status === 'inquiry' && (
         <div className="px-5 py-3 border-t border-divider flex items-center justify-end gap-2">
@@ -917,6 +976,10 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook }) {
 
       {bookingLead && (
         <BookedModal lead={bookingLead} onConfirm={confirmBooking} onClose={() => setBookingLead(null)} />
+      )}
+
+      {editLead && (
+        <EditJobDetailsModal lead={editLead} onConfirm={confirmEdit} onClose={() => setEditLead(null)} />
       )}
     </Card>
   );

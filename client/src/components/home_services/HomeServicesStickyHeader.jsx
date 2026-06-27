@@ -10,8 +10,8 @@ import VoicemailBadge from './VoicemailBadge';
 import MissedCallBadge from './MissedCallBadge';
 import ManualBadge from './ManualBadge';
 import { api } from '../../utils/api';
-import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES, getTerminology, getSubVertical } from '../../utils/verticalConfig';
-import { parseRentalDays, calcPickupFromDuration, buildBookingUpdates } from '../../utils/booking';
+import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES, getTerminology, getSubVertical, formatTime12 } from '../../utils/verticalConfig';
+import { parseRentalDays, calcPickupFromDuration, buildBookingUpdates, buildJobDetailUpdates } from '../../utils/booking';
 
 function formatPickupDate(iso) {
   if (!iso) return null;
@@ -183,6 +183,227 @@ export function BookedModal({ lead, onConfirm, onClose }) {
             Confirm Booking
           </button>
           <button onClick={onClose} className="px-4 py-2.5 text-sm text-muted hover:text-content rounded-xl transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Convert an ISO timestamp ↔ the "YYYY-MM-DDTHH:mm" a datetime-local input wants,
+// in the browser's local timezone (mirrors the lead-detail follow-up editor).
+function toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(str) {
+  if (!str) return null;
+  const d = new Date(str);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// Short, audit-friendly renderings for the "what changed" summary (local tz).
+function fmtDayMonth(iso) {
+  if (!iso) return null;
+  const s = String(iso).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function fmtFollowUp(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? null
+    : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+// Edit Job Details — available on an open engagement (an unbooked Active Inquiry
+// OR a booked Open Job) from the customer profile. Mirrors the Confirm Booking
+// modal's fields (size / delivery date / duration → recomputed pickup) PLUS the
+// scheduling fields shown in the details block (delivery time, follow-up date &
+// time). It is strictly a manual edit: it never sets job_status, re-runs
+// extraction, or touches booking-signal / auto-book logic. On save it builds the
+// lead update, computes a one-line "old → new" summary of exactly what changed,
+// and hands both to onConfirm (which persists + logs a single activity event).
+export function EditJobDetailsModal({ lead, onConfirm, onClose }) {
+  const vd = parseVerticalData(lead);
+  const t = getTerminology(lead.vertical, getSubVertical(lead));
+
+  // Original (prefilled) values, captured for change detection on save.
+  const origSize = vd.dumpsterSize || '';
+  const origDate = lead.delivery_date || vd.deliveryDate || '';
+  const origDays = parseRentalDays(vd.rentalDuration); // number | null
+  const origTime = lead.scheduled_time || '';
+  const origFollowUp = vd.followUpDate || '';
+
+  const [size, setSize] = useState(origSize);
+  const [date, setDate] = useState(origDate);
+  const [rentalDays, setRentalDays] = useState(origDays ? String(origDays) : '');
+  const [time, setTime] = useState(origTime);
+  const [followUpLocal, setFollowUpLocal] = useState(toLocalInput(origFollowUp));
+  const [poolSizes, setPoolSizes] = useState([]);
+  const [availability, setAvailability] = useState(null);
+  const [loadingAvail, setLoadingAvail] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const daysNum = Number(rentalDays);
+  const hasDays = rentalDays !== '' && daysNum >= 1;
+  const pickupISO = (date && hasDays) ? calcPickupFromDuration(date, String(daysNum)) : null;
+  // Duration is the only constrained field: blank clears it, but a typed value
+  // must be a positive whole-day count. Every other field is optional on an edit.
+  const durationInvalid = rentalDays !== '' && !(daysNum >= 1);
+  const canSave = !durationInvalid && !saving;
+
+  // Same inventory-pool size selector + availability check as Confirm Booking.
+  useEffect(() => {
+    let cancelled = false;
+    api.getInventory()
+      .then(rows => {
+        if (cancelled) return;
+        const sizes = (rows || []).map(r => r.size).filter(Boolean);
+        setPoolSizes(sizes);
+        if (origSize) {
+          const match = sizes.find(s => sizeMatches(s, origSize));
+          if (match) setSize(match);
+        }
+      })
+      .catch(() => { if (!cancelled) setPoolSizes([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const sizeOptions = poolSizes.some(s => s === size) || !size ? poolSizes : [size, ...poolSizes];
+
+  useEffect(() => {
+    if (!date || !pickupISO || !size) { setAvailability(null); return; }
+    let cancelled = false;
+    setLoadingAvail(true);
+    api.getInventory({ delivery_date: date, pickup_date: pickupISO, exclude_lead_id: lead.id })
+      .then(rows => {
+        if (cancelled) return;
+        const match = (rows || []).find(r => sizeMatches(r.size, size)) || null;
+        setAvailability(match);
+        setLoadingAvail(false);
+      })
+      .catch(() => { if (!cancelled) { setAvailability(null); setLoadingAvail(false); } });
+    return () => { cancelled = true; };
+  }, [date, rentalDays, size, lead.id]);
+
+  // One-line audit summary of exactly what changed (old → new), in the owner's
+  // local timezone so it reads the same as the profile. Empty array = no change.
+  const computeChanges = () => {
+    const followUpISO = fromLocalInput(followUpLocal);
+    const changes = [];
+    if (!sizeMatches(origSize, size) && (origSize || size)) {
+      changes.push(`${t.sizeLabel.toLowerCase()} ${origSize || 'not set'} → ${size || 'not set'}`);
+    }
+    if (String(origDate).slice(0, 10) !== String(date).slice(0, 10)) {
+      changes.push(`${t.startDate.toLowerCase()} ${fmtDayMonth(origDate) || 'not set'} → ${fmtDayMonth(date) || 'not set'}`);
+    }
+    const newDays = hasDays ? daysNum : null;
+    if ((origDays || null) !== newDays) {
+      changes.push(`duration ${origDays ? `${origDays} days` : 'not set'} → ${newDays ? `${newDays} days` : 'not set'}`);
+    }
+    if ((origTime || '') !== (time || '')) {
+      changes.push(`${t.startTime.toLowerCase()} ${formatTime12(origTime) || 'not set'} → ${formatTime12(time) || 'not set'}`);
+    }
+    if (fmtFollowUp(origFollowUp) !== fmtFollowUp(followUpISO)) {
+      changes.push(`follow-up ${fmtFollowUp(origFollowUp) || 'not set'} → ${fmtFollowUp(followUpISO) || 'not set'}`);
+    }
+    return { changes, followUpISO };
+  };
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    const { changes, followUpISO } = computeChanges();
+    // Nothing actually changed → no write, no activity event.
+    if (changes.length === 0) { onClose(); return; }
+    setSaving(true);
+    const body = buildJobDetailUpdates({
+      size, date, rentalDays: hasDays ? daysNum : '', time, followUp: followUpISO,
+    });
+    body.job_edit_summary = `Job details updated — ${changes.join(', ')}`;
+    try {
+      await onConfirm(body);
+    } catch (err) {
+      console.error('Edit job details failed:', err);
+      setSaving(false);
+    }
+  };
+
+  const fieldCls = 'w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-surface';
+  const labelCls = 'block text-xs font-medium text-muted uppercase tracking-wide mb-1';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-surface rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <h3 className="text-lg font-bold text-content mb-1">Edit Job Details</h3>
+        <p className="text-sm text-muted mb-5">{getLeadName(lead)}</p>
+        <div className="space-y-4">
+          <div>
+            <label className={labelCls}>{t.jobUnit} Size</label>
+            <select value={size} onChange={e => setSize(e.target.value)} className={fieldCls}>
+              <option value="">Not set</option>
+              {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>{t.startDate}</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={fieldCls} />
+          </div>
+          <div>
+            <label className={labelCls}>{t.durationLabel} (days)</label>
+            <input
+              type="number"
+              min="1"
+              value={rentalDays}
+              onChange={e => setRentalDays(e.target.value)}
+              placeholder="e.g. 7"
+              className={fieldCls}
+            />
+            {durationInvalid ? (
+              <p className="text-xs text-danger mt-1">Enter a whole number of days (1 or more), or leave blank.</p>
+            ) : pickupISO ? (
+              <p className="text-xs text-muted mt-1">{t.endAction}: {formatPickupDate(pickupISO)}</p>
+            ) : (
+              <p className="text-xs text-muted mt-1">{t.endAction} date is calculated from {t.startDate.toLowerCase()} + duration</p>
+            )}
+          </div>
+          <div>
+            <label className={labelCls}>{t.startTime}</label>
+            <input type="time" value={time} onChange={e => setTime(e.target.value)} className={fieldCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Follow-Up Date &amp; Time</label>
+            <input
+              type="datetime-local"
+              value={followUpLocal}
+              onChange={e => setFollowUpLocal(e.target.value)}
+              className={fieldCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Availability</label>
+            {(date && hasDays && size) ? (
+              <AvailabilityNote loading={loadingAvail} availability={availability} size={size} />
+            ) : (
+              <p className="text-xs text-muted">Set a {t.startDate.toLowerCase()}, duration, and size to check availability.</p>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={handleSave}
+            disabled={!canSave}
+            className="flex-1 text-sm font-medium text-content bg-brand hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
+          >
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+          <button onClick={onClose} disabled={saving} className="px-4 py-2.5 text-sm text-muted hover:text-content rounded-xl transition-colors disabled:opacity-50">
             Cancel
           </button>
         </div>

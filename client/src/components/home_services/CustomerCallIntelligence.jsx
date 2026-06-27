@@ -46,11 +46,13 @@ function ROField({ label, value }) {
 // AUTO-BOOK SAFETY: this only GETs the lead (api.getLead). It never writes and
 // never re-runs extraction or booking, so mounting it cannot trigger or change
 // auto-booking. Editing still happens on the full lead detail via the link below.
-export default function CustomerCallIntelligence({ jobId, compact = false }) {
+export default function CustomerCallIntelligence({ jobId, compact = false, refreshKey = 0 }) {
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // refreshKey bumps after an in-place edit (e.g. Edit Job Details) so this
+  // self-fetched grid re-pulls the lead and reflects the new values immediately.
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -60,7 +62,7 @@ export default function CustomerCallIntelligence({ jobId, compact = false }) {
       .catch(e => { if (active) setError(e.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [jobId]);
+  }, [jobId, refreshKey]);
 
   if (loading) return <div className="px-5 py-4 text-sm text-muted">Loading call details…</div>;
   if (error || !lead) return <div className="px-5 py-4 text-sm text-muted">{error || 'Call details unavailable.'}</div>;

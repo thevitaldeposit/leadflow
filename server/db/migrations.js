@@ -3,6 +3,7 @@ const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 const db = require('./database');
+const { describeBooking } = require('../services/leadActivityText');
 
 const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN audio_file_path TEXT',
@@ -536,6 +537,34 @@ function runMigrations() {
   }
   if (deadCleaned > 0) {
     console.log(`[migrations] Cleared follow-up date on ${deadCleaned} dead-end home_services lead(s)`);
+  }
+
+  // ── Relabel legacy booking events in the activity feed ─────────────────────
+  // Bookings logged before the richer describeBooking() line existed read as the
+  // generic "Status changed to booked". Rewrite each to the new
+  // "Dumpster booked — 20 yard · delivery Fri, Jun 26" form, reconstructing the
+  // size + delivery date from the lead. Idempotent: after the first pass no rows
+  // match the old text, so re-runs are no-ops; new bookings already log the rich
+  // line directly and are never touched.
+  try {
+    const legacyBookings = db.prepare(
+      `SELECT a.id AS activity_id, l.*
+         FROM activity_log a
+         JOIN leads l ON l.id = a.lead_id
+        WHERE a.activity_type = 'status_change'
+          AND a.description = 'Status changed to booked'`
+    ).all();
+    const relabel = db.prepare('UPDATE activity_log SET description = ? WHERE id = ?');
+    let relabeled = 0;
+    for (const row of legacyBookings) {
+      relabel.run(describeBooking(row), row.activity_id);
+      relabeled++;
+    }
+    if (relabeled > 0) {
+      console.log(`[migrations] Relabeled ${relabeled} legacy "Status changed to booked" activity event(s)`);
+    }
+  } catch (err) {
+    console.error('[migrations] Booking-event relabel skipped:', err.message);
   }
 
   // ── Customers: unified person-level record ─────────────────────────────────

@@ -49,3 +49,25 @@ export function buildBookingUpdates({ date, rentalDays, size }) {
   if (Object.keys(vd).length) updates.vertical_data = vd;
   return updates;
 }
+
+// Build the lead update for the Edit Job Details modal from its
+// { size, date, rentalDays, time, followUp } payload. Unlike buildBookingUpdates
+// this NEVER changes job_status (it's an edit, not a booking) — it just persists
+// the scheduling fields and recomputes the pickup window with the same date math.
+// A cleared field sends null so the server unsets it. The server-side
+// vertical_data merge preserves every untouched key (AI summary, signals, etc.).
+export function buildJobDetailUpdates({ size, date, rentalDays, time, followUp }) {
+  const days = rentalDays === '' || rentalDays == null ? null : Number(rentalDays);
+  const hasDays = Number.isFinite(days) && days >= 1;
+  const pickup = (date && hasDays) ? calcPickupFromDuration(date, String(days)) : null;
+  return {
+    delivery_date: date || null,
+    pickup_date: pickup || null,
+    scheduled_time: time || null,
+    vertical_data: {
+      dumpsterSize: size || null,
+      rentalDuration: hasDays ? `${days} days` : null,
+      followUpDate: followUp || null,
+    },
+  };
+}
