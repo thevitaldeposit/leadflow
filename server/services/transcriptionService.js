@@ -53,8 +53,12 @@ async function transcribeWithDeeepgram(filePath) {
   const start = Date.now();
 
   const audioData = fs.readFileSync(filePath);
+  // Diarization (speaker separation) intentionally DISABLED for privacy/compliance
+  // (avoids BIPA voiceprint exposure). Nothing downstream reads speaker indices —
+  // the extraction prompts infer rep-vs-customer from context, same as the Whisper
+  // path. Do not re-add diarize without a compliance review.
   const url =
-    'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true&diarize=true&language=en';
+    'https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true&language=en';
 
   const res = await fetch(url, {
     method: 'POST',
@@ -77,7 +81,10 @@ async function transcribeWithDeeepgram(filePath) {
   const alternative = result.results.channels[0].alternatives[0];
   let transcript = alternative.transcript;
 
-  // Format with speaker labels if diarization is present
+  // Defensive: with diarization disabled, Deepgram returns words with no
+  // `speaker` field, so this guard is false and the plain transcript above is
+  // used as-is (no empty "[Speaker ]:" artifacts). The stitching only runs if a
+  // future/manual config re-enables diarization and speaker indices are present.
   const words = alternative.words || [];
   if (words.length && words[0].speaker !== undefined) {
     const segments = [];
@@ -110,7 +117,11 @@ async function transcribeWithDeeepgram(filePath) {
 }
 
 async function transcribe(filePath) {
-  const provider = process.env.TRANSCRIPTION_PROVIDER;
+  // OpenAI/Whisper is the explicit default — the non-diarizing, privacy-preserving
+  // path. Deepgram is used only when explicitly selected via
+  // TRANSCRIPTION_PROVIDER=deepgram (also non-diarizing now), or as a fallback
+  // when no OpenAI key is configured.
+  const provider = process.env.TRANSCRIPTION_PROVIDER || 'openai';
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
   const hasDeeepgram = !!process.env.DEEPGRAM_API_KEY;
 
@@ -123,7 +134,7 @@ async function transcribe(filePath) {
   if (provider === 'deepgram' && hasDeeepgram) return transcribeWithDeeepgram(filePath);
   if (provider === 'openai' && hasOpenAI) return transcribeWithOpenAI(filePath);
 
-  // Auto-select: prefer OpenAI
+  // Fallback (requested provider's key missing, or no provider set): prefer OpenAI.
   if (hasOpenAI) return transcribeWithOpenAI(filePath);
   return transcribeWithDeeepgram(filePath);
 }
