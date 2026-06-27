@@ -268,9 +268,13 @@ function aggregateLeads(leadRows) {
 const STALE_INQUIRY_DAYS = 14;
 const STALE_INQUIRY_MS = STALE_INQUIRY_DAYS * 24 * 60 * 60 * 1000;
 
+// Status badge labels (used on Jobs-tab rows and the Past-inquiries list). The
+// active engagement's section HEADER is computed client-side ("Open Job" for a
+// booked engagement, "Active Inquiry" for an open inquiry) — these labels drive
+// badges only, so a booked job's badge reads "Booked".
 const ENGAGEMENT_LABELS = {
   inquiry: 'Active Inquiry',
-  booked: 'Job',
+  booked: 'Booked',
   completed: 'Completed',
   lost: 'Closed',
 };
@@ -402,6 +406,11 @@ function shapeEngagement(eng) {
     label: ENGAGEMENT_LABELS[status] || 'Active Inquiry',
     is_open: engagementIsOpen(status),
     stale,
+    // For a manually-closed inquiry, which action closed it ('lost' | 'closed') —
+    // persisted on the call's vertical_data by the close route. Drives the
+    // Past-inquiries label; null for open/booked/completed. Defaults to 'lost'
+    // (the generic terminal state) for older closes that predate this field.
+    close_reason: status === 'lost' ? (vd.closeReason || 'lost') : null,
     service: leadServiceSummary(rep),
     address: rep.address || vd.deliveryAddress || vd.propertyAddress || null,
     delivery_date: rep.delivery_date || null,
@@ -600,7 +609,9 @@ function getCustomerDetail(businessId, customerId) {
     // Totals reflect engagements (one ongoing piece of business), so repeat calls
     // about the same inquiry count once and revenue isn't double-counted.
     totals: {
-      jobs: engagements.length,
+      // "Total Jobs" = engagements that became real jobs (booked or completed).
+      // An open, never-booked Active Inquiry is NOT a job, so it doesn't count.
+      jobs: engagements.filter((e) => e.status === 'booked' || e.status === 'completed').length,
       open_jobs: engagements.filter((e) => e.is_open).length,
       completed_jobs: engagements.filter((e) => e.status === 'completed').length,
       total_revenue: Math.round(engagements.reduce((s, e) => s + (e.estimated_revenue || 0), 0)),

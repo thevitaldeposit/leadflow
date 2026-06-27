@@ -462,21 +462,26 @@ export default function CustomerDetailPage() {
   const pricing = c.pricing || { items: [], group: null };
   const primaryAddress = c.address || (c.addresses && c.addresses[0]) || null;
 
-  // Engagements: one ongoing piece of business (inquiry → job → completed). The
-  // single open one (if any) is the "active" engagement, expanded below; the rest
-  // (completed / closed) collapse into Job History.
+  // Engagements: one ongoing piece of business (inquiry → job → completed).
+  //  • activeEngagement — the single OPEN engagement: an Active Inquiry, or a
+  //    booked Open Job that hasn't completed. Expanded up top.
+  //  • jobEngagements — everything that became a real job (Booked or Completed).
+  //    A booked Open Job lives in BOTH places: expanded above AND as a Jobs row.
+  //  • pastInquiries — inquiries Closed / Marked Lost (never booked). These do
+  //    NOT go to Jobs; they collapse into a lightweight list below the Jobs tab.
   const engagements = c.engagements || [];
   const activeEngagement = engagements.find(e => e.is_active) || null;
-  const historyEngagements = engagements.filter(e => !e.is_active);
+  const jobEngagements = engagements.filter(e => e.status === 'booked' || e.status === 'completed');
+  const pastInquiries = engagements.filter(e => e.status === 'lost');
 
   // Quick Stats: outstanding = unpaid invoice balances; last job = newest
-  // booked/completed engagement (else the newest engagement of any kind).
+  // booked/completed engagement (— when there are none yet).
   const outstanding = invoices.reduce((s, inv) => {
     if (inv.status === 'paid' || inv.status === 'void') return s;
     const bal = Number(inv.total || 0) - Number(inv.amount_paid || 0);
     return s + (bal > 0 ? bal : 0);
   }, 0);
-  const lastJobEng = engagements.find(e => e.status === 'completed' || e.status === 'booked') || engagements[0] || null;
+  const lastJobEng = jobEngagements[0] || null; // engagements are newest-first
   const lastJob = lastJobEng ? fmtDate(lastJobEng.delivery_date || lastJobEng.created_at) : '—';
 
   return (
@@ -575,16 +580,18 @@ export default function CustomerDetailPage() {
             </Card>
           )}
 
-          {/* Jobs (Job History) — completed/closed engagements; Job ID expands in place */}
+          {/* Jobs — booked + completed engagements ONLY. A booked Open Job shows
+              here as the current job (and also expanded above); a completed one is
+              history. Closed/lost inquiries never appear here. Job ID expands in place. */}
           <Card
             id="jobs"
-            title={`Job History (${historyEngagements.length})`}
+            title={`Jobs (${jobEngagements.length})`}
             icon={Briefcase}
-            action={historyEngagements.length > 0 && <span className="text-[11px] text-muted">Tap a Job ID to expand</span>}
+            action={jobEngagements.length > 0 && <span className="text-[11px] text-muted">Tap a Job ID to expand</span>}
           >
-            {historyEngagements.length === 0 ? (
+            {jobEngagements.length === 0 ? (
               <div className="px-5 py-8 text-center text-sm text-muted">
-                {activeEngagement ? 'No completed or closed jobs yet.' : 'No jobs yet.'}
+                No jobs yet. A job appears here once an inquiry is booked.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -600,12 +607,17 @@ export default function CustomerDetailPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-divider">
-                    {historyEngagements.map(e => <JobHistoryRow key={e.id} engagement={e} />)}
+                    {jobEngagements.map(e => <JobHistoryRow key={e.id} engagement={e} />)}
                   </tbody>
                 </table>
               </div>
             )}
           </Card>
+
+          {/* Past inquiries — Closed / Marked Lost inquiries that never booked.
+              Lightweight collapsed list (separate from Jobs); they also remain in
+              the Activity Feed. Hidden entirely when there are none. */}
+          {pastInquiries.length > 0 && <PastInquiries engagements={pastInquiries} />}
 
           {/* Invoices — Create Invoice when empty; populated otherwise. No Quick Stats here. */}
           <Card
@@ -858,10 +870,15 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook }) {
     }
   };
 
+  // Booking converts the engagement in place: the same open slot, now a Job. The
+  // header flips from "Active Inquiry" to "Open Job" (the green BOOKED badge lives
+  // on the top contact card). It only leaves this slot when the job completes.
+  const headerTitle = e.status === 'booked' ? 'Open Job' : 'Active Inquiry';
+
   return (
     <Card
       id={id}
-      title={e.label}
+      title={headerTitle}
       icon={e.status === 'booked' ? Briefcase : MessageSquare}
       action={canBook && (
         <button
@@ -905,8 +922,53 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook }) {
   );
 }
 
-// One collapsed Job History engagement (completed / closed / non-active). The
-// blue Job ID expands the job's call intelligence in place — no separate page.
+// Past inquiries — inquiries that were Closed / Marked Lost without ever booking.
+// Deliberately lightweight: a collapsed section (closed by default) listing each
+// dead inquiry with its service, date, and a Lost/Closed label, plus a link to the
+// underlying call. The full record still lives in the Activity Feed; these never
+// appear in Jobs (only booked/completed engagements do).
+function PastInquiries({ engagements }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-5 py-3 flex items-center justify-between hover:bg-surface-2 transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          {open ? <ChevronDown size={15} className="text-muted" /> : <ChevronRight size={15} className="text-muted" />}
+          <span className="text-sm font-semibold text-content">Past inquiries</span>
+          <span className="text-[11px] text-muted">({engagements.length})</span>
+        </span>
+        <span className="text-[11px] text-muted hidden sm:block">Closed / lost — never booked</span>
+      </button>
+      {open && (
+        <ul className="divide-y divide-divider border-t border-divider">
+          {engagements.map(e => {
+            const lost = e.close_reason !== 'closed'; // server defaults to 'lost'
+            const label = lost ? 'Lost' : 'Closed';
+            const style = lost ? 'bg-danger/10 text-danger border-danger/30' : 'bg-surface-2 text-muted border-divider';
+            return (
+              <li key={e.id} className="px-5 py-2.5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-content truncate">{e.service || 'Inquiry'}</p>
+                  <p className="text-xs text-muted">{fmtDate(e.created_at)}</p>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <span className={`${badgeCls} ${style}`}>{label}</span>
+                  <Link to={`/leads/${e.representative_lead_id}`} className="text-[11px] text-brand hover:underline whitespace-nowrap">View →</Link>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// One collapsed Jobs row (a booked or completed engagement). The blue Job ID
+// expands the job's call intelligence in place — no separate page.
 function JobHistoryRow({ engagement: e }) {
   const [open, setOpen] = useState(false);
   const style = JOB_STATUS_STYLES[e.status] || 'bg-surface-2 text-muted border-divider';

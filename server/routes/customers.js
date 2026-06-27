@@ -221,7 +221,14 @@ router.post('/:id/engagements/close', (req, res) => {
       // Only close still-open inquiry calls; never a booked/completed/already-terminal one.
       if (!lead || leadIsCompleted(lead, paidCtx) || leadIsBooked(lead)) continue;
       if (lead.job_status === 'lost' || lead.job_status === 'spam') continue;
-      db.prepare('UPDATE leads SET job_status = ?, updated_at = ? WHERE id = ?').run('lost', now, lead.id);
+      // Record which action closed it ('lost' vs 'closed') on the call's
+      // vertical_data (additive merge — never wipes other fields) so the profile's
+      // Past-inquiries list can label it correctly. Does not change booking state.
+      let vd = {};
+      try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+      vd.closeReason = reason;
+      db.prepare('UPDATE leads SET job_status = ?, vertical_data = ?, updated_at = ? WHERE id = ?')
+        .run('lost', JSON.stringify(vd), now, lead.id);
       logActivity(lead.id, 'status_change', note);
       closed++;
     }
