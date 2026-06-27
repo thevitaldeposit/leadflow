@@ -4,7 +4,7 @@ import {
   ArrowLeft, Phone, PhoneMissed, PhoneOutgoing, MessageSquare, Voicemail,
   StickyNote, RefreshCw, MapPin, Mail, Edit2, Trash2, Check, X, FileText,
   DollarSign, Plus, ChevronDown, ChevronRight, Zap, Briefcase, Clock,
-  Activity, AlertCircle,
+  Activity, AlertCircle, CheckCircle2,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
@@ -14,6 +14,8 @@ import {
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
 import VoicemailBadge from '../components/home_services/VoicemailBadge';
+import { BookedModal } from '../components/home_services/HomeServicesStickyHeader';
+import { buildBookingUpdates } from '../utils/booking';
 
 const money = (n, c = 'USD') => {
   const v = Number(n);
@@ -424,6 +426,18 @@ export default function CustomerDetailPage() {
     await load();
   };
 
+  // Manually mark the Active Inquiry booked from the profile. The system only
+  // ingests inbound calls, so a booking taken on an OUTBOUND call (e.g. returning
+  // a voicemail) has no entry point — this is it. Reuses the lead-detail header's
+  // exact path: the same Confirm Booking modal (availability + pickup math run
+  // in-modal) and buildBookingUpdates (job_status/status='booked'), applied to the
+  // engagement's representative (newest) call so it becomes a Job. No extraction,
+  // booking-signal, or auto-book logic runs here.
+  const handleBookEngagement = async (engagement, payload) => {
+    await api.updateLead(engagement.representative_lead_id, buildBookingUpdates(payload));
+    await load();
+  };
+
   const scrollToId = (sectionId) => (e) => {
     e.preventDefault();
     setActiveSection(sectionId);
@@ -554,7 +568,7 @@ export default function CustomerDetailPage() {
 
           {/* Active Inquiry — the current active engagement, expanded by default */}
           {activeEngagement ? (
-            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} />
+            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} onBook={handleBookEngagement} />
           ) : (
             <Card id="active-inquiry" title="Active Inquiry" icon={MessageSquare}>
               <div className="px-5 py-8 text-center text-sm text-muted">No active inquiry. A new call opens one automatically.</div>
@@ -797,10 +811,18 @@ function EngagementBody({ engagement: e }) {
 }
 
 // The active engagement — the open Active Inquiry or booked Job — rendered
-// expanded with its status, a Stale flag for an idle inquiry, and (for an
-// inquiry) the manual Close / Mark Lost actions. Nothing here changes booking.
-function ActiveEngagement({ id, engagement: e, onClose }) {
+// expanded with its status, a Stale flag for an idle inquiry, and (for an open
+// inquiry) the manual Close / Mark Lost actions plus the green "Mark Booked"
+// header action. Mark Booked reuses the lead-detail Confirm Booking modal and
+// its booking path verbatim; it never re-runs extraction or auto-book logic.
+function ActiveEngagement({ id, engagement: e, onClose, onBook }) {
   const [closing, setClosing] = useState(false);
+  // Manual booking is offered only while the inquiry is still open (status
+  // 'inquiry'); once it's a booked Job or completed, the button is hidden.
+  const [bookingLead, setBookingLead] = useState(null);
+  const [loadingBooking, setLoadingBooking] = useState(false);
+  const canBook = e.status === 'inquiry';
+
   const close = async (reason) => {
     const msg = reason === 'lost'
       ? 'Mark this inquiry as Lost? It will close and leave the action queue.'
@@ -810,8 +832,47 @@ function ActiveEngagement({ id, engagement: e, onClose }) {
     try { await onClose(e, reason); } finally { setClosing(false); }
   };
 
+  // Lazy-load the representative (newest) call so the Confirm Booking modal
+  // prefills from the real lead (size/date/duration/name) exactly as the lead
+  // detail header does, rather than from the lighter engagement summary.
+  const openBooking = async () => {
+    setLoadingBooking(true);
+    try {
+      const lead = await api.getLead(e.representative_lead_id);
+      setBookingLead(lead);
+    } catch (err) {
+      console.error('Failed to load job for booking:', err);
+      alert('Could not load this job to book it. Please try again.');
+    } finally {
+      setLoadingBooking(false);
+    }
+  };
+
+  const confirmBooking = async (payload) => {
+    try {
+      await onBook(e, payload);
+      setBookingLead(null);
+    } catch (err) {
+      console.error('Booking failed:', err);
+      alert('Could not book this job. Please try again.');
+    }
+  };
+
   return (
-    <Card id={id} title={e.label} icon={e.status === 'booked' ? Briefcase : MessageSquare}>
+    <Card
+      id={id}
+      title={e.label}
+      icon={e.status === 'booked' ? Briefcase : MessageSquare}
+      action={canBook && (
+        <button
+          onClick={openBooking}
+          disabled={loadingBooking}
+          className="flex items-center gap-1.5 text-xs font-medium text-background bg-success hover:bg-success/90 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
+        >
+          <CheckCircle2 size={14} /> {loadingBooking ? 'Loading…' : 'Mark Booked'}
+        </button>
+      )}
+    >
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
         {e.stale && (
           <span className={`${badgeCls} bg-warning/10 text-warning border-warning/30`}>
@@ -835,6 +896,10 @@ function ActiveEngagement({ id, engagement: e, onClose }) {
           <button onClick={() => close('lost')} disabled={closing} className="text-xs font-medium text-danger border border-danger/30 hover:bg-danger/10 px-3 py-1.5 rounded-lg disabled:opacity-50">Mark Lost</button>
           <button onClick={() => close('closed')} disabled={closing} className="text-xs font-medium text-muted border border-divider hover:bg-surface-2 px-3 py-1.5 rounded-lg disabled:opacity-50">Close</button>
         </div>
+      )}
+
+      {bookingLead && (
+        <BookedModal lead={bookingLead} onConfirm={confirmBooking} onClose={() => setBookingLead(null)} />
       )}
     </Card>
   );

@@ -11,25 +11,7 @@ import MissedCallBadge from './MissedCallBadge';
 import ManualBadge from './ManualBadge';
 import { api } from '../../utils/api';
 import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES, getTerminology, getSubVertical } from '../../utils/verticalConfig';
-
-function parseRentalDays(str) {
-  if (!str) return null;
-  const s = String(str).toLowerCase().trim();
-  const num = parseFloat(s);
-  if (isNaN(num)) return null;
-  if (s.includes('week')) return Math.round(num * 7);
-  if (s.includes('month')) return Math.round(num * 30);
-  return Math.round(num);
-}
-
-function calcPickupFromDuration(deliveryISO, rentalDuration) {
-  if (!deliveryISO || !rentalDuration) return null;
-  const days = parseRentalDays(rentalDuration);
-  if (!days) return null;
-  const d = new Date(deliveryISO + 'T00:00:00Z');
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+import { parseRentalDays, calcPickupFromDuration, buildBookingUpdates } from '../../utils/booking';
 
 function formatPickupDate(iso) {
   if (!iso) return null;
@@ -69,7 +51,7 @@ function AvailabilityNote({ loading, availability, size }) {
   return <p className="text-sm font-semibold text-danger">No {label} available for selected dates</p>;
 }
 
-function BookedModal({ lead, onConfirm, onClose }) {
+export function BookedModal({ lead, onConfirm, onClose }) {
   const vd = parseVerticalData(lead);
   const t = getTerminology(lead.vertical, getSubVertical(lead));
   const extractedSize = vd.dumpsterSize || null;
@@ -229,27 +211,7 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
   };
 
   const handleBookedConfirm = async ({ date, rentalDays, size }) => {
-    const updates = { job_status: 'booked', status: 'booked' };
-    const vd = {};
-    // Persist the (possibly changed) dumpster size selected in the modal.
-    if (size) vd.dumpsterSize = size;
-    if (date) {
-      updates.delivery_date = date;
-      // Write the keys the Industry Details field pack reads from (camelCase)
-      // alongside the legacy deliveryDateISO for back-compat with older readers.
-      vd.deliveryDate = date;
-      vd.deliveryDateISO = date;
-      if (rentalDays >= 1) {
-        const pickup = calcPickupFromDuration(date, String(rentalDays));
-        if (pickup) {
-          updates.pickup_date = pickup;
-          vd.pickupDate = pickup;
-        }
-        vd.rentalDuration = `${rentalDays} days`;
-      }
-    }
-    if (Object.keys(vd).length) updates.vertical_data = vd;
-    await applyUpdate(updates);
+    await applyUpdate(buildBookingUpdates({ date, rentalDays, size }));
     setShowBooked(false);
   };
 
