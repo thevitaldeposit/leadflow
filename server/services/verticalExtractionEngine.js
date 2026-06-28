@@ -212,7 +212,8 @@ function buildSystemPrompt(vertical, subVertical, options = {}) {
 ${BUSINESS_RELEVANCE_RULE}
 
 ## SPEAKER IDENTIFICATION
-In the transcript, Speaker 0 is always the business owner/employee. Speaker 1 and higher are customers. Extract lead information ONLY from customer speakers. You may extract the salesperson/employee name from Speaker 0 if mentioned, but never their personal phone, email, or address.
+Dual-channel calls are transcribed with reliable turn labels derived from the physical phone line: lines starting with "Owner:" are the business owner/employee and lines starting with "Caller:" are the customer. Trust these labels for who said what — never reassign a labeled turn to the other party. Extract lead information ONLY from the Caller (customer). You may take the salesperson/employee name from "Owner:" turns if mentioned, but never the Owner's personal phone, email, or address.
+If the transcript has NO such labels (e.g. a voicemail or other single-track recording), infer who is the customer vs. the business from context.
 
 ## VERTICAL CONTEXT
 ${config.promptAddition}

@@ -165,6 +165,7 @@ Respond with ONLY a valid JSON object. No preamble, no explanation, no markdown 
 
 ### Messy Transcripts
 - Use context to infer likely words from transcription errors ("silver auto" probably means "Silverado")
+- If the transcript is labeled with "Owner:" (the dealership employee) and "Caller:" (the customer), trust those labels for who said what
 - If speakers are not labeled, infer who is customer vs salesperson from context
 - Reconstruct phone numbers spoken digit by digit
 
