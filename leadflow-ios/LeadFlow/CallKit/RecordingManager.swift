@@ -12,6 +12,26 @@ import AVFoundation
 final class RecordingManager: NSObject, ObservableObject, AVAudioRecorderDelegate {
     static let shared = RecordingManager()
 
+    // MARK: Device-recording kill-switch
+    //
+    // DISABLED (2026-06-28). On-device call recording is turned off. When a call
+    // connected, `startRecording` re-configured and re-activated the SHARED
+    // AVAudioSession mid-call (`configureAudioSession`: setCategory + setActive,
+    // then an AVAudioRecorder on the mic). That collided with Twilio's
+    // DefaultAudioDevice — which owns the audio path for inbound VoIP calls — and
+    // caused clipped-start and one-way audio.
+    //
+    // It is also redundant for the calls in use: Twilio records every
+    // inbound/answered call server-side (record-from-answer-dual) and transcribes
+    // from THAT recording, independent of any device upload. The device recorder
+    // only ever uniquely captured OUTBOUND calls, which are not currently in use.
+    //
+    // The recording/upload code below is intentionally left intact so outbound
+    // capture can be rebuilt later — at which point this should be re-enabled
+    // SCOPED to non-Twilio calls, so it never touches the session during a VoIP
+    // call. Flipping this flag to true restores the previous behavior.
+    static let deviceRecordingEnabled = false
+
     private var activeRecordings: [UUID: ActiveRecording] = [:]
     private var disclosurePlayer: AVAudioPlayer?
     private let disclosurePlayedKey = "disclosurePlayed_"
@@ -21,6 +41,14 @@ final class RecordingManager: NSObject, ObservableObject, AVAudioRecorderDelegat
     // MARK: Start Recording
 
     func startRecording(for callUUID: UUID, direction: String) {
+        // Disabled — see `deviceRecordingEnabled`. This is the single funnel for
+        // every audio-session / mic operation (configureAudioSession, disclosure
+        // playback, AVAudioRecorder), so returning here guarantees RecordingManager
+        // never touches the audio session during a call.
+        guard Self.deviceRecordingEnabled else {
+            print("[RecordingManager] Device recording disabled — Twilio records server-side")
+            return
+        }
         guard LocalStorageService.shared.recordingEnabled else { return }
 
         let outputURL = LocalStorageService.shared.temporaryAudioURL()

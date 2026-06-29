@@ -14,6 +14,12 @@ final class CallObserver: NSObject, ObservableObject, CXCallObserverDelegate {
     }
 
     func callObserver(_ callObserver: CXCallObserver, callChanged call: CXCall) {
+        // On-device recording is disabled (see RecordingManager.deviceRecordingEnabled):
+        // it re-configured the shared AVAudioSession mid-call and collided with
+        // Twilio's call audio. Short-circuit so no device-recording state is created
+        // and RecordingManager is never invoked during a call. Twilio records and
+        // transcribes inbound/answered calls server-side.
+        guard RecordingManager.deviceRecordingEnabled else { return }
         guard LocalStorageService.shared.recordingEnabled else { return }
 
         if call.hasConnected && !call.hasEnded {
