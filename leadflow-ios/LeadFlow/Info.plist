@@ -56,6 +56,13 @@
 		<string>remote-notification</string>
 		<string>processing</string>
 	</array>
+	<!-- Call-log / Siri redial: declare the call intents the app handles so iOS
+	     delivers an INStartCallIntent when a Stream number is tapped in Recents. -->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INStartCallIntent</string>
+		<string>INStartAudioCallIntent</string>
+	</array>
 	<!-- Minimum OS Version -->
 	<key>MinimumOSVersion</key>
 	<string>16.0</string>

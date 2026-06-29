@@ -65,6 +65,41 @@ final class CallKitProvider: NSObject {
         provider.reportCall(with: uuid, endedAt: Date(), reason: reason)
     }
 
+    // MARK: Outgoing
+
+    /// Ask CallKit to place an outgoing call. This presents the NATIVE system call
+    /// screen (Calling… → in-call with mute / speaker / keypad, plus the green
+    /// status-bar tap-to-return-to-call). The actual Twilio connect happens when
+    /// the system performs the resulting CXStartCallAction (see the delegate
+    /// below). `handle` is the destination phone number; `displayName` (optional)
+    /// is shown as the callee's name on the call screen.
+    func startOutgoingCall(uuid: UUID, handle: String, displayName: String?) {
+        let action = CXStartCallAction(call: uuid, handle: makeHandle(handle))
+        action.isVideo = false
+        if let displayName = displayName, !displayName.isEmpty {
+            action.contactIdentifier = displayName
+        }
+        let transaction = CXTransaction(action: action)
+        callController.request(transaction) { error in
+            if let error = error {
+                NSLog("[callkit] startOutgoingCall request failed: \(error.localizedDescription)")
+                // The action never reached the provider; tear down pending state.
+                VoiceCallManager.shared.outgoingTransactionFailed(uuid: uuid)
+            }
+        }
+    }
+
+    /// Report that an outgoing call has begun connecting (native UI shows "Calling…").
+    func reportOutgoingStartedConnecting(uuid: UUID) {
+        provider.reportOutgoingCall(with: uuid, startedConnectingAt: Date())
+    }
+
+    /// Report that an outgoing call has connected (native UI starts the call timer).
+    func reportOutgoingConnected(uuid: UUID?) {
+        guard let uuid = uuid else { return }
+        provider.reportOutgoingCall(with: uuid, connectedAt: Date())
+    }
+
     // Use a .phoneNumber handle for real numbers (lets CallKit match contacts /
     // show a recognizable caller ID); fall back to .generic otherwise.
     private func makeHandle(_ value: String) -> CXHandle {
@@ -96,6 +131,29 @@ extension CallKitProvider: CXProviderDelegate {
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         VoiceCallManager.shared.performAnswer(uuid: action.callUUID) { _ in }
         action.fulfill()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        // Surface the destination (and name, if any) on the native call screen.
+        let update = CXCallUpdate()
+        update.remoteHandle = action.handle
+        if let name = action.contactIdentifier, !name.isEmpty {
+            update.localizedCallerName = name
+        }
+        update.hasVideo = false
+        update.supportsDTMF = true
+        update.supportsHolding = false
+        provider.reportCall(with: action.callUUID, updated: update)
+
+        // Move the UI into "Calling…", then kick off the Twilio connect. The system
+        // activates the audio session after we fulfill, driving the shared
+        // DefaultAudioDevice via provider(_:didActivate:) — same path as inbound.
+        reportOutgoingStartedConnecting(uuid: action.callUUID)
+        if VoiceCallManager.shared.performStartCall(uuid: action.callUUID) {
+            action.fulfill()
+        } else {
+            action.fail()
+        }
     }
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {

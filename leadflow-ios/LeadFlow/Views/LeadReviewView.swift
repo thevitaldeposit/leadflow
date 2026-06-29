@@ -69,6 +69,40 @@ struct LeadReviewView: View {
                     ConfidenceBadge(confidence: lead.confidence ?? 0)
                 }
 
+                // Call the customer in-app (outbound VoIP; presents the verified
+                // business caller ID). Hidden when the lead has no callable number.
+                if let number = callableNumber(lead) {
+                    Button {
+                        placeCall(to: number, displayName: lead.displayName)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "phone.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 38, height: 38)
+                                .background(Color.green)
+                                .clipShape(Circle())
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Call \(lead.displayName)")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                Text(number)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(12)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+                    }
+                    .accessibilityLabel("Call \(lead.displayName) at \(number)")
+                }
+
                 if let summary = lead.callSummary, !summary.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("AI Summary", systemImage: "sparkles")
@@ -210,6 +244,26 @@ struct LeadReviewView: View {
                 errorMessage = error.localizedDescription
             }
             isSaving = false
+        }
+    }
+
+    // MARK: - Calling
+
+    /// The best number to dial for this lead: a phone the user just edited, else the
+    /// extracted customer phone, else the inbound caller's number. Nil when none is
+    /// usable, which hides the Call button.
+    private func callableNumber(_ lead: Lead) -> String? {
+        let candidates = [editedFields["customerPhone"], lead.phone, lead.callerNumber]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
+    /// Place an outbound VoIP call to the customer via VoiceCallManager. Surfaces a
+    /// message through the existing error alert if Voice isn't configured.
+    private func placeCall(to number: String, displayName: String?) {
+        VoiceCallManager.shared.startOutgoingCall(to: number, displayName: displayName) { message in
+            errorMessage = message
         }
     }
 }

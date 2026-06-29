@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import UserNotifications
+import Intents
 
 @main
 struct LeadFlowApp: App {
@@ -14,7 +15,54 @@ struct LeadFlowApp: App {
                 .environmentObject(notificationService)
                 .environmentObject(auth)
                 .task { await auth.bootstrap() }
+                // Redial from the iOS call log / Siri: tapping a Stream number hands
+                // the app an INStartCallIntent (or legacy audio variant) which we
+                // route into the same outbound flow as the in-app Call button. This
+                // is the reliable hook under the SwiftUI scene lifecycle (cold + warm).
+                .onContinueUserActivity("INStartCallIntent") { activity in
+                    OutboundCallRouter.handle(activity)
+                }
+                .onContinueUserActivity("INStartAudioCallIntent") { activity in
+                    OutboundCallRouter.handle(activity)
+                }
         }
+    }
+}
+
+// MARK: - Outbound call routing (call-log redial / Siri)
+
+// Routes a system "call" hand-off into the in-app outbound flow. iOS hands the app
+// an INStartCallIntent (or the legacy INStartAudioCallIntent) when the user taps a
+// Stream number in the call history; we pull the destination number out and place
+// the call exactly like the in-app Call button — fixing the prior behavior where a
+// call-log tap merely opened the app and did nothing.
+enum OutboundCallRouter {
+    @discardableResult
+    static func handle(_ userActivity: NSUserActivity) -> Bool {
+        guard let target = destination(from: userActivity) else {
+            NSLog("[voice] continue userActivity '\(userActivity.activityType)' carried no callable handle")
+            return false
+        }
+        NSLog("[voice] redial from call log → \(target.number)")
+        VoiceCallManager.shared.startOutgoingCall(to: target.number, displayName: target.name) { message in
+            NSLog("[voice] redial failed: \(message)")
+        }
+        return true
+    }
+
+    private static func destination(from userActivity: NSUserActivity) -> (number: String, name: String?)? {
+        let intent = userActivity.interaction?.intent
+        if let startCall = intent as? INStartCallIntent,
+           let contact = startCall.contacts?.first,
+           let value = contact.personHandle?.value, !value.isEmpty {
+            return (value, contact.displayName)
+        }
+        if let startAudio = intent as? INStartAudioCallIntent,
+           let contact = startAudio.contacts?.first,
+           let value = contact.personHandle?.value, !value.isEmpty {
+            return (value, contact.displayName)
+        }
+        return nil
     }
 }
 
@@ -175,5 +223,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         RecordingManager.shared.retryPendingUploads()
         // Refresh the Voice registration on foreground (throttled internally).
         VoiceCallManager.shared.register()
+    }
+
+    // Fallback hand-off hook (alongside SwiftUI's .onContinueUserActivity) so a
+    // call-log redial routes into the outbound flow regardless of how the system
+    // delivers the activity.
+    func application(
+        _ application: UIApplication,
+        continue userActivity: NSUserActivity,
+        restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
+    ) -> Bool {
+        return OutboundCallRouter.handle(userActivity)
     }
 }

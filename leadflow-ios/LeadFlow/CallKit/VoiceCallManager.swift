@@ -42,6 +42,18 @@ final class VoiceCallManager: NSObject, ObservableObject {
     private var activeCalls: [String: Call] = [:]
     private var incomingCallUUID: UUID? = nil
 
+    // Outgoing-call state. `pendingOutgoing` holds the destination + minted access
+    // token for a call that's been reported to CallKit but not yet connected via
+    // TwilioVoiceSDK (the connect happens when the system performs the
+    // CXStartCallAction). `outgoingCallUUIDs` marks which active calls are outbound
+    // so the shared CallDelegate can report `connectedAt` to CallKit for them.
+    private struct PendingOutgoing {
+        let to: String
+        let accessToken: String
+    }
+    private var pendingOutgoing: [String: PendingOutgoing] = [:]
+    private var outgoingCallUUIDs: Set<String> = []
+
     // VoIP push token (raw Data from PushKit) + the last access token we minted,
     // needed for register/unregister with Twilio.
     private var voipToken: Data? = nil
@@ -210,6 +222,80 @@ final class VoiceCallManager: NSObject, ObservableObject {
             incomingCallerNumber = nil
             incomingCallUUID = nil
         }
+        // An outbound call ended/declined before connecting: drop its pending state.
+        pendingOutgoing.removeValue(forKey: uuid.uuidString)
+        outgoingCallUUIDs.remove(uuid.uuidString)
+    }
+
+    // MARK: - Outgoing calls
+
+    /// Public entry point for placing a call — used by the in-app "Call" button and
+    /// by the call-log redial intent. Mints a fresh Voice access token, then asks
+    /// CallKit to start the outgoing call so the NATIVE system call screen appears;
+    /// the actual Twilio connect happens in `performStartCall` when the system
+    /// performs the CXStartCallAction. `onError` (main thread) fires if Voice isn't
+    /// configured / the token can't be minted, so the UI shows a message instead of
+    /// a dead call screen. Outbound calls are NOT recorded.
+    func startOutgoingCall(to rawNumber: String, displayName: String?, onError: ((String) -> Void)? = nil) {
+        let to = rawNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !to.isEmpty else {
+            onError?("There's no phone number to call.")
+            return
+        }
+
+        Task { @MainActor in
+            let voice: APIService.VoiceTokenResponse
+            do {
+                voice = try await APIService.shared.fetchVoiceToken()
+            } catch {
+                NSLog("[voice] ✗ outbound token mint failed (Voice may not be configured): \(error.localizedDescription)")
+                onError?("Calling isn’t available right now. Please try again later.")
+                return
+            }
+
+            let uuid = UUID()
+            pendingOutgoing[uuid.uuidString] = PendingOutgoing(to: to, accessToken: voice.token)
+            identity = voice.identity
+            NSLog("[voice] startOutgoingCall → \(to) as \(voice.identity) (uuid \(uuid.uuidString))")
+            CallKitProvider.shared.startOutgoingCall(uuid: uuid, handle: to, displayName: displayName)
+        }
+    }
+
+    /// Invoked by CallKitProvider when the system performs the CXStartCallAction.
+    /// Connects the Twilio call using the destination + token stashed by
+    /// `startOutgoingCall`. Returns whether the connect was kicked off so the
+    /// provider can fulfill/fail the action. Reuses the SAME DefaultAudioDevice the
+    /// inbound path uses — CallKit's didActivate enables it; no AVAudioSession
+    /// reconfiguration here.
+    func performStartCall(uuid: UUID) -> Bool {
+        guard let pending = pendingOutgoing[uuid.uuidString] else {
+            NSLog("[voice] performStartCall — no pending outgoing for \(uuid.uuidString)")
+            return false
+        }
+        let connectOptions = ConnectOptions(accessToken: pending.accessToken) { builder in
+            // `To` is read by the backend's /api/voice/outbound TwiML endpoint, which
+            // <Dial>s it presenting the business's verified caller ID.
+            builder.params = ["To": pending.to]
+            builder.uuid = uuid
+        }
+        let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)
+        activeCalls[uuid.uuidString] = call
+        outgoingCallUUIDs.insert(uuid.uuidString)
+        hasActiveCall = true
+        NSLog("[voice] ▶︎ outbound connect started → \(pending.to) (uuid \(uuid.uuidString))")
+        return true
+    }
+
+    /// Called by CallKitProvider when the CXStartCallAction transaction request
+    /// itself fails (e.g. another call is already active), before the call ever
+    /// reaches the provider. Tears down the pending outbound state.
+    func outgoingTransactionFailed(uuid: UUID) {
+        pendingOutgoing.removeValue(forKey: uuid.uuidString)
+        outgoingCallUUIDs.remove(uuid.uuidString)
+        if let call = activeCalls.removeValue(forKey: uuid.uuidString) {
+            call.disconnect()
+        }
+        if activeCalls.isEmpty { hasActiveCall = false }
     }
 
     // MARK: - Audio session (invoked by CallKitProvider)
@@ -221,13 +307,19 @@ final class VoiceCallManager: NSObject, ObservableObject {
         audioDevice.isEnabled = false
         activeCalls.removeAll()
         activeCallInvites.removeAll()
+        pendingOutgoing.removeAll()
+        outgoingCallUUIDs.removeAll()
         incomingCallerNumber = nil
         incomingCallUUID = nil
         hasActiveCall = false
     }
 
     private func cleanup(call: Call) {
-        if let id = call.uuid?.uuidString { activeCalls.removeValue(forKey: id) }
+        if let id = call.uuid?.uuidString {
+            activeCalls.removeValue(forKey: id)
+            pendingOutgoing.removeValue(forKey: id)
+            outgoingCallUUIDs.remove(id)
+        }
         userInitiatedDisconnect = false
         if activeCalls.isEmpty {
             hasActiveCall = false
@@ -275,6 +367,12 @@ extension VoiceCallManager: CallDelegate {
         NSLog("[voice] callDidConnect")
         answerCompletion?(true)
         answerCompletion = nil
+        // For outbound calls, tell CallKit the call connected so the native screen
+        // switches from "Calling…" to the running call timer. Inbound answers are
+        // already reported as connected by CallKit when the user accepts.
+        if let id = call.uuid?.uuidString, outgoingCallUUIDs.contains(id) {
+            CallKitProvider.shared.reportOutgoingConnected(uuid: call.uuid)
+        }
         hasActiveCall = true
     }
 
