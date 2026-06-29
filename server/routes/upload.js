@@ -9,6 +9,7 @@ const { extractFromTranscriptVertical } = require('../services/verticalExtractio
 const { sendToAll } = require('../services/apns');
 const { emitToBusiness } = require('../socket');
 const { enforceAutoBookAvailability } = require('../services/inventoryService');
+const { logActivity } = require('../services/activityLog');
 const { attachBusiness } = require('../middleware/auth');
 
 // iOS CallKit uploads don't send a token yet — soft auth scopes the lead to the
@@ -89,7 +90,7 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
     const { transcript, provider, transcription_seconds } = await transcribe(audioPath);
     console.log(`[upload] Transcript length: ${transcript.length} chars via ${provider}`);
 
-    const { commonFields, verticalData, confidence } = await extractFromTranscriptVertical(transcript, normalizedVertical, null, { businessId: req.business.id });
+    const { commonFields, verticalData, confidence, businessRelevant } = await extractFromTranscriptVertical(transcript, normalizedVertical, null, { businessId: req.business.id });
     console.log(`[upload] Extraction complete, confidence: ${confidence}`);
 
     // Pre-populate phone from caller ID if not extracted
@@ -122,6 +123,31 @@ router.post('/recording', uploadAudio.single('audio'), async (req, res) => {
     };
 
     let lead = insertLead(leadData);
+
+    // Business-relevance gate — mirrors the Twilio path (webhook.js) exactly so
+    // both capture paths behave identically. The AI flags calls with zero business
+    // connection (wrong number, "call you back", purely personal); auto-discard so
+    // they never become a live lead. Only an explicit false discards; undefined is
+    // kept. The recording/transcript/extraction stay intact (discarded, not
+    // deleted) — the existing `discarded` filtering (customerService reconcile /
+    // getCustomerDetail, All Leads, Action Queue) keeps it out of every owner-facing
+    // view. Skip the auto-booking, new_lead emit, and push, just as webhook.js
+    // skips new_lead + SMS.
+    if (businessRelevant === false) {
+      db.prepare('UPDATE leads SET discarded = 1 WHERE id = ?').run(lead.id);
+      logActivity(lead.id, 'note', 'Auto-discarded — call had no business relevance');
+      console.log(`[upload] Auto-discarded non-business call (lead ${lead.id})`);
+      lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+      return res.status(201).json(lead);
+    }
+
+    // Vertical prompt sets confidence to 0 for personal/non-business calls
+    if (!confidence) {
+      db.prepare('UPDATE leads SET discarded = 1 WHERE id = ?').run(lead.id);
+      console.log(`[upload] Auto-discarded zero-confidence call (lead ${lead.id})`);
+      lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+      return res.status(201).json(lead);
+    }
 
     // Auto-booking: verify pool inventory is actually available for the requested
     // size over the rental window before finalizing. Inventory is pool-based — no
