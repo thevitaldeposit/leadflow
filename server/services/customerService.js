@@ -408,6 +408,19 @@ function shapeEngagement(eng) {
   // debrisType): prefer the booked lead's value, fall back to the representative.
   const schedVd = (key) => (bookedLead && !isEmptySched(bookedVd[key])) ? bookedVd[key] : vd[key];
 
+  // The job's payable call: the booked lead (carries paid_at, payment-SMS state,
+  // and the payable amount). Resolved for a booked OR completed engagement so the
+  // profile's Open Job card runs Mark Paid / payment SMS on the right call, not the
+  // newest (often empty) follow-up. Null for an inquiry. Read-only — never writes.
+  let jobLead = null;
+  if (status === 'booked' || status === 'completed') {
+    const rev = [...leadsAsc].reverse();
+    jobLead = rev.find(leadIsBooked)
+      || rev.find((l) => (l.job_status || '') === 'completed')
+      || rev.find((l) => !!l.paid_at)
+      || rep;
+  }
+
   let lastActivityAt = null;
   for (const l of leadsAsc) {
     const ts = l.updated_at || l.created_at;
@@ -441,6 +454,11 @@ function shapeEngagement(eng) {
     estimated_revenue: leadRevenue(rep),
     paid_at: rep.paid_at || null,
     auto_booked: rep.auto_booked === 1,
+    // Payable call for the Open Job card's Mark Paid / payment-link actions — the
+    // booked lead (not the newest call). paid_at / payment_sms_sent_at come from it.
+    booked_lead_id: jobLead ? jobLead.id : null,
+    booked_paid_at: jobLead ? (jobLead.paid_at || null) : null,
+    booked_payment_sms_sent_at: jobLead ? (jobLead.payment_sms_sent_at || null) : null,
     booking_signals: Array.isArray(vd.bookingSignalsDetected) ? vd.bookingSignalsDetected : [],
     booking_confidence: vd.bookingConfidence || null,
     intent_level: vd.intentLevel || null,

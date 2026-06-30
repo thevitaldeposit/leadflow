@@ -13,6 +13,7 @@ import {
   INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
+import PaymentLinkSection from '../components/home_services/PaymentLinkSection';
 import VoicemailBadge from '../components/home_services/VoicemailBadge';
 import { BookedModal, EditJobDetailsModal } from '../components/home_services/HomeServicesStickyHeader';
 import { buildBookingUpdates } from '../utils/booking';
@@ -455,6 +456,14 @@ export default function CustomerDetailPage() {
     setDetailRefresh(n => n + 1);
   };
 
+  // Mark Paid / Mark Unpaid or a payment-SMS send happened on the Open Job card's
+  // Payment Link (PaymentLinkSection already called the lead endpoint). Just reload
+  // so the engagement re-derives: a paid + past-pickup job flips to Completed, and
+  // the paid/SMS state re-renders. No extraction, booking, or Stripe logic here.
+  const handlePaymentChange = async () => {
+    await load();
+  };
+
   const scrollToId = (sectionId) => (e) => {
     e.preventDefault();
     setActiveSection(sectionId);
@@ -590,7 +599,7 @@ export default function CustomerDetailPage() {
 
           {/* Active Inquiry — the current active engagement, expanded by default */}
           {activeEngagement ? (
-            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} onBook={handleBookEngagement} onEdit={handleEditEngagement} refreshKey={detailRefresh} />
+            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} onBook={handleBookEngagement} onEdit={handleEditEngagement} onPaymentChange={handlePaymentChange} refreshKey={detailRefresh} />
           ) : (
             <Card id="active-inquiry" title="Active Inquiry" icon={MessageSquare}>
               <div className="px-5 py-8 text-center text-sm text-muted">No active inquiry. A new call opens one automatically.</div>
@@ -624,7 +633,7 @@ export default function CustomerDetailPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-divider">
-                    {jobEngagements.map(e => <JobHistoryRow key={e.id} engagement={e} />)}
+                    {jobEngagements.map(e => <JobHistoryRow key={e.id} engagement={e} onPaymentChange={handlePaymentChange} />)}
                   </tbody>
                 </table>
               </div>
@@ -793,7 +802,11 @@ export default function CustomerDetailPage() {
 // The body shared by the active engagement and an expanded history row: the
 // newest call's full intelligence (booking signals, dates, industry fields, AI
 // summary, recording) plus any earlier calls in the same engagement, expandable.
-function EngagementBody({ engagement: e, refreshKey = 0 }) {
+// For a booked/completed job it also surfaces the Payment Link + Mark Paid block,
+// targeting the engagement's BOOKED lead (see booked_lead_id) — the same actions
+// the lead-detail page exposes. onPaymentChange refreshes the profile so a Mark
+// Paid that completes the job (paid + pickup passed) reflects immediately.
+function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
   const [openCalls, setOpenCalls] = useState(() => new Set());
   const toggle = (cid) => setOpenCalls(prev => {
     const next = new Set(prev);
@@ -846,6 +859,23 @@ function EngagementBody({ engagement: e, refreshKey = 0 }) {
           </div>
         </div>
       )}
+
+      {/* Payment Link + Mark Paid — booked/completed jobs only, operating on the
+          engagement's booked lead (not the newest call). Reuses the same component
+          and api methods (api.updateLead paid_at, api.resendPaymentSms) as the lead
+          detail page; onUpdate reloads the profile so completion / paid state sync. */}
+      {e.booked_lead_id && (
+        <div className="px-5 pb-5 pt-1">
+          <PaymentLinkSection
+            lead={{
+              id: e.booked_lead_id,
+              paid_at: e.booked_paid_at,
+              payment_sms_sent_at: e.booked_payment_sms_sent_at,
+            }}
+            onUpdate={() => onPaymentChange?.()}
+          />
+        </div>
+      )}
     </>
   );
 }
@@ -855,7 +885,7 @@ function EngagementBody({ engagement: e, refreshKey = 0 }) {
 // inquiry) the manual Close / Mark Lost actions plus the green "Mark Booked"
 // header action. Mark Booked reuses the lead-detail Confirm Booking modal and
 // its booking path verbatim; it never re-runs extraction or auto-book logic.
-function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, refreshKey = 0 }) {
+function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymentChange, refreshKey = 0 }) {
   const [closing, setClosing] = useState(false);
   // Manual booking is offered only while the inquiry is still open (status
   // 'inquiry'); once it's a booked Job or completed, the button is hidden.
@@ -976,7 +1006,7 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, refreshK
         {e.estimated_revenue ? <span className="text-sm font-semibold text-content">${Math.round(e.estimated_revenue).toLocaleString()}</span> : null}
       </div>
 
-      <EngagementBody engagement={e} refreshKey={refreshKey} />
+      <EngagementBody engagement={e} refreshKey={refreshKey} onPaymentChange={onPaymentChange} />
 
       {e.status === 'inquiry' && (
         <div className="px-5 py-3 border-t border-divider flex items-center justify-end gap-2">
@@ -1044,7 +1074,7 @@ function PastInquiries({ engagements }) {
 
 // One collapsed Jobs row (a booked or completed engagement). The blue Job ID
 // expands the job's call intelligence in place — no separate page.
-function JobHistoryRow({ engagement: e }) {
+function JobHistoryRow({ engagement: e, onPaymentChange }) {
   const [open, setOpen] = useState(false);
   // Service column shows the service TYPE (e.g. "Dumpster rental") from the
   // vertical config — the size lives in its own column. Status is display-only:
@@ -1080,7 +1110,7 @@ function JobHistoryRow({ engagement: e }) {
       {open && (
         <tr>
           <td colSpan={6} className="p-0 border-t border-divider">
-            <EngagementBody engagement={e} />
+            <EngagementBody engagement={e} onPaymentChange={onPaymentChange} />
           </td>
         </tr>
       )}
