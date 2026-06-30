@@ -358,9 +358,46 @@ function engagementIsOpen(status) {
   return status === 'inquiry' || status === 'booked';
 }
 
+// "Has booking signals" = the booking-signal detector already recorded at least one
+// signal on this call. We CONSUME its stored output (vertical_data.bookingSignalsDetected
+// — keys like "price_agreed"/"size_confirmed", set to [] for voicemails/non-booking
+// calls) and never recompute it. An actually booked/auto-booked lead also counts: it
+// is itself a new job and must never be absorbed into a prior one. A call with no
+// signals is a follow-up (swap-out, billing, status check) that belongs to the job it
+// follows — not a new inquiry.
+function leadHasBookingSignals(lead) {
+  if (leadIsBooked(lead)) return true;
+  let vd = {};
+  try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+  return Array.isArray(vd.bookingSignalsDetected) && vd.bookingSignalsDetected.length > 0;
+}
+
+// The most-recent real JOB (a booked or completed engagement) in the walk so far —
+// the job a no-booking-signal follow-up call logically belongs to. Closed inquiries
+// (lost) are skipped: a follow-up revives a real job, never a lost inquiry.
+function mostRecentJobEngagement(engagements) {
+  for (let i = engagements.length - 1; i >= 0; i--) {
+    if (engagements[i].status === 'booked' || engagements[i].status === 'completed') {
+      return engagements[i];
+    }
+  }
+  return null;
+}
+
 // Fold a customer's (non-discarded) calls into engagements. Walking oldest → newest,
 // each call joins the open engagement if one exists, else starts a new one; an
 // engagement stops absorbing calls the instant it becomes closed (completed/lost).
+//
+// EXCEPTION — attach-on-read: once the open job has closed, a follow-up call that
+// carries NO booking signals attaches to that most-recent booked/completed job as
+// call history instead of spawning a phantom Active Inquiry. So a post-booking
+// swap-out, or a post-pickup billing/status call, stays part of the job it belongs
+// to even after the job completed and ejected it from the open slot. The job's
+// status/schedule/completion/totals are untouched — its schedule is sourced from the
+// booked lead in shapeEngagement, never from the absorbed follow-up. A call WITH
+// booking signals (or an actually-booked lead) still starts a NEW engagement, so a
+// genuinely new inquiry/job is never swallowed or merged into an old one. Purely
+// read-time, like the rest of this module; nothing is written.
 function buildEngagements(activeLeads, paidCtx) {
   const asc = [...activeLeads].sort(
     (a, b) => String(a.created_at).localeCompare(String(b.created_at)) || (a.id - b.id)
@@ -368,7 +405,17 @@ function buildEngagements(activeLeads, paidCtx) {
   const engagements = [];
   let open = null;
   for (const lead of asc) {
-    if (!open) { open = { leads: [] }; engagements.push(open); }
+    if (!open) {
+      // No open engagement. A follow-up call with no booking signals rejoins the
+      // most-recent job (if any) rather than opening a new Active Inquiry. The job
+      // stays closed (we never set `open`); the call is recorded as history only.
+      if (!leadHasBookingSignals(lead)) {
+        const job = mostRecentJobEngagement(engagements);
+        if (job) { job.leads.push(lead); continue; }
+      }
+      open = { leads: [] };
+      engagements.push(open);
+    }
     open.leads.push(lead);
     open.status = engagementStatusOf(open.leads, paidCtx);
     if (!engagementIsOpen(open.status)) open = null;
@@ -376,9 +423,12 @@ function buildEngagements(activeLeads, paidCtx) {
   return engagements;
 }
 
-// Shape one engagement for the customer profile. Display details come from the
-// newest call (latest call wins); industry fields are read straight from the
-// stored vertical_data (never recomputed).
+// Shape one engagement for the customer profile. An inquiry's display details come
+// from the newest call (latest call wins); a booked/completed JOB instead sources its
+// schedule, size, price and payment fields from the booked lead — never recomputed,
+// and never from a later follow-up call absorbed into the job (a swap-out / billing
+// call must not blank or alter the job's details). Industry fields are read straight
+// from stored vertical_data.
 function shapeEngagement(eng) {
   const leadsAsc = eng.leads;
   const rep = leadsAsc[leadsAsc.length - 1];
@@ -386,32 +436,12 @@ function shapeEngagement(eng) {
   let vd = {};
   try { vd = rep.vertical_data ? JSON.parse(rep.vertical_data) : {}; } catch { vd = {}; }
 
-  // For a BOOKED engagement, the live schedule lives on the booked lead — not
-  // necessarily the newest call. A later (and often empty) follow-up call must
-  // not blank the booked job's delivery/pickup/time/duration in this summary. So
-  // for a booked engagement we source each schedule field from the booked lead,
-  // falling back to the representative (newest call) only when the booked lead's
-  // value is genuinely empty. Inquiries/opportunities are untouched — they keep
-  // reflecting the latest call. Pure read-time merge; nothing is written.
-  const bookedLead = status === 'booked'
-    ? [...leadsAsc].reverse().find(leadIsBooked) || null
-    : null;
-  let bookedVd = vd;
-  if (bookedLead && bookedLead !== rep) {
-    try { bookedVd = bookedLead.vertical_data ? JSON.parse(bookedLead.vertical_data) : {}; } catch { bookedVd = {}; }
-  }
-  const isEmptySched = (v) => v == null || v === '';
-  // Prefer the booked lead's non-empty value for a flat schedule column; fall
-  // back to the representative. A no-op when there's no booked lead (inquiries).
-  const schedCol = (col) => (bookedLead && !isEmptySched(bookedLead[col])) ? bookedLead[col] : rep[col];
-  // Same, for a field stored in vertical_data (rentalDuration, dumpsterSize,
-  // debrisType): prefer the booked lead's value, fall back to the representative.
-  const schedVd = (key) => (bookedLead && !isEmptySched(bookedVd[key])) ? bookedVd[key] : vd[key];
-
-  // The job's payable call: the booked lead (carries paid_at, payment-SMS state,
-  // and the payable amount). Resolved for a booked OR completed engagement so the
-  // profile's Open Job card runs Mark Paid / payment SMS on the right call, not the
-  // newest (often empty) follow-up. Null for an inquiry. Read-only — never writes.
+  // The job's defining call: the booked lead (carries the live delivery/pickup/time/
+  // size/duration, the quoted price, paid_at and payment-SMS state). Resolved for a
+  // booked OR completed engagement — for completed too, because no-booking-signal
+  // follow-up calls are now absorbed into the job's call history and would otherwise
+  // become the newest call (rep) and blank the job's schedule/price. Null for an
+  // inquiry, which keeps reflecting the latest call. Read-only — never writes.
   let jobLead = null;
   if (status === 'booked' || status === 'completed') {
     const rev = [...leadsAsc].reverse();
@@ -420,6 +450,22 @@ function shapeEngagement(eng) {
       || rev.find((l) => !!l.paid_at)
       || rep;
   }
+  let jobVd = vd;
+  if (jobLead && jobLead !== rep) {
+    try { jobVd = jobLead.vertical_data ? JSON.parse(jobLead.vertical_data) : {}; } catch { jobVd = {}; }
+  }
+  const isEmpty = (v) => v == null || v === '';
+  // Prefer the job lead's non-empty value for a flat column / a vertical_data field
+  // (delivery/pickup/time, dumpsterSize/debrisType/rentalDuration); fall back to the
+  // representative. A no-op for inquiries (jobLead null) and for a single-call job
+  // (jobLead === rep), so existing inquiries and jobs are unchanged.
+  const jobCol = (col) => (jobLead && !isEmpty(jobLead[col])) ? jobLead[col] : rep[col];
+  const jobVdField = (key) => (jobLead && !isEmpty(jobVd[key])) ? jobVd[key] : vd[key];
+  // The lead representing the job for non-schedule display too (service summary,
+  // address, revenue, paid_at, auto_booked) so an absorbed follow-up never blanks
+  // them or drops the job's revenue from totals. rep for an inquiry.
+  const detailLead = jobLead || rep;
+  const detailVd = (jobLead && jobLead !== rep) ? jobVd : vd;
 
   let lastActivityAt = null;
   for (const l of leadsAsc) {
@@ -446,14 +492,14 @@ function shapeEngagement(eng) {
     // Past-inquiries label; null for open/booked/completed. Defaults to 'lost'
     // (the generic terminal state) for older closes that predate this field.
     close_reason: status === 'lost' ? (vd.closeReason || 'lost') : null,
-    service: leadServiceSummary(rep),
-    address: rep.address || vd.deliveryAddress || vd.propertyAddress || null,
-    delivery_date: schedCol('delivery_date') || null,
-    pickup_date: schedCol('pickup_date') || null,
-    scheduled_time: schedCol('scheduled_time') || null,
-    estimated_revenue: leadRevenue(rep),
-    paid_at: rep.paid_at || null,
-    auto_booked: rep.auto_booked === 1,
+    service: leadServiceSummary(detailLead),
+    address: detailLead.address || detailVd.deliveryAddress || detailVd.propertyAddress || null,
+    delivery_date: jobCol('delivery_date') || null,
+    pickup_date: jobCol('pickup_date') || null,
+    scheduled_time: jobCol('scheduled_time') || null,
+    estimated_revenue: leadRevenue(detailLead),
+    paid_at: detailLead.paid_at || null,
+    auto_booked: detailLead.auto_booked === 1,
     // Payable call for the Open Job card's Mark Paid / payment-link actions — the
     // booked lead (not the newest call). paid_at / payment_sms_sent_at come from it.
     booked_lead_id: jobLead ? jobLead.id : null,
@@ -465,11 +511,11 @@ function shapeEngagement(eng) {
     urgency: vd.urgency || null,
     follow_up_date: vd.followUpDate || rep.follow_up_date || null,
     // Industry-relevant fields (display stored values; not recomputed). Size /
-    // debris / duration are booked-sourced (schedVd) so a booked job shows the
-    // booked lead's values, not a later empty follow-up call's.
-    dumpster_size: schedVd('dumpsterSize') || null,
-    debris_type: schedVd('debrisType') || null,
-    rental_duration: schedVd('rentalDuration') || null,
+    // debris / duration are job-sourced (jobVdField) so a booked or completed job
+    // shows the booked lead's values, not a later empty follow-up call's.
+    dumpster_size: jobVdField('dumpsterSize') || null,
+    debris_type: jobVdField('debrisType') || null,
+    rental_duration: jobVdField('rentalDuration') || null,
     vertical: rep.vertical || null,
     sub_vertical: rep.sub_vertical || null,
     calls: leadsAsc.slice().reverse().map(toJob),   // newest-first call list
