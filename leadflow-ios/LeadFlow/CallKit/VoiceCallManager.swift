@@ -353,6 +353,16 @@ final class VoiceCallManager: NSObject, ObservableObject {
 
     func toggleSpeaker() { setSpeaker(!isSpeakerOn) }
 
+    /// Send DTMF tone(s) on the active call — used by the in-app keypad. Forwards to
+    /// the EXISTING Twilio `Call.sendDigits(_:)` on the in-progress call, exactly as
+    /// `toggleMute` flips the call's `isMuted`. It does not touch the audio session,
+    /// CallKit, call setup, or recording. No-op when there's no active call. The SDK
+    /// accepts 0-9, `*`, `#`, and `w` (a half-second pause); other characters are ignored.
+    func sendDigits(_ digits: String) {
+        guard let id = currentCallUUID?.uuidString, let call = activeCalls[id] else { return }
+        call.sendDigits(digits)
+    }
+
     /// End the active call through CallKit (CXEndCallAction) — the same path the
     /// native red End button uses (CallKitProvider → performEnd → disconnect).
     func endActiveCall() {
