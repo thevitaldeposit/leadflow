@@ -32,6 +32,7 @@ const ACTIVITY_ICONS = {
   sms_sent: MessageSquare,
   status_change: RefreshCw,
   job_updated: Edit2,
+  reschedule_requested: RefreshCw,
   note_added: StickyNote,
 };
 

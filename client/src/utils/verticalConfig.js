@@ -478,6 +478,14 @@ export function getLeadActionState(lead, now = new Date()) {
     recommendation = `Call back ${mcName} — missed call, no voicemail`;
   }
 
+  // A booked job with a pending CALL-DRIVEN reschedule request: the proposed
+  // schedule change was held (not written) and is waiting on the owner to approve
+  // or reject. Surfaced as a Tier-1 Action Queue item (see bookedAttentionReason).
+  const rescheduleRequested = !!vd.rescheduleRequest;
+  if (rescheduleRequested) {
+    recommendation = 'Customer requested reschedule — approve?';
+  }
+
   // Buckets used by Today's Priorities — ordered by priority floor below.
   // asap sits above follow_up_due so ASAP customers are never buried.
   let bucket = 'other';
@@ -551,6 +559,7 @@ export function getLeadActionState(lead, now = new Date()) {
     isOpportunity,
     isOperational,
     isDead,
+    rescheduleRequested,
     jobStatus,
   };
 }

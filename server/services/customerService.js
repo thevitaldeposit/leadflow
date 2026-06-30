@@ -386,6 +386,27 @@ function shapeEngagement(eng) {
   let vd = {};
   try { vd = rep.vertical_data ? JSON.parse(rep.vertical_data) : {}; } catch { vd = {}; }
 
+  // For a BOOKED engagement, the live schedule lives on the booked lead — not
+  // necessarily the newest call. A later (and often empty) follow-up call must
+  // not blank the booked job's delivery/pickup/time/duration in this summary. So
+  // for a booked engagement we source each schedule field from the booked lead,
+  // falling back to the representative (newest call) only when the booked lead's
+  // value is genuinely empty. Inquiries/opportunities are untouched — they keep
+  // reflecting the latest call. Pure read-time merge; nothing is written.
+  const bookedLead = status === 'booked'
+    ? [...leadsAsc].reverse().find(leadIsBooked) || null
+    : null;
+  let bookedVd = vd;
+  if (bookedLead && bookedLead !== rep) {
+    try { bookedVd = bookedLead.vertical_data ? JSON.parse(bookedLead.vertical_data) : {}; } catch { bookedVd = {}; }
+  }
+  const isEmptySched = (v) => v == null || v === '';
+  // Prefer the booked lead's non-empty value for a flat schedule column; fall
+  // back to the representative. A no-op when there's no booked lead (inquiries).
+  const schedCol = (col) => (bookedLead && !isEmptySched(bookedLead[col])) ? bookedLead[col] : rep[col];
+  // Same, for a schedule field stored in vertical_data (rentalDuration).
+  const schedVd = (key) => (bookedLead && !isEmptySched(bookedVd[key])) ? bookedVd[key] : vd[key];
+
   let lastActivityAt = null;
   for (const l of leadsAsc) {
     const ts = l.updated_at || l.created_at;
@@ -413,9 +434,9 @@ function shapeEngagement(eng) {
     close_reason: status === 'lost' ? (vd.closeReason || 'lost') : null,
     service: leadServiceSummary(rep),
     address: rep.address || vd.deliveryAddress || vd.propertyAddress || null,
-    delivery_date: rep.delivery_date || null,
-    pickup_date: rep.pickup_date || null,
-    scheduled_time: rep.scheduled_time || null,
+    delivery_date: schedCol('delivery_date') || null,
+    pickup_date: schedCol('pickup_date') || null,
+    scheduled_time: schedCol('scheduled_time') || null,
     estimated_revenue: leadRevenue(rep),
     paid_at: rep.paid_at || null,
     auto_booked: rep.auto_booked === 1,
@@ -427,7 +448,7 @@ function shapeEngagement(eng) {
     // Industry-relevant fields (display stored values; not recomputed).
     dumpster_size: vd.dumpsterSize || null,
     debris_type: vd.debrisType || null,
-    rental_duration: vd.rentalDuration || null,
+    rental_duration: schedVd('rentalDuration') || null,
     vertical: rep.vertical || null,
     sub_vertical: rep.sub_vertical || null,
     calls: leadsAsc.slice().reverse().map(toJob),   // newest-first call list

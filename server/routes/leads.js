@@ -8,6 +8,7 @@ const { emitToBusiness } = require('../socket');
 const { attachBusiness, requireAuth } = require('../middleware/auth');
 const { reconcileCustomersForBusiness, recomputeCustomerStatus } = require('../services/customerService');
 const { describeBooking } = require('../services/leadActivityText');
+const { sendToAll } = require('../services/apns');
 
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
 // request to the caller's business when a token is present, else to Valley Binz.
@@ -38,6 +39,101 @@ function calcPickupFromDuration(deliveryISO, days) {
   if (Number.isNaN(d.getTime())) return null;
   d.setUTCDate(d.getUTCDate() + Math.round(days));
   return d.toISOString().slice(0, 10);
+}
+
+// ── Booked-schedule write guard ────────────────────────────────────────────────
+// A confirmed (booked/operational) job's schedule is load-bearing — it drives the
+// calendar, inventory, completion, and payment. Once a job is booked, its
+// delivery/pickup/time/duration must not be silently lost on the write path:
+//   • An EMPTY incoming schedule field never nulls a non-empty booked value
+//     (protects against a partial save blanking good data — applies to ALL callers).
+//   • A real (non-empty) schedule CHANGE to a booked job is applied directly for the
+//     OWNER (an authenticated edit — the normal Edit Job Details / Mark Booked PUT),
+//     but a CALL-DRIVEN / automated change is diverted to an approval item instead
+//     of being written (see the reschedule-approval flow in PUT /:id).
+// Unbooked leads (inquiries/opportunities) are never gated — booking, rescheduling,
+// and clearing all behave exactly as before until a job is actually booked.
+const OPERATIONAL_BOOKED_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up']);
+
+function isEmptyScheduleVal(v) {
+  return v === undefined || v === null || v === '';
+}
+
+// Mutates `updates` (flat columns) and `vdPatch` (vertical_data patch) in place to
+// enforce the guard above, returning the call-driven changes it diverted as
+// { field, from, to } entries. A no-op for any lead that isn't already booked.
+function guardBookedSchedule({ existing, updates, vdPatch, currentVd, req }) {
+  const diverted = [];
+  const existingBooked = OPERATIONAL_BOOKED_STATUSES.has(existing.job_status) || existing.status === 'booked';
+  if (!existingBooked) return diverted;
+
+  // Owner edits carry a valid JWT (attachBusiness populates req.user); the iOS app
+  // and any automated/call-driven caller do not. A caller may also self-identify as
+  // call-driven via source:'call' | automated:true. Owner edits are NEVER gated.
+  const isOwnerEdit = !!req.user && req.body.source !== 'call' && req.body.automated !== true;
+
+  // The four schedule fields, with where each lives (flat column vs vertical_data).
+  const fields = [
+    { key: 'delivery_date', loc: 'flat', incoming: updates.delivery_date, current: existing.delivery_date },
+    { key: 'pickup_date', loc: 'flat', incoming: updates.pickup_date, current: existing.pickup_date },
+    { key: 'scheduled_time', loc: 'flat', incoming: updates.scheduled_time, current: existing.scheduled_time },
+    { key: 'rentalDuration', loc: 'vd', incoming: vdPatch ? vdPatch.rentalDuration : undefined, current: currentVd.rentalDuration },
+  ];
+
+  const drop = (f) => {
+    if (f.loc === 'flat') delete updates[f.key];
+    else if (vdPatch) delete vdPatch[f.key];
+  };
+
+  for (const f of fields) {
+    if (f.incoming === undefined) continue;               // not in this request — untouched
+    // (a) Never let an empty incoming value null a non-empty booked value.
+    if (isEmptyScheduleVal(f.incoming)) {
+      if (!isEmptyScheduleVal(f.current)) drop(f);         // preserve existing booked value
+      continue;
+    }
+    // (b) A real (non-empty) change to a booked schedule field.
+    if (String(f.incoming) === String(f.current ?? '')) continue;   // same value — nothing to guard
+    if (isOwnerEdit) continue;                             // owner meant it — apply directly
+    diverted.push({ field: f.key, from: f.current ?? null, to: f.incoming });  // call-driven → divert
+    drop(f);
+  }
+
+  return diverted;
+}
+
+// Human-readable summary of a diverted reschedule, for the activity log + UI.
+function describeReschedule(diverted) {
+  const LABELS = {
+    delivery_date: 'delivery date', pickup_date: 'pickup date',
+    scheduled_time: 'delivery time', rentalDuration: 'duration',
+  };
+  const parts = diverted.map(d => `${LABELS[d.field] || d.field} ${d.from || 'not set'} → ${d.to}`);
+  return `Customer requested reschedule — ${parts.join(', ')}`.slice(0, 500);
+}
+
+// Device tokens registered for a business (mirrors upload.js). Best-effort.
+function getBusinessDeviceTokens(businessId) {
+  try {
+    return db.prepare('SELECT device_token FROM devices WHERE business_id = ?')
+      .all(businessId).map(d => d.device_token);
+  } catch {
+    return [];
+  }
+}
+
+// Push the owner an approval prompt for a call-driven reschedule (mirrors the
+// new-lead push in upload.js — same { type, leadId } data the iOS app routes on).
+function notifyRescheduleApproval(lead) {
+  try {
+    const tokens = getBusinessDeviceTokens(lead.business_id);
+    const name = getLeadDisplayName(lead) || 'A customer';
+    sendToAll(tokens, 'Reschedule request', `${name} asked to change a booked job — tap to approve`, {
+      type: 'reschedule_approval', leadId: lead.id,
+    }).catch(err => console.error('[leads] reschedule push failed:', err.message));
+  } catch (err) {
+    console.error('[leads] reschedule notify error:', err.message);
+  }
 }
 
 // GET /api/leads
@@ -184,18 +280,39 @@ router.put('/:id', (req, res) => {
     // the flat delivery_date / pickup_date columns into vertical_data so the Lead
     // Detail page's field-pack display picks up changes from any caller (Confirm
     // Booking modal, schedule editor, etc.) without each caller needing to
-    // duplicate the keys.
+    // duplicate the keys. Clone the patch so the booked-schedule guard can drop
+    // diverted keys without mutating the request body.
     const vdPatch = (req.body.vertical_data && typeof req.body.vertical_data === 'object')
-      ? req.body.vertical_data
+      ? { ...req.body.vertical_data }
       : null;
-    const needsVdMerge = vdPatch !== null
+
+    let currentVd = {};
+    try { currentVd = JSON.parse(existing.vertical_data || '{}'); } catch { currentVd = {}; }
+
+    // Booked-schedule guard: protect a booked job's schedule from being nulled by
+    // an empty save, and divert call-driven schedule changes to owner approval.
+    // Owner edits pass through untouched. No-op for unbooked leads. Mutates
+    // `updates` / `vdPatch` in place; returns the diverted call-driven changes.
+    const divertedReschedule = guardBookedSchedule({ existing, updates, vdPatch, currentVd, req });
+
+    // A diverted reschedule is recorded as a PENDING request on vertical_data —
+    // the booked schedule itself stays unchanged — so the owner can approve it from
+    // the Action Queue. Approving re-issues these values as an owner edit.
+    let pendingReschedule = null;
+    if (divertedReschedule.length) {
+      pendingReschedule = { requestedAt: new Date().toISOString() };
+      for (const d of divertedReschedule) pendingReschedule[d.field] = d.to;
+    }
+
+    const effectiveVdPatch = pendingReschedule
+      ? { ...(vdPatch || {}), rescheduleRequest: pendingReschedule }
+      : vdPatch;
+    const needsVdMerge = effectiveVdPatch !== null
       || updates.delivery_date !== undefined
       || updates.pickup_date !== undefined;
 
     if (needsVdMerge) {
-      let current = {};
-      try { current = JSON.parse(existing.vertical_data || '{}'); } catch { current = {}; }
-      const merged = { ...current, ...(vdPatch || {}) };
+      const merged = { ...currentVd, ...(effectiveVdPatch || {}) };
       if (updates.delivery_date !== undefined) {
         merged.deliveryDate = updates.delivery_date;
         merged.deliveryDateISO = updates.delivery_date;
@@ -257,6 +374,16 @@ router.put('/:id', (req, res) => {
           });
         }
       }).catch((err) => console.error('[leads] SMS send error:', err));
+    }
+
+    // A call-driven attempt to change the booked schedule was diverted (not
+    // written). Record it on the timeline and notify the owner so it surfaces as a
+    // Tier-1 "approve reschedule?" item in the Action Queue. The schedule itself
+    // was preserved by guardBookedSchedule above.
+    if (divertedReschedule.length) {
+      logActivity(updated.id, 'reschedule_requested', describeReschedule(divertedReschedule));
+      emitToBusiness(updated.business_id, 'lead_updated', updated);
+      notifyRescheduleApproval(updated);
     }
 
     res.json(updated);
@@ -482,3 +609,6 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
+// Pure helpers exported for unit tests; the router itself ignores extra props.
+module.exports.guardBookedSchedule = guardBookedSchedule;
+module.exports.describeReschedule = describeReschedule;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   AlertTriangle, UserPlus, CalendarCheck2, Truck, CheckCircle2, DollarSign,
-  Phone, CalendarSearch, Calendar, Sparkles, X, ArrowRight, ArrowUpRight,
+  Phone, CalendarSearch, Calendar, Sparkles, X, Check, ArrowRight, ArrowUpRight,
   ArrowDownRight, FileText, Briefcase, AlertCircle,
 } from 'lucide-react';
 import { api } from '../../utils/api';
@@ -257,10 +257,14 @@ function classifyForQueue(e, now, cfg) {
   return { inQueue: anyActive, expired: !anyActive, reason: null };
 }
 
-// A booked/scheduled job delivering today or tomorrow that is still missing the
-// delivery address or payment is operational risk — it jumps to the top tier.
+// Operational risk on a booked/scheduled job that jumps it to the top tier:
+// (1) a pending call-driven reschedule request the owner must approve/reject, or
+// (2) a job delivering today/tomorrow still missing the delivery address or payment.
 function bookedAttentionReason(lead, vd, now) {
   if (lead.job_status !== 'booked' && lead.job_status !== 'scheduled') return null;
+  // A held reschedule request surfaces regardless of delivery date — the booked
+  // schedule wasn't changed (see the server guard); the owner decides.
+  if (vd.rescheduleRequest) return 'Customer requested reschedule — approve?';
   const d = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
   if (!d) return null;
   const today = new Date(now); today.setHours(0, 0, 0, 0);
@@ -272,6 +276,18 @@ function bookedAttentionReason(lead, vd, now) {
   if (missing.length === 0) return null;
   const when = d.getTime() === today.getTime() ? 'today' : 'tomorrow';
   return `Delivering ${when} — missing ${missing.join(' & ')}`;
+}
+
+// One-line summary of an approved reschedule, persisted as the job_updated audit
+// line (same format as the Edit Job Details summary). Names only the fields the
+// request actually proposed.
+function describeRescheduleApplied(rr) {
+  const parts = [];
+  if (rr.delivery_date !== undefined) parts.push(`delivery date → ${formatDeliveryDate(rr.delivery_date) || rr.delivery_date}`);
+  if (rr.pickup_date !== undefined) parts.push(`pickup date → ${formatDeliveryDate(rr.pickup_date) || rr.pickup_date}`);
+  if (rr.scheduled_time !== undefined) parts.push(`delivery time → ${formatTime12(rr.scheduled_time) || rr.scheduled_time}`);
+  if (rr.rentalDuration !== undefined) parts.push(`duration → ${rr.rentalDuration}`);
+  return `Reschedule approved — ${parts.join(', ')}`;
 }
 
 // Assigns a lead to a priority tier (1 = most urgent, 6 = least).
@@ -522,10 +538,13 @@ function CallButton({ lead, name }) {
 
 // Compact Action Queue row. Shows intent/critical badge, name + phone, the
 // operational reason it's in the queue, a time indicator, and call + dismiss.
-function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick }) {
+function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onMissedCallClick }) {
   const navigate = useNavigate();
   const isMissedCall = lead.call_type === 'missed_call';
   const isVoicemail = lead.call_type === 'voicemail';
+  // A pending call-driven reschedule swaps the call/dismiss actions for an
+  // explicit Approve / Reject decision (see handleRescheduleDecision).
+  const isReschedule = !!state.rescheduleRequested;
   const name = getLeadName(lead);
   // Missed calls often have no name yet — fall back to the caller's number.
   const displayName = (isMissedCall && name === 'Unknown')
@@ -597,18 +616,44 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onMissedCallClick 
         </span>
       )}
       <div className="flex items-center justify-end gap-0.5 flex-shrink-0 w-14" onClick={e => e.stopPropagation()}>
-        {lead.phone && <CallButton lead={lead} name={name} />}
-        {/* Missed calls are dismissed via the decision modal's Discard, not the
-            quick-dismiss X, so the owner makes an explicit create/discard call. */}
-        {!isMissedCall && (
-          <button
-            onClick={handleDismissClick}
-            className="p-1.5 rounded-lg text-muted hover:text-muted hover:bg-surface-2 transition-colors"
-            title="Dismiss from Action Queue"
-            aria-label="Dismiss from Action Queue"
-          >
-            <X size={14} />
-          </button>
+        {isReschedule ? (
+          <>
+            {/* Approve applies the requested schedule (owner edit — allowed by the
+                server guard); Reject leaves the booked schedule unchanged. Either
+                clears the pending request so the item leaves the queue. */}
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReschedule(lead, true); }}
+              className="p-1.5 rounded-lg text-success hover:bg-success/10 transition-colors"
+              title="Approve reschedule"
+              aria-label="Approve reschedule"
+            >
+              <Check size={15} />
+            </button>
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReschedule(lead, false); }}
+              className="p-1.5 rounded-lg text-muted hover:text-danger hover:bg-surface-2 transition-colors"
+              title="Reject reschedule"
+              aria-label="Reject reschedule"
+            >
+              <X size={14} />
+            </button>
+          </>
+        ) : (
+          <>
+            {lead.phone && <CallButton lead={lead} name={name} />}
+            {/* Missed calls are dismissed via the decision modal's Discard, not the
+                quick-dismiss X, so the owner makes an explicit create/discard call. */}
+            {!isMissedCall && (
+              <button
+                onClick={handleDismissClick}
+                className="p-1.5 rounded-lg text-muted hover:text-muted hover:bg-surface-2 transition-colors"
+                title="Dismiss from Action Queue"
+                aria-label="Dismiss from Action Queue"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -1246,6 +1291,38 @@ export default function HomeServicesDashboard() {
     }
   }, [leads]);
 
+  // Approve or reject a pending call-driven reschedule on a booked job. Approve
+  // re-issues the requested schedule as an OWNER edit (authenticated → allowed by
+  // the server's booked-schedule guard) and clears the request; reject just clears
+  // the request, leaving the booked schedule untouched. Either way the pending
+  // marker is removed so the item drops out of the Action Queue.
+  const handleRescheduleDecision = useCallback(async (lead, approve) => {
+    const vd = parseVerticalData(lead);
+    const rr = vd.rescheduleRequest;
+    if (!rr) return;
+
+    const body = { vertical_data: { rescheduleRequest: null } };
+    if (approve) {
+      if (rr.delivery_date !== undefined) body.delivery_date = rr.delivery_date;
+      if (rr.pickup_date !== undefined) body.pickup_date = rr.pickup_date;
+      if (rr.scheduled_time !== undefined) body.scheduled_time = rr.scheduled_time;
+      if (rr.rentalDuration !== undefined) body.vertical_data.rentalDuration = rr.rentalDuration;
+      body.job_edit_summary = describeRescheduleApplied(rr);
+    }
+
+    // Optimistically drop the pending marker so the item leaves the queue at once;
+    // the server response (authoritative schedule) then replaces the row.
+    const clearedVd = JSON.stringify({ ...vd, rescheduleRequest: null });
+    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, vertical_data: clearedVd } : l));
+    try {
+      const updated = await api.updateLead(lead.id, body);
+      setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    } catch (err) {
+      console.error('Failed to apply reschedule decision', lead.id, err);
+      loadRef.current().catch(() => {}); // resync on failure
+    }
+  }, []);
+
   // Missed-call decision modal actions. A missed call is not a lead until the
   // owner explicitly acts on it here.
   // Create Lead: open the manual form prefilled with the caller's number; the
@@ -1524,6 +1601,7 @@ export default function HomeServicesDashboard() {
                   tier={tier}
                   reason={bookedReason}
                   onDismiss={handleDismiss}
+                  onReschedule={handleRescheduleDecision}
                   onMissedCallClick={setMissedCallModal}
                 />
               ))}

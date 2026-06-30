@@ -444,6 +444,7 @@ const ACTIVITY_ICONS = {
   sms_sent: '💬',
   status_change: '📋',
   job_updated: '✏️',
+  reschedule_requested: '🔄',
   note_added: '📋',
   voicemail: '🎙️',
   missed_call: '📵',
