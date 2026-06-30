@@ -804,7 +804,18 @@ function EngagementBody({ engagement: e, refreshKey = 0 }) {
 
   return (
     <>
-      <CustomerCallIntelligence jobId={e.representative_lead_id} refreshKey={refreshKey} />
+      <CustomerCallIntelligence
+        jobId={e.representative_lead_id}
+        refreshKey={refreshKey}
+        schedule={{
+          delivery_date: e.delivery_date,
+          pickup_date: e.pickup_date,
+          scheduled_time: e.scheduled_time,
+          rental_duration: e.rental_duration,
+          dumpster_size: e.dumpster_size,
+          debris_type: e.debris_type,
+        }}
+      />
       {earlier.length > 0 && (
         <div className="px-5 pb-4">
           <p className="text-[11px] font-semibold text-muted uppercase tracking-wide mb-1.5">

@@ -46,7 +46,7 @@ function ROField({ label, value }) {
 // AUTO-BOOK SAFETY: this only GETs the lead (api.getLead). It never writes and
 // never re-runs extraction or booking, so mounting it cannot trigger or change
 // auto-booking. Editing still happens on the full lead detail via the link below.
-export default function CustomerCallIntelligence({ jobId, compact = false, refreshKey = 0 }) {
+export default function CustomerCallIntelligence({ jobId, compact = false, refreshKey = 0, schedule = null }) {
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -70,6 +70,18 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
   const vd = parseVerticalData(lead);
   const t = getTerminology(lead.vertical, getSubVertical(lead));
   const intent = vd.intentLevel ? (INTENT_LABELS[vd.intentLevel] || vd.intentLevel) : null;
+
+  // Schedule grid only: prefer the engagement's already-resolved (booked-sourced)
+  // override when present, falling back to THIS call's stored lead values. For a
+  // booked job the override carries the booked lead's dates/size, so a later empty
+  // follow-up call (the representative we fetch) no longer blanks the card. The AI
+  // summary, recording, and transcript below stay bound to this specific call.
+  const schedSize = schedule?.dumpster_size ?? vd.dumpsterSize;
+  const schedDuration = schedule?.rental_duration ?? vd.rentalDuration;
+  const schedDebris = schedule?.debris_type ?? vd.debrisType;
+  const schedDelivery = schedule?.delivery_date ?? lead.delivery_date;
+  const schedPickup = schedule?.pickup_date ?? lead.pickup_date;
+  const schedTime = schedule?.scheduled_time ?? lead.scheduled_time;
 
   // Compact mode (earlier calls in an engagement): show ONLY the AI summary, the
   // recording player, and the small Raw transcript link. The structured fields,
@@ -106,12 +118,12 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
           stored values, never recomputed). The industry fields self-hide when the
           call didn't capture them (e.g. non-dumpster verticals). */}
       <div className="bg-surface rounded-xl border border-divider shadow-sm p-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-        {vd.dumpsterSize && <ROField label="Dumpster Size" value={vd.dumpsterSize} />}
-        {vd.rentalDuration && <ROField label="Rental Duration" value={vd.rentalDuration} />}
-        {vd.debrisType && <ROField label="Debris Type" value={vd.debrisType} />}
-        <ROField label={t.startDate} value={fmtDate(lead.delivery_date)} />
-        <ROField label={t.endDate} value={fmtDate(lead.pickup_date)} />
-        <ROField label={t.startTime} value={formatTime12(lead.scheduled_time)} />
+        {schedSize && <ROField label="Dumpster Size" value={schedSize} />}
+        {schedDuration && <ROField label="Rental Duration" value={schedDuration} />}
+        {schedDebris && <ROField label="Debris Type" value={schedDebris} />}
+        <ROField label={t.startDate} value={fmtDate(schedDelivery)} />
+        <ROField label={t.endDate} value={fmtDate(schedPickup)} />
+        <ROField label={t.startTime} value={formatTime12(schedTime)} />
         <ROField label="Intent" value={intent} />
         <ROField label="Urgency" value={vd.urgency} />
         <ROField label="Follow-Up" value={fmtDateTime(vd.followUpDate)} />

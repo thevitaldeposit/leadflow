@@ -404,7 +404,8 @@ function shapeEngagement(eng) {
   // Prefer the booked lead's non-empty value for a flat schedule column; fall
   // back to the representative. A no-op when there's no booked lead (inquiries).
   const schedCol = (col) => (bookedLead && !isEmptySched(bookedLead[col])) ? bookedLead[col] : rep[col];
-  // Same, for a schedule field stored in vertical_data (rentalDuration).
+  // Same, for a field stored in vertical_data (rentalDuration, dumpsterSize,
+  // debrisType): prefer the booked lead's value, fall back to the representative.
   const schedVd = (key) => (bookedLead && !isEmptySched(bookedVd[key])) ? bookedVd[key] : vd[key];
 
   let lastActivityAt = null;
@@ -445,9 +446,11 @@ function shapeEngagement(eng) {
     intent_level: vd.intentLevel || null,
     urgency: vd.urgency || null,
     follow_up_date: vd.followUpDate || rep.follow_up_date || null,
-    // Industry-relevant fields (display stored values; not recomputed).
-    dumpster_size: vd.dumpsterSize || null,
-    debris_type: vd.debrisType || null,
+    // Industry-relevant fields (display stored values; not recomputed). Size /
+    // debris / duration are booked-sourced (schedVd) so a booked job shows the
+    // booked lead's values, not a later empty follow-up call's.
+    dumpster_size: schedVd('dumpsterSize') || null,
+    debris_type: schedVd('debrisType') || null,
     rental_duration: schedVd('rentalDuration') || null,
     vertical: rep.vertical || null,
     sub_vertical: rep.sub_vertical || null,
