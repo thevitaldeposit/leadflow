@@ -113,6 +113,32 @@ struct Lead: Codable, Identifiable {
     var isDiscarded: Bool { discarded == 1 }
 }
 
+// MARK: - Customer Model (person-layer)
+
+// A row from GET /api/customers — the person-layer the web dashboard reads. One
+// record per real person (keyed by normalized phone) carrying the saved name that
+// PERSISTS across later nameless calls. The call screen uses it as the name
+// fallback when a matched lead has no name of its own, so a known customer shows
+// their name (not just a number) on both inbound and outbound calls. Intentionally
+// lightweight: only the fields needed to resolve a name by phone. (display_name is
+// the server's best-name rollup, which can fall back to the phone/"Unknown" — the
+// call screen guards against that before treating it as a real name.)
+struct CustomerSummary: Codable, Identifiable {
+    let id: Int
+    let displayName: String?
+    let firstName: String?
+    let lastName: String?
+    let phone: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+        case firstName = "first_name"
+        case lastName = "last_name"
+        case phone
+    }
+}
+
 // MARK: - Inventory Pool Model
 
 // One per-size inventory pool, as returned by GET /api/dumpsters (requireAuth,

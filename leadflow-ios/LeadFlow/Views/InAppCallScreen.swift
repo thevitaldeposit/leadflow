@@ -31,6 +31,14 @@ struct InAppCallScreen: View {
     // the context card. Reset + re-resolved whenever the active handle changes.
     @State private var matchedLead: Lead? = nil
 
+    // The person-layer customer NAME for the remote number (the web app's customers
+    // source), matched by normalized phone. This name PERSISTS across later nameless
+    // calls, so it's the name fallback when the matched lead has none of its own — a
+    // known customer shows their name, not just a number, on inbound and outbound.
+    // nil ⇒ no saved customer name for this number (or signed out, where the
+    // auth-only customers endpoint is unavailable). Resolved alongside matchedLead.
+    @State private var matchedCustomerName: String? = nil
+
     // Keypad (DTMF) overlay state. `dtmfEntered` mirrors what's been keyed this
     // keypad session, shown above the dialpad like a standard call screen.
     @State private var showKeypad = false
@@ -77,6 +85,7 @@ struct InAppCallScreen: View {
         // AND outbound so a saved caller's name + context show in both directions.
         .task(id: voice.activeCallHandle) {
             matchedLead = nil
+            matchedCustomerName = nil
             showKeypad = false
             dtmfEntered = ""
             await lookupCustomer()
@@ -274,20 +283,35 @@ struct InAppCallScreen: View {
 
     // MARK: - Derived display
 
-    // The customer/lead name when known: a name supplied at dial time (only when
-    // it's a real name, not the phone number some callers pass), else the matched
-    // CRM record's name. nil ⇒ unknown caller (show the number + silhouette).
+    // The customer/lead name when known. Resolves with the SAME fallback chain the
+    // web app uses, so a known customer with a nameless recent lead shows their name
+    // (not just a number) on both inbound and outbound. nil ⇒ unknown caller (show
+    // the formatted number + silhouette).
     private var resolvedName: String? {
+        // 1. A name supplied at dial time (outbound from a known contact) — but only
+        //    when it's a real name, not a phone number some callers pass.
         if let dialed = voice.activeCallName, Self.isNameLike(dialed) {
             return dialed.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        // 2. The matched lead's own name — flat columns, then vertical_data.customerName
+        //    (the same fields the web app's leadIdentity reads off a lead).
         if let lead = matchedLead {
-            let name = [lead.customerFirstName, lead.customerLastName]
+            let flat = [lead.customerFirstName, lead.customerLastName]
                 .compactMap { $0 }
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")
-            if !name.isEmpty { return name }
+            if let name = Self.nonEmpty(flat) { return name }
+            if let vdName = Self.nonEmpty(lead.verticalData["customerName"]?.stringValue),
+               Self.isNameLike(vdName) {
+                return vdName
+            }
         }
+        // 3. The CUSTOMERS person-layer saved name (display_name / first+last) for
+        //    this number — exactly what the web app shows. It persists across later
+        //    nameless calls, so a known customer's name appears even when their most
+        //    recent lead has none. Resolved by normalized phone, so it works inbound.
+        if let custName = matchedCustomerName { return custName }
+        // 4. Nothing ⇒ unknown caller: fall through to the formatted number + silhouette.
         return nil
     }
 
@@ -334,9 +358,11 @@ struct InAppCallScreen: View {
         guard let lead = matchedLead else { return nil }
         let vd = lead.verticalData
 
-        let address = Self.nonEmpty(vd["deliveryAddress"]?.stringValue)
-            ?? Self.nonEmpty(vd["propertyAddress"]?.stringValue)
-            ?? Self.nonEmpty(vd["serviceAddress"]?.stringValue)
+        // Only a clean, real address is shown; empty or AI-uncertain values
+        // ("… (unclear)") are dropped so the row is hidden rather than showing junk.
+        let address = Self.cleanAddress(vd["deliveryAddress"]?.stringValue)
+            ?? Self.cleanAddress(vd["propertyAddress"]?.stringValue)
+            ?? Self.cleanAddress(vd["serviceAddress"]?.stringValue)
 
         let jobStatus = Self.nonEmpty(lead.jobStatus) ?? Self.nonEmpty(vd["job_status"]?.stringValue)
 
@@ -393,13 +419,30 @@ struct InAppCallScreen: View {
         guard let handle = voice.activeCallHandle else { return }
         let target = Self.normalize(handle)
         guard target.count >= 7 else { return }
-        guard let leads = try? await APIService.shared.fetchLeads() else { return }
-        let matches = leads.filter { lead in
-            let p = Self.normalize(lead.phone ?? lead.callerNumber ?? "")
-            return !p.isEmpty && p == target
+
+        // Resolve the per-call lead (for the context card) and the person-layer
+        // customer (for the name fallback) concurrently. Both are best-effort: a
+        // failure — e.g. signed out, where /api/customers is auth-only — just leaves
+        // that source nil and name resolution falls back to the next option.
+        async let leadsResult = APIService.shared.fetchLeads()
+        async let customersResult = APIService.shared.fetchCustomers()
+
+        if let leads = try? await leadsResult {
+            let matches = leads.filter { lead in
+                let p = Self.normalize(lead.phone ?? lead.callerNumber ?? "")
+                return !p.isEmpty && p == target
+            }
+            // Freshest record wins so name + context reflect the latest engagement.
+            matchedLead = matches.max { ($0.updatedAt ?? $0.createdAt) < ($1.updatedAt ?? $1.createdAt) }
         }
-        // Freshest record wins so name + context reflect the latest engagement.
-        matchedLead = matches.max { ($0.updatedAt ?? $0.createdAt) < ($1.updatedAt ?? $1.createdAt) }
+
+        if let customers = try? await customersResult {
+            let match = customers.first { c in
+                let p = Self.normalize(c.phone ?? "")
+                return !p.isEmpty && p == target
+            }
+            matchedCustomerName = match.flatMap { Self.customerSavedName($0) }
+        }
     }
 
     // MARK: - String / date helpers
@@ -414,9 +457,43 @@ struct InAppCallScreen: View {
         return t.contains { $0.isLetter }
     }
 
+    // The customer's real saved name, for use as a name fallback. Built from
+    // first+last, then the server's display_name. The latter rolls up to the phone
+    // or "Unknown" when no name exists, which must NOT masquerade as a name (it
+    // would put a number or filler in the title + avatar), so the candidate is
+    // gated through isNameLike. nil ⇒ no real saved name for this customer.
+    private static func customerSavedName(_ c: CustomerSummary) -> String? {
+        let composed = [c.firstName, c.lastName]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard let candidate = nonEmpty(composed) ?? nonEmpty(c.displayName),
+              isNameLike(candidate) else { return nil }
+        return candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private static func nonEmpty(_ s: String?) -> String? {
         guard let s = s, !s.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         return s
+    }
+
+    // Show an address only when it's clean and real. AI extraction / transcription
+    // can emit the model's own uncertainty inline (e.g. "Goalspeed (unclear)") or a
+    // bare placeholder; better to show nothing than a garbage address. Returns nil
+    // for empty, a placeholder, any uncertainty marker, or a value with no letters.
+    private static func cleanAddress(_ s: String?) -> String? {
+        guard let v = nonEmpty(s) else { return nil }
+        let lower = v.lowercased()
+        // Whole-value placeholders the model uses to mean "no address".
+        let placeholders: Set<String> = ["n/a", "na", "tbd", "none", "unknown", "null", "-", "—"]
+        if placeholders.contains(lower) { return nil }
+        // Inline uncertainty appended to an uncertain value, e.g. "… (unclear)".
+        let markers = ["(unclear)", "unclear", "inaudible", "not provided",
+                       "not given", "unspecified", "didn't catch", "couldn't hear"]
+        if markers.contains(where: { lower.contains($0) }) { return nil }
+        // A usable address has letters (street/city); pure digits/punctuation isn't one.
+        guard v.contains(where: { $0.isLetter }) else { return nil }
+        return v
     }
 
     // "20 yard" / "20yd" → "20yd" (mirrors the dashboard's formatSize).

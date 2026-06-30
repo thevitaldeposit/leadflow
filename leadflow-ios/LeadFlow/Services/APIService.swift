@@ -192,6 +192,21 @@ final class APIService: ObservableObject {
         return try await updateLead(id: id, fields: fields)
     }
 
+    // MARK: Customers (person-layer)
+
+    /// GET /api/customers — the person-layer records the web dashboard lists (one
+    /// per person, keyed by normalized phone). This endpoint is `requireAuth`, so it
+    /// returns data only when signed in (the bearer token scopes it to the user's
+    /// business); signed out it 401s and callers treat that as "no customer data"
+    /// via `try?`. The call screen uses it to resolve a saved customer's name by
+    /// phone when the matched lead is nameless — the same name the web app shows.
+    func fetchCustomers() async throws -> [CustomerSummary] {
+        let request = try authorizedRequest("/api/customers")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data)
+        return try JSONDecoder().decode([CustomerSummary].self, from: data)
+    }
+
     // MARK: Inventory (availability)
 
     /// GET /api/dumpsters — the business's per-size inventory pools. This endpoint
