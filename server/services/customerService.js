@@ -666,6 +666,7 @@ module.exports = {
   normalizePhone,
   deriveStatus,
   displayNameOf,
+  findOrCreateCustomerForLead,
   reconcileCustomersForBusiness,
   backfillAllCustomers,
   recomputeCustomerStatus,

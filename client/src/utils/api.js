@@ -56,6 +56,9 @@ export const api = {
   },
   getLead: (id) => request(`/leads/${id}`),
   getLeadActivity: (id) => request(`/leads/${id}/activity`),
+  // Resolve a lead to its owning customer id (robust find-or-create; handles a
+  // NULL leads.customer_id). Powers the /leads/:id → /customers/:id redirect.
+  getLeadCustomer: (id) => request(`/leads/${id}/customer`),
   updateLead: (id, body) =>
     request(`/leads/${id}`, {
       method: 'PUT',

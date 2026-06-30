@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, Fragment } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   ArrowLeft, Phone, PhoneMissed, PhoneOutgoing, MessageSquare, Voicemail,
   StickyNote, RefreshCw, MapPin, Mail, Edit2, Trash2, Check, X, FileText,
@@ -64,6 +64,21 @@ const JUMP_LINKS = [
   { id: 'pricing', label: 'Pricing' },
   { id: 'notes', label: 'Notes' },
 ];
+
+// Smooth-scroll to a DOM id, retrying across a few animation frames until it
+// exists. Used by the ?call=<leadId> focus and the in-place "View job"/"View"
+// links: focusing a collapsed Jobs row / Past-inquiry first force-expands it
+// (a state update + re-render), so the target node may not be in the DOM on the
+// same tick — this waits for it rather than scrolling to nothing.
+function scrollToWhenReady(targetId, attempts = 15) {
+  const el = document.getElementById(targetId);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  if (attempts <= 0) return;
+  requestAnimationFrame(() => scrollToWhenReady(targetId, attempts - 1));
+}
 
 function Card({ id, title, icon: Icon, children, action }) {
   return (
@@ -165,7 +180,7 @@ function QuickStats({ totalJobs, totalSpent, outstanding, lastJob }) {
 // The full-height right rail. Lists interactions/events most-recent first and
 // grows as the customer is interacted with (calls, status changes, invoice paid,
 // notes added, …). Notes added below are merged in server-side as note_added.
-function ActivityFeed({ activity }) {
+function ActivityFeed({ activity, onViewCall }) {
   return (
     <div className="bg-surface rounded-xl border border-divider shadow-sm flex flex-col lg:max-h-[calc(100vh-7rem)]">
       <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between flex-shrink-0">
@@ -189,8 +204,14 @@ function ActivityFeed({ activity }) {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-content break-words">{a.description || a.activity_type}</p>
                   <p className="text-xs text-muted mt-0.5">{fmtDateTime(a.created_at)}</p>
-                  {a.lead_id && (
-                    <Link to={`/leads/${a.lead_id}`} className="text-[11px] text-brand hover:underline">View job →</Link>
+                  {a.lead_id && onViewCall && (
+                    <button
+                      type="button"
+                      onClick={() => onViewCall(a.lead_id)}
+                      className="text-[11px] text-brand hover:underline"
+                    >
+                      View job →
+                    </button>
                   )}
                 </div>
               </li>
@@ -312,6 +333,20 @@ function NotesSection({ id, notes, legacyNote, draft, setDraft, onAdd, onEdit, o
 export default function CustomerDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Optional ?call=<leadId> focus: which call the inbound navigation targeted
+  // (e.g. a redirect from the retired /leads/:id, a schedule item, or a toast).
+  // Absent → load the profile normally (Active Inquiry expanded by default).
+  const callParam = new URLSearchParams(location.search).get('call');
+  const focusCallId = callParam && Number(callParam) > 0 ? Number(callParam) : null;
+  // Post-extraction confirmation: the redirect carries {fresh:true} so the
+  // "Lead extracted and saved" banner still shows once we land on the profile.
+  const [showFresh, setShowFresh] = useState(!!location.state?.fresh);
+  // The engagement to force-expand (a Jobs row or a Past inquiry). Seeded by the
+  // ?call focus and set by the in-place "View job" / "View" links so they expand
+  // here instead of navigating to the retired /leads/:id page.
+  const [focusEngId, setFocusEngId] = useState(null);
+  const didInitialFocus = useRef(false);
   const [customer, setCustomer] = useState(null);
   const [groups, setGroups] = useState([]);
   const [invoices, setInvoices] = useState([]);
@@ -471,6 +506,39 @@ export default function CustomerDetailPage() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  // Focus the engagement that contains a given call (lead) IN PLACE: expand its
+  // Jobs row / Past-inquiry (via focusEngId below) and scroll to it. Powers both
+  // the ?call=<leadId> deep-link and the in-place "View job" (Activity Feed) and
+  // "View" (Past inquiries) links — replacing the old jumps to /leads/:id, with no
+  // self-loop. A call with no matching engagement (e.g. a discarded lead) is a
+  // safe no-op. Read-only — never books, edits, or re-runs extraction.
+  const focusCall = useCallback((leadId) => {
+    const lid = Number(leadId);
+    if (!Number.isFinite(lid)) return;
+    const eng = (customer?.engagements || []).find((e) => (e.lead_ids || []).includes(lid));
+    if (!eng) return;
+    setFocusEngId(eng.id);
+    // The active engagement is always expanded at #active-inquiry; everything else
+    // lives in a per-engagement row keyed eng-<id> (force-expanded via focusEngId).
+    scrollToWhenReady(eng.is_active ? 'active-inquiry' : `eng-${eng.id}`);
+  }, [customer]);
+
+  // On first load with ?call=<leadId>, focus that call's engagement once. Guarded
+  // so later reloads (after a note/edit/booking) don't yank the page back.
+  useEffect(() => {
+    if (loading || !customer || !focusCallId || didInitialFocus.current) return;
+    didInitialFocus.current = true;
+    focusCall(focusCallId);
+  }, [loading, customer, focusCallId, focusCall]);
+
+  // Auto-dismiss the post-extraction confirmation a few seconds after the profile
+  // is visible (it's also manually dismissable).
+  useEffect(() => {
+    if (!showFresh || loading) return;
+    const t = setTimeout(() => setShowFresh(false), 6000);
+    return () => clearTimeout(t);
+  }, [showFresh, loading]);
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-brand border-t-transparent rounded-full" /></div>;
   }
@@ -512,6 +580,24 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="max-w-[1400px] mx-auto">
+      {/* Post-extraction confirmation — carried here from the upload/manual flows
+          via the /leads/:id → profile redirect ({fresh:true}). Auto-dismisses. */}
+      {showFresh && (
+        <div className="mb-4 flex items-center justify-between gap-3 text-sm text-success bg-success/10 border border-success/30 px-4 py-2.5 rounded-lg">
+          <span className="flex items-center gap-1.5 font-medium">
+            <CheckCircle2 size={15} /> Lead extracted and saved
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowFresh(false)}
+            className="text-success/70 hover:text-success"
+            aria-label="Dismiss"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
       {/* Action row — breadcrumb left, lifecycle status + edit/delete right */}
       <div className="flex items-center justify-between gap-3 mb-4">
         <Link to="/customers" className="text-sm text-brand inline-flex items-center gap-1 hover:underline"><ArrowLeft size={14} /> Customers</Link>
@@ -633,7 +719,7 @@ export default function CustomerDetailPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-divider">
-                    {jobEngagements.map(e => <JobHistoryRow key={e.id} engagement={e} onPaymentChange={handlePaymentChange} />)}
+                    {jobEngagements.map(e => <JobHistoryRow key={e.id} engagement={e} onPaymentChange={handlePaymentChange} forceOpen={focusEngId === e.id} />)}
                   </tbody>
                 </table>
               </div>
@@ -643,7 +729,7 @@ export default function CustomerDetailPage() {
           {/* Past inquiries — Closed / Marked Lost inquiries that never booked.
               Lightweight collapsed list (separate from Jobs); they also remain in
               the Activity Feed. Hidden entirely when there are none. */}
-          {pastInquiries.length > 0 && <PastInquiries engagements={pastInquiries} />}
+          {pastInquiries.length > 0 && <PastInquiries engagements={pastInquiries} forceOpenId={focusEngId} onPaymentChange={handlePaymentChange} />}
 
           {/* Invoices — Create Invoice when empty; populated otherwise. No Quick Stats here. */}
           <Card
@@ -792,7 +878,7 @@ export default function CustomerDetailPage() {
 
         {/* ── Right rail: Activity Feed (full page height) ──────────────────── */}
         <aside className="w-full lg:w-80 flex-shrink-0 lg:sticky lg:top-0 lg:self-start">
-          <ActivityFeed activity={c.activity} />
+          <ActivityFeed activity={c.activity} onViewCall={focusCall} />
         </aside>
       </div>
     </div>
@@ -1032,8 +1118,23 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
 // dead inquiry with its service, date, and a Lost/Closed label, plus a link to the
 // underlying call. The full record still lives in the Activity Feed; these never
 // appear in Jobs (only booked/completed engagements do).
-function PastInquiries({ engagements }) {
+function PastInquiries({ engagements, forceOpenId = null, onPaymentChange }) {
   const [open, setOpen] = useState(false);
+  // Which past inquiry is expanded inline (shows its call intelligence). The "View"
+  // link toggles this in place — it no longer navigates to the retired /leads/:id.
+  const [expandedId, setExpandedId] = useState(null);
+
+  // Focused via ?call / Activity-feed "View job": open the section and expand the
+  // matching row so the deep-linked call is visible (the parent scrolls to it).
+  useEffect(() => {
+    if (forceOpenId != null && engagements.some(e => e.id === forceOpenId)) {
+      setOpen(true);
+      setExpandedId(forceOpenId);
+    }
+  }, [forceOpenId, engagements]);
+
+  const toggleRow = (rowId) => setExpandedId(cur => (cur === rowId ? null : rowId));
+
   return (
     <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
       <button
@@ -1053,16 +1154,35 @@ function PastInquiries({ engagements }) {
             const lost = e.close_reason !== 'closed'; // server defaults to 'lost'
             const label = lost ? 'Lost' : 'Closed';
             const style = lost ? 'bg-danger/10 text-danger border-danger/30' : 'bg-surface-2 text-muted border-divider';
+            const isExpanded = expandedId === e.id;
             return (
-              <li key={e.id} className="px-5 py-2.5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm text-content truncate">{e.service || 'Inquiry'}</p>
-                  <p className="text-xs text-muted">{fmtDate(e.created_at)}</p>
+              <li key={e.id} id={`eng-${e.id}`} className="scroll-mt-6">
+                <div className="px-5 py-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-content truncate">{e.service || 'Inquiry'}</p>
+                    <p className="text-xs text-muted">{fmtDate(e.created_at)}</p>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className={`${badgeCls} ${style}`}>{label}</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleRow(e.id)}
+                      className="text-[11px] text-brand hover:underline whitespace-nowrap inline-flex items-center gap-1"
+                    >
+                      {isExpanded
+                        ? <>Hide <ChevronDown size={12} /></>
+                        : <>View <ChevronRight size={12} /></>}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  <span className={`${badgeCls} ${style}`}>{label}</span>
-                  <Link to={`/leads/${e.representative_lead_id}`} className="text-[11px] text-brand hover:underline whitespace-nowrap">View →</Link>
-                </div>
+                {/* The call's full intelligence (recording, transcript, AI summary)
+                    inline — same component the active engagement uses. No payment
+                    block (a lost inquiry was never booked). */}
+                {isExpanded && (
+                  <div className="border-t border-divider">
+                    <EngagementBody engagement={e} onPaymentChange={onPaymentChange} />
+                  </div>
+                )}
               </li>
             );
           })}
@@ -1074,8 +1194,11 @@ function PastInquiries({ engagements }) {
 
 // One collapsed Jobs row (a booked or completed engagement). The blue Job ID
 // expands the job's call intelligence in place — no separate page.
-function JobHistoryRow({ engagement: e, onPaymentChange }) {
+function JobHistoryRow({ engagement: e, onPaymentChange, forceOpen = false }) {
   const [open, setOpen] = useState(false);
+  // Expand in place when this row is the focus target (?call / "View job"). Only
+  // opens — the owner can still collapse it afterward.
+  useEffect(() => { if (forceOpen) setOpen(true); }, [forceOpen]);
   // Service column shows the service TYPE (e.g. "Dumpster rental") from the
   // vertical config — the size lives in its own column. Status is display-only:
   // a booked/open job reads "In progress", a completed one "Completed".
@@ -1084,7 +1207,7 @@ function JobHistoryRow({ engagement: e, onPaymentChange }) {
   const toggle = () => setOpen(o => !o);
   return (
     <Fragment>
-      <tr className="hover:bg-surface-2 cursor-pointer transition-colors" onClick={toggle}>
+      <tr id={`eng-${e.id}`} className="hover:bg-surface-2 cursor-pointer transition-colors scroll-mt-6" onClick={toggle}>
         <td className="px-5 py-3 whitespace-nowrap">
           <button
             onClick={(ev) => { ev.stopPropagation(); toggle(); }}

@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import Layout from './components/Layout';
 import DashboardPage from './pages/DashboardPage';
 import NewLeadPage from './pages/NewLeadPage';
-import LeadDetailPage from './pages/LeadDetailPage';
+import LeadRedirect from './pages/LeadRedirect';
 import LeadListPage from './pages/LeadListPage';
 import CustomersListPage from './pages/CustomersListPage';
 import CustomerDetailPage from './pages/CustomerDetailPage';
@@ -96,7 +96,10 @@ function AppRoutes() {
                 <Route path="/payments" element={<PaymentsPage />} />
                 <Route path="/payments/:id" element={<PaymentDetailPage />} />
                 <Route path="/leads" element={<LeadListPage />} />
-                <Route path="/leads/:id" element={<LeadDetailPage />} />
+                {/* Retired per-call page: resolve the lead to its customer and
+                    redirect to /customers/:id. LeadDetailPage.jsx stays in the
+                    codebase but is never rendered to users. */}
+                <Route path="/leads/:id" element={<LeadRedirect />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
                 <Route path="/action-queue" element={<FilteredLeadsPage mode="action_queue" />} />

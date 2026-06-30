@@ -6,7 +6,7 @@ const { initiateClickToCall } = require('../services/callService');
 const { logActivity, getActivityForLead } = require('../services/activityLog');
 const { emitToBusiness } = require('../socket');
 const { attachBusiness, requireAuth } = require('../middleware/auth');
-const { reconcileCustomersForBusiness, recomputeCustomerStatus } = require('../services/customerService');
+const { reconcileCustomersForBusiness, recomputeCustomerStatus, findOrCreateCustomerForLead } = require('../services/customerService');
 const { describeBooking } = require('../services/leadActivityText');
 const { sendToAll } = require('../services/apns');
 
@@ -241,6 +241,42 @@ router.get('/:id/activity', (req, res) => {
   } catch (err) {
     console.error('GET /leads/:id/activity error:', err);
     res.status(500).json({ error: 'Failed to retrieve activity' });
+  }
+});
+
+// GET /api/leads/:id/customer — resolve the CUSTOMER that owns this lead, robustly.
+// The /leads/:id page is retired; every inbound navigation to a per-call lead
+// redirects to the owning customer profile, and this is the resolver behind it.
+// leads.customer_id is NULL for freshly-extracted (not-yet-reconciled), discarded,
+// and deleted-customer leads, so we never trust the raw column:
+// findOrCreateCustomerForLead does a normalized-phone match (or creates the
+// person's own record when there's no phone/match) and we persist the link, exactly
+// as reconcileCustomersForBusiness would. This guarantees every navigable lead
+// resolves to a customer and never dead-ends. Read-or-create only — it never
+// touches the call/transcription/extraction or booking pipeline. Business-scoped
+// via the same attachBusiness as the rest of /api/leads; it widens no
+// unauthenticated surface.
+router.get('/:id/customer', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const customerId = findOrCreateCustomerForLead(businessId, lead);
+    if (!customerId) return res.status(500).json({ error: 'Could not resolve customer' });
+
+    // Persist the reconciliation so the lead stays linked and surfaces under the
+    // right person on the next read (mirrors reconcileCustomersForBusiness's write).
+    if (lead.customer_id !== customerId) {
+      db.prepare('UPDATE leads SET customer_id = ? WHERE id = ? AND business_id = ?')
+        .run(customerId, lead.id, businessId);
+      recomputeCustomerStatus(customerId);
+    }
+
+    res.json({ customerId });
+  } catch (err) {
+    console.error('GET /leads/:id/customer error:', err);
+    res.status(500).json({ error: 'Failed to resolve customer' });
   }
 });
 

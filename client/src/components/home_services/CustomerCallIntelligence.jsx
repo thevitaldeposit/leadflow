@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Sparkles, ExternalLink } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { api } from '../../utils/api';
 import BookingSignalsPanel from './BookingSignalsPanel';
 import AudioSection from './AudioSection';
@@ -142,14 +141,12 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
         </div>
       )}
 
-      {/* Recording + transcript (shared with the lead detail) */}
+      {/* Recording + transcript (shared with the lead detail). This profile view
+          already inlines the booking signals, resolved dates, AI summary, and the
+          recording + transcript for the call, so the old "Open full call detail →"
+          link to the retired /leads/:id page was redundant and has been removed.
+          Editing the job is still available via the engagement's Edit action. */}
       <AudioSection lead={lead} />
-
-      <div className="flex justify-end">
-        <Link to={`/leads/${lead.id}`} className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
-          Open full call detail <ExternalLink size={11} />
-        </Link>
-      </div>
     </div>
   );
 }
