@@ -39,6 +39,14 @@ struct InAppCallScreen: View {
     // auth-only customers endpoint is unavailable). Resolved alongside matchedLead.
     @State private var matchedCustomerName: String? = nil
 
+    // The person-layer customer's primary ADDRESS (the same customers.address the
+    // web profile shows as the customer's location, e.g. a town like "Ottawa").
+    // Used as the LAST fallback for the context card's location row when the matched
+    // call has no clean delivery/property/service address of its own. Raw here;
+    // cleaned (placeholder/uncertainty stripped) at the point of use. Resolved by
+    // normalized phone alongside matchedCustomerName. nil ⇒ none on file / signed out.
+    @State private var matchedCustomerAddress: String? = nil
+
     // Keypad (DTMF) overlay state. `dtmfEntered` mirrors what's been keyed this
     // keypad session, shown above the dialpad like a standard call screen.
     @State private var showKeypad = false
@@ -86,6 +94,7 @@ struct InAppCallScreen: View {
         .task(id: voice.activeCallHandle) {
             matchedLead = nil
             matchedCustomerName = nil
+            matchedCustomerAddress = nil
             showKeypad = false
             dtmfEntered = ""
             await lookupCustomer()
@@ -360,9 +369,15 @@ struct InAppCallScreen: View {
 
         // Only a clean, real address is shown; empty or AI-uncertain values
         // ("… (unclear)") are dropped so the row is hidden rather than showing junk.
+        // Fallback chain: this call's extracted delivery/property/service address,
+        // then the customer's profile address (their town, e.g. "Ottawa" — the same
+        // customers.address the web profile shows) so a known customer with no
+        // address on this call still gets a location instead of a blank row. Each
+        // candidate is cleaned, so a garbage profile address is skipped too.
         let address = Self.cleanAddress(vd["deliveryAddress"]?.stringValue)
             ?? Self.cleanAddress(vd["propertyAddress"]?.stringValue)
             ?? Self.cleanAddress(vd["serviceAddress"]?.stringValue)
+            ?? Self.cleanAddress(matchedCustomerAddress)
 
         let jobStatus = Self.nonEmpty(lead.jobStatus) ?? Self.nonEmpty(vd["job_status"]?.stringValue)
 
@@ -442,6 +457,10 @@ struct InAppCallScreen: View {
                 return !p.isEmpty && p == target
             }
             matchedCustomerName = match.flatMap { Self.customerSavedName($0) }
+            // The customer's primary address (e.g. their town) — the location-row
+            // fallback when the matched call has no clean address of its own. Stored
+            // raw; cleanAddress is applied where it's used in crmContext.
+            matchedCustomerAddress = match?.address
         }
     }
 

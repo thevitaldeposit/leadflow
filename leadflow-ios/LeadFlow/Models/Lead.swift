@@ -120,15 +120,19 @@ struct Lead: Codable, Identifiable {
 // PERSISTS across later nameless calls. The call screen uses it as the name
 // fallback when a matched lead has no name of its own, so a known customer shows
 // their name (not just a number) on both inbound and outbound calls. Intentionally
-// lightweight: only the fields needed to resolve a name by phone. (display_name is
-// the server's best-name rollup, which can fall back to the phone/"Unknown" — the
-// call screen guards against that before treating it as a real name.)
+// lightweight: only the fields needed to resolve a name (and a fallback location)
+// by phone. (display_name is the server's best-name rollup, which can fall back to
+// the phone/"Unknown" — the call screen guards against that before treating it as
+// a real name. `address` is the person-layer primary address — the same
+// customers.address the web profile shows as the customer's location, used as the
+// call card's location fallback when a call has no clean delivery address.)
 struct CustomerSummary: Codable, Identifiable {
     let id: Int
     let displayName: String?
     let firstName: String?
     let lastName: String?
     let phone: String?
+    let address: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -136,6 +140,7 @@ struct CustomerSummary: Codable, Identifiable {
         case firstName = "first_name"
         case lastName = "last_name"
         case phone
+        case address
     }
 }
 
