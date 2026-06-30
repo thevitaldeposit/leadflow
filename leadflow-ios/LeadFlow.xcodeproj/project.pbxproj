@@ -34,6 +34,7 @@
 		9D00000000000000000001A /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001C /* KeychainService.swift */; };
 		9D00000000000000000001B /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001D /* AuthManager.swift */; };
 		9D00000000000000000001C /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001E /* LoginView.swift */; };
+		9D00000000000000000001D /* InAppCallScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00000000000000000001F /* InAppCallScreen.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,6 +67,7 @@
 		9C00000000000000000001C /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 		9C00000000000000000001D /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		9C00000000000000000001E /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		9C00000000000000000001F /* InAppCallScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InAppCallScreen.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,6 +156,7 @@
 			children = (
 				9B000000000000000000007 /* Onboarding */,
 				9C00000000000000000001E /* LoginView.swift */,
+				9C00000000000000000001F /* InAppCallScreen.swift */,
 				9C00000000000000000001B /* HomeDashboardView.swift */,
 				9C00000000000000000000B /* DashboardView.swift */,
 				9C00000000000000000000C /* LeadCardView.swift */,
@@ -303,6 +306,7 @@
 				9D00000000000000000001A /* KeychainService.swift in Sources */,
 				9D00000000000000000001B /* AuthManager.swift in Sources */,
 				9D00000000000000000001C /* LoginView.swift in Sources */,
+				9D00000000000000000001D /* InAppCallScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

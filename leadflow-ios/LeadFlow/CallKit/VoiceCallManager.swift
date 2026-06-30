@@ -28,6 +28,19 @@ final class VoiceCallManager: NSObject, ObservableObject {
     @Published private(set) var incomingCallerNumber: String? = nil
     @Published private(set) var hasActiveCall: Bool = false
 
+    // Supplementary published state powering the in-app FOREGROUND call screen
+    // (the native CallKit screen still owns backgrounded/locked calls). These are
+    // pure UI mirrors set alongside the existing call lifecycle — they do not
+    // alter any CallKit / Twilio / audio behavior.
+    @Published private(set) var activeCallHandle: String? = nil  // remote phone number / identity
+    @Published private(set) var activeCallName: String? = nil    // display name known at dial time (outbound from a lead)
+    @Published private(set) var callConnectedAt: Date? = nil     // when the call actually connected (drives the timer)
+    @Published private(set) var isMuted: Bool = false
+    @Published private(set) var isSpeakerOn: Bool = false
+
+    // UUID CallKit knows the in-progress call by — used to mute/end the active call.
+    private var currentCallUUID: UUID? = nil
+
     /// The Twilio Voice client identity this device last registered under
     /// (e.g. "business_1"). Surfaced for debugging / Settings.
     private(set) var identity: String? = nil
@@ -49,6 +62,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
     // so the shared CallDelegate can report `connectedAt` to CallKit for them.
     private struct PendingOutgoing {
         let to: String
+        let displayName: String?
         let accessToken: String
     }
     private var pendingOutgoing: [String: PendingOutgoing] = [:]
@@ -202,6 +216,12 @@ final class VoiceCallManager: NSObject, ObservableObject {
         let call = invite.accept(options: acceptOptions, delegate: self)
         let key = call.uuid?.uuidString ?? uuid.uuidString
         activeCalls[key] = call
+        // Mirror the answered call into the in-app call-screen state.
+        currentCallUUID = call.uuid ?? uuid
+        activeCallHandle = (invite.from ?? incomingCallerNumber)?.replacingOccurrences(of: "client:", with: "")
+        activeCallName = nil
+        isMuted = false
+        isSpeakerOn = false
         activeCallInvites.removeValue(forKey: uuid.uuidString)
         incomingCallerNumber = nil
         incomingCallUUID = nil
@@ -254,7 +274,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
             }
 
             let uuid = UUID()
-            pendingOutgoing[uuid.uuidString] = PendingOutgoing(to: to, accessToken: voice.token)
+            pendingOutgoing[uuid.uuidString] = PendingOutgoing(to: to, displayName: displayName, accessToken: voice.token)
             identity = voice.identity
             NSLog("[voice] startOutgoingCall → \(to) as \(voice.identity) (uuid \(uuid.uuidString))")
             CallKitProvider.shared.startOutgoingCall(uuid: uuid, handle: to, displayName: displayName)
@@ -282,6 +302,13 @@ final class VoiceCallManager: NSObject, ObservableObject {
         activeCalls[uuid.uuidString] = call
         outgoingCallUUIDs.insert(uuid.uuidString)
         hasActiveCall = true
+        // Mirror the outbound call into the in-app call-screen state ("Calling…"
+        // until callDidConnect stamps callConnectedAt and starts the timer).
+        currentCallUUID = uuid
+        activeCallHandle = pending.to
+        activeCallName = pending.displayName
+        isMuted = false
+        isSpeakerOn = false
         NSLog("[voice] ▶︎ outbound connect started → \(pending.to) (uuid \(uuid.uuidString))")
         return true
     }
@@ -295,7 +322,42 @@ final class VoiceCallManager: NSObject, ObservableObject {
         if let call = activeCalls.removeValue(forKey: uuid.uuidString) {
             call.disconnect()
         }
-        if activeCalls.isEmpty { hasActiveCall = false }
+        if activeCalls.isEmpty {
+            hasActiveCall = false
+            clearActiveCallUIState()
+        }
+    }
+
+    // MARK: - In-call controls (invoked by the in-app call screen)
+
+    /// Toggle mute on the active call by flipping the Twilio Call's `isMuted`.
+    /// Touches only the existing call object — no audio-session work.
+    func toggleMute() {
+        guard let id = currentCallUUID?.uuidString, let call = activeCalls[id] else { return }
+        call.isMuted.toggle()
+        isMuted = call.isMuted
+    }
+
+    /// Route call audio to the speaker (or back to the receiver) via the shared
+    /// AVAudioSession output-port override — the standard speaker toggle. It does
+    /// NOT change the session category/mode, touch the DefaultAudioDevice, or
+    /// re-activate the session.
+    func setSpeaker(_ on: Bool) {
+        do {
+            try AVAudioSession.sharedInstance().overrideOutputAudioPort(on ? .speaker : .none)
+            isSpeakerOn = on
+        } catch {
+            NSLog("[voice] speaker override failed: \(error.localizedDescription)")
+        }
+    }
+
+    func toggleSpeaker() { setSpeaker(!isSpeakerOn) }
+
+    /// End the active call through CallKit (CXEndCallAction) — the same path the
+    /// native red End button uses (CallKitProvider → performEnd → disconnect).
+    func endActiveCall() {
+        guard let uuid = currentCallUUID else { return }
+        CallKitProvider.shared.endCall(uuid: uuid)
     }
 
     // MARK: - Audio session (invoked by CallKitProvider)
@@ -312,6 +374,17 @@ final class VoiceCallManager: NSObject, ObservableObject {
         incomingCallerNumber = nil
         incomingCallUUID = nil
         hasActiveCall = false
+        clearActiveCallUIState()
+    }
+
+    /// Reset the in-app call-screen's published state once no call remains.
+    private func clearActiveCallUIState() {
+        currentCallUUID = nil
+        activeCallHandle = nil
+        activeCallName = nil
+        callConnectedAt = nil
+        isMuted = false
+        isSpeakerOn = false
     }
 
     private func cleanup(call: Call) {
@@ -325,6 +398,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
             hasActiveCall = false
             incomingCallerNumber = nil
             incomingCallUUID = nil
+            clearActiveCallUIState()
         }
     }
 }
@@ -373,6 +447,8 @@ extension VoiceCallManager: CallDelegate {
         if let id = call.uuid?.uuidString, outgoingCallUUIDs.contains(id) {
             CallKitProvider.shared.reportOutgoingConnected(uuid: call.uuid)
         }
+        // Stamp the connect moment so the in-app call screen's timer counts from here.
+        callConnectedAt = Date()
         hasActiveCall = true
     }
 

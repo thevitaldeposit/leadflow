@@ -159,6 +159,9 @@ struct AuthedRootView: View {
 
 struct MainTabView: View {
     @EnvironmentObject private var notificationService: NotificationService
+    // Observe the call manager so an active call presents the in-app call screen
+    // over the whole tab UI (the foreground gap the native CallKit screen leaves).
+    @ObservedObject private var voice = VoiceCallManager.shared
 
     var body: some View {
         TabView {
@@ -169,6 +172,15 @@ struct MainTabView: View {
                 .environmentObject(notificationService)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+        }
+        // Present the foreground call screen for BOTH inbound-answered and outbound
+        // calls. Dismissal is driven by the call ending (hasActiveCall → false), so
+        // the setter is a no-op — there's no user-interactive dismiss of a call.
+        .fullScreenCover(isPresented: Binding(
+            get: { voice.hasActiveCall },
+            set: { _ in }
+        )) {
+            InAppCallScreen(voice: voice)
         }
     }
 }
