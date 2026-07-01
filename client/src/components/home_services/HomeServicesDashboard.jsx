@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import socket from '../../socket';
-import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, getTerminology, getSubVertical, formatTime12 } from '../../utils/verticalConfig';
+import { getLeadActionState, parseVerticalData, OPERATIONAL_JOB_STATUSES, ACTIVE_JOB_STATUS_SET, UPCOMING_JOB_STATUS_SET, JOB_STATUS, LEGACY_STATUS, getTerminology, getSubVertical, formatTime12 } from '../../utils/verticalConfig';
 import { playChime } from '../../utils/chime';
 import IntentBadge from './IntentBadge';
 import CriticalBadge from './CriticalBadge';
@@ -192,7 +192,7 @@ function classifyForQueue(e, now, cfg) {
   // expire out after the grace window (default 24h). Handle them before the
   // opportunity gate below, which they would otherwise fail.
   if (lead.call_type === 'missed_call') {
-    const neverContacted = (state.jobStatus === 'inquiry' || state.jobStatus == null) && lead.status === 'new';
+    const neverContacted = (state.jobStatus === JOB_STATUS.INQUIRY || state.jobStatus == null) && lead.status === LEGACY_STATUS.NEW;
     if (!neverContacted) return { inQueue: false, expired: false, reason: null };
     const created = lead.created_at ? new Date(lead.created_at).getTime() : null;
     const active = created == null ? true : now.getTime() <= created + cfg.missedCallExpiryH * MS_HOUR;
@@ -219,7 +219,7 @@ function classifyForQueue(e, now, cfg) {
 
   const critical = isCriticalLead(lead, vd);
   const isVoicemail = lead.call_type === 'voicemail';
-  const neverContacted = (state.jobStatus === 'inquiry' || state.jobStatus == null) && lead.status === 'new';
+  const neverContacted = (state.jobStatus === JOB_STATUS.INQUIRY || state.jobStatus == null) && lead.status === LEGACY_STATUS.NEW;
 
   // Collect every qualifying reason with whether it's still within its window.
   const reasons = [];
@@ -261,7 +261,7 @@ function classifyForQueue(e, now, cfg) {
 // (1) a pending call-driven reschedule request the owner must approve/reject, or
 // (2) a job delivering today/tomorrow still missing the delivery address or payment.
 function bookedAttentionReason(lead, vd, now) {
-  if (lead.job_status !== 'booked' && lead.job_status !== 'scheduled') return null;
+  if (!UPCOMING_JOB_STATUS_SET.has(lead.job_status)) return null;
   // A held reschedule request surfaces regardless of delivery date — the booked
   // schedule wasn't changed (see the server guard); the owner decides.
   if (vd.rescheduleRequest) return 'Customer requested reschedule — approve?';
@@ -299,7 +299,7 @@ function getAttentionTier(e, now = new Date()) {
   if (isCriticalLead(lead, vd) || bookedReason) return 1;
 
   const isVoicemail = lead.call_type === 'voicemail';
-  const neverContacted = (state.jobStatus === 'inquiry' || state.jobStatus == null) && lead.status === 'new';
+  const neverContacted = (state.jobStatus === JOB_STATUS.INQUIRY || state.jobStatus == null) && lead.status === LEGACY_STATUS.NEW;
 
   // TIER 2 — VOICEMAIL UNCONTACTED: customer is waiting on a callback.
   if (isVoicemail && neverContacted) return 2;
@@ -1454,19 +1454,19 @@ export default function HomeServicesDashboard() {
     // though they're fetched for the Action Queue.
     const newLeads7d = leads.filter(l => l.call_type !== 'missed_call' && l.created_at && new Date(l.created_at) >= weekStart).length;
     const bookedThisWeek = leads.filter(l =>
-      (l.job_status === 'booked' || l.status === 'booked') && l.updated_at && new Date(l.updated_at) >= weekStart
+      (l.job_status === JOB_STATUS.BOOKED || l.status === LEGACY_STATUS.BOOKED) && l.updated_at && new Date(l.updated_at) >= weekStart
     ).length;
 
     // On Schedule — ALL booked/scheduled jobs with a future (today onward)
     // delivery date, regardless of when they were booked: the upcoming pipeline.
     const onSchedule = enriched.filter(({ lead, vd }) => {
-      if (lead.job_status !== 'booked' && lead.job_status !== 'scheduled') return false;
+      if (!UPCOMING_JOB_STATUS_SET.has(lead.job_status)) return false;
       const d = dayKey(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
       return d && d >= todayStr;
     }).length;
 
     const completedMonth = leads.filter(l =>
-      l.job_status === 'completed' && l.updated_at && new Date(l.updated_at) >= monthStart
+      l.job_status === JOB_STATUS.COMPLETED && l.updated_at && new Date(l.updated_at) >= monthStart
     ).length;
 
     // Bottom row
@@ -1478,12 +1478,11 @@ export default function HomeServicesDashboard() {
     const jobsScheduled = onSchedule;
 
     const activeJobs = enriched.filter(e =>
-      e.lead.job_status === 'delivered' || e.lead.job_status === 'active_rental'
+      e.lead.job_status === JOB_STATUS.DELIVERED || e.lead.job_status === JOB_STATUS.ACTIVE_RENTAL
     ).length;
 
     // Pending invoices: operational jobs (excluding completed) not yet paid.
-    const PENDING_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up']);
-    const pending = enriched.filter(e => PENDING_STATUSES.has(e.lead.job_status) && !e.lead.paid_at);
+    const pending = enriched.filter(e => ACTIVE_JOB_STATUS_SET.has(e.lead.job_status) && !e.lead.paid_at);
     const pendingInvoicesCount = pending.length;
     const pendingInvoicesValue = pending.reduce((s, e) => s + revOf(e.lead, e.state), 0);
 

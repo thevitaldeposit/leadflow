@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import socket from '../socket';
-import { getLeadActionState, parseVerticalData, JOB_STATUS_STYLES, getJobStatusLabel, OPERATIONAL_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '../utils/verticalConfig';
+import { getLeadActionState, parseVerticalData, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUS, LEGACY_STATUS, OPERATIONAL_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '../utils/verticalConfig';
 import IntentBadge from '../components/home_services/IntentBadge';
 import UrgencyBadge from '../components/home_services/UrgencyBadge';
 
@@ -58,7 +58,7 @@ const MODE_CONFIG = {
     title: 'Completed',
     emptyMsg: 'No completed jobs yet.',
     filter: (enriched) =>
-      enriched.filter(e => e.lead.job_status === 'completed' || e.lead.status === 'spam' || e.lead.status === 'lost' || e.lead.job_status === 'lost')
+      enriched.filter(e => e.lead.job_status === JOB_STATUS.COMPLETED || e.lead.status === LEGACY_STATUS.SPAM || e.lead.status === LEGACY_STATUS.LOST || e.lead.job_status === JOB_STATUS.LOST)
         .sort((a, b) => new Date(b.lead.updated_at) - new Date(a.lead.updated_at)),
   },
 };

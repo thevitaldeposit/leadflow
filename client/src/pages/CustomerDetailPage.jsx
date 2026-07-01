@@ -11,6 +11,7 @@ import {
   CUSTOMER_STATUSES, CUSTOMER_STATUS_STYLES, getCustomerStatusLabel,
   getTerminology,
   INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
+  ENGAGEMENT_STATUS,
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
 import PaymentLinkSection from '../components/home_services/PaymentLinkSection';
@@ -565,8 +566,8 @@ export default function CustomerDetailPage() {
   //    NOT go to Jobs; they collapse into a lightweight list below the Jobs tab.
   const engagements = c.engagements || [];
   const activeEngagement = engagements.find(e => e.is_active) || null;
-  const jobEngagements = engagements.filter(e => e.status === 'booked' || e.status === 'completed');
-  const pastInquiries = engagements.filter(e => e.status === 'lost');
+  const jobEngagements = engagements.filter(e => e.status === ENGAGEMENT_STATUS.BOOKED || e.status === ENGAGEMENT_STATUS.COMPLETED);
+  const pastInquiries = engagements.filter(e => e.status === ENGAGEMENT_STATUS.LOST);
 
   // Quick Stats: outstanding = unpaid invoice balances; last job = newest
   // booked/completed engagement (— when there are none yet).
@@ -981,7 +982,7 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
   // an unbooked Active Inquiry or a booked Open Job alike.
   const [editLead, setEditLead] = useState(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
-  const canBook = e.status === 'inquiry';
+  const canBook = e.status === ENGAGEMENT_STATUS.INQUIRY;
 
   const close = async (reason) => {
     const msg = reason === 'lost'
@@ -1048,13 +1049,13 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
   // Booking converts the engagement in place: the same open slot, now a Job. The
   // header flips from "Active Inquiry" to "Open Job" (the green BOOKED badge lives
   // on the top contact card). It only leaves this slot when the job completes.
-  const headerTitle = e.status === 'booked' ? 'Open Job' : 'Active Inquiry';
+  const headerTitle = e.status === ENGAGEMENT_STATUS.BOOKED ? 'Open Job' : 'Active Inquiry';
 
   return (
     <Card
       id={id}
       title={headerTitle}
-      icon={e.status === 'booked' ? Briefcase : MessageSquare}
+      icon={e.status === ENGAGEMENT_STATUS.BOOKED ? Briefcase : MessageSquare}
       action={(
         <div className="flex items-center gap-2">
           <button
@@ -1094,7 +1095,7 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
 
       <EngagementBody engagement={e} refreshKey={refreshKey} onPaymentChange={onPaymentChange} />
 
-      {e.status === 'inquiry' && (
+      {e.status === ENGAGEMENT_STATUS.INQUIRY && (
         <div className="px-5 py-3 border-t border-divider flex items-center justify-end gap-2">
           <span className="text-[11px] text-muted mr-auto">Inquiries stay open until you close them.</span>
           <button onClick={() => close('lost')} disabled={closing} className="text-xs font-medium text-danger border border-danger/30 hover:bg-danger/10 px-3 py-1.5 rounded-lg disabled:opacity-50">Mark Lost</button>
@@ -1203,7 +1204,7 @@ function JobHistoryRow({ engagement: e, onPaymentChange, forceOpen = false }) {
   // vertical config — the size lives in its own column. Status is display-only:
   // a booked/open job reads "In progress", a completed one "Completed".
   const serviceType = getTerminology(e.vertical, e.sub_vertical).serviceType;
-  const statusText = e.status === 'completed' ? 'Completed' : 'In progress';
+  const statusText = e.status === ENGAGEMENT_STATUS.COMPLETED ? 'Completed' : 'In progress';
   const toggle = () => setOpen(o => !o);
   return (
     <Fragment>

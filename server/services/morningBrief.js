@@ -8,6 +8,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db/database');
 const { getTimezone } = require('./settingsService');
 const { getActionState, leadFullName } = require('./morningPriorities');
+const { UPCOMING_JOB_STATUS_SET } = require('../config/jobStatus');
 
 const client = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -107,7 +108,7 @@ function buildSnapshot(businessId, todayStr, now = new Date()) {
   // delivery address or payment — operational risk the owner must clear first.
   const atRiskJobs = [];
   for (const { lead, state } of enriched) {
-    if (lead.job_status !== 'booked' && lead.job_status !== 'scheduled') continue;
+    if (!UPCOMING_JOB_STATUS_SET.has(lead.job_status)) continue;
     const vd = state.vd;
     const d = dayOf(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
     if (d !== todayStr && d !== tomorrowStr) continue;
@@ -127,7 +128,7 @@ function buildSnapshot(businessId, todayStr, now = new Date()) {
   // Upcoming deliveries in the next 30 days (pipeline of confirmed work).
   const upcomingDeliveries = enriched
     .filter(({ lead, state }) => {
-      if (!['booked', 'scheduled'].includes(lead.job_status)) return false;
+      if (!UPCOMING_JOB_STATUS_SET.has(lead.job_status)) return false;
       const d = dayOf(lead.delivery_date || state.vd.deliveryDateISO || state.vd.deliveryDate);
       return d && d >= todayStr && d <= in30Str;
     }).length;

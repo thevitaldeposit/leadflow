@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 const { addDaysToISO, getAvailabilityBySize } = require('../services/inventoryService');
+const { ACTIVE_JOB_STATUSES } = require('../config/jobStatus');
 
 // Every schedule route is scoped to the authenticated business.
 router.use(requireAuth);
@@ -65,13 +66,13 @@ router.get('/calendar', (req, res) => {
       WHERE vertical = 'home_services'
         AND business_id = ?
         AND (discarded = 0 OR discarded IS NULL)
-        AND job_status IN ('booked', 'scheduled', 'delivered', 'active_rental', 'picked_up')
+        AND job_status IN (${ACTIVE_JOB_STATUSES.map(() => '?').join(', ')})
         AND (
           (delivery_date >= ? AND delivery_date <= ?)
           OR (pickup_date >= ? AND pickup_date <= ?)
           OR (delivery_date IS NOT NULL AND delivery_date <= ? AND (pickup_date IS NULL OR pickup_date >= ?))
         )
-    `).all(req.business.id, firstDay, lastDay, firstDay, lastDay, lastDay, firstDay);
+    `).all(req.business.id, ...ACTIVE_JOB_STATUSES, firstDay, lastDay, firstDay, lastDay, lastDay, firstDay);
 
     // Build day-by-day map for the entire month
     const dayMap = {};

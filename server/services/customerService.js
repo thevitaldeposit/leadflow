@@ -1,4 +1,11 @@
 const db = require('../db/database');
+const {
+  JOB_STATUS,
+  ACTIVE_JOB_STATUS_SET,
+  CLOSED_LOST_STATUSES,
+  LEGACY_STATUS,
+  ENGAGEMENT_STATUS,
+} = require('../config/jobStatus');
 
 // ── Customers: the person-level layer over the per-call `leads` table ──────────
 // `leads` remains the per-call/per-inquiry record the Twilio pipeline inserts
@@ -8,11 +15,12 @@ const db = require('../db/database');
 // pipeline-inserted leads are linked lazily by reconcileCustomersForBusiness(),
 // which the customers routes call before every list/detail read.
 
-// Operational job statuses = a confirmed job occupying the calendar/inventory.
-// Mirrors verticalConfig/inventoryService; 'completed' is handled separately so
-// it can drive the repeat-customer ladder.
-const OPERATIONAL_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up']);
-const TERMINAL_STATUSES = new Set(['lost', 'spam']);
+// Job-status GROUP membership comes from the canonical module (server/config/jobStatus):
+//   ACTIVE_JOB_STATUS_SET = a confirmed job occupying the calendar/inventory,
+//     EXCLUDING completed ('completed' is handled separately so it can drive the
+//     repeat-customer ladder).
+//   CLOSED_LOST_STATUSES  = {lost, spam} — applied below to job_status AND the legacy
+//     leads.status column (both vocabularies share those two values).
 
 // Lifecycle stages a customer can be in, derived from the set of their jobs (or
 // set manually by the owner). Ordered from coldest to most valuable.
@@ -58,10 +66,10 @@ function deriveStatus(leadRows) {
     if (l.discarded) continue;
     const js = l.job_status || null;
     const legacy = l.status || null;
-    if (js === 'completed') { completed++; continue; }
-    if (OPERATIONAL_STATUSES.has(js) || legacy === 'booked') { active++; continue; }
-    if (TERMINAL_STATUSES.has(js) || TERMINAL_STATUSES.has(legacy)) continue;
-    if (js === 'opportunity') { opp++; continue; }
+    if (js === JOB_STATUS.COMPLETED) { completed++; continue; }
+    if (ACTIVE_JOB_STATUS_SET.has(js) || legacy === LEGACY_STATUS.BOOKED) { active++; continue; }
+    if (CLOSED_LOST_STATUSES.has(js) || CLOSED_LOST_STATUSES.has(legacy)) continue;
+    if (js === JOB_STATUS.OPPORTUNITY) { opp++; continue; }
     leadish++; // inquiry / new / null — a live but un-quoted lead
   }
   if (completed >= 2) return 'repeat';
@@ -207,8 +215,8 @@ function toJob(lead) {
   try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
   return {
     id: lead.id,
-    job_status: lead.job_status || 'inquiry',
-    status: lead.status || 'new',
+    job_status: lead.job_status || JOB_STATUS.INQUIRY,
+    status: lead.status || LEGACY_STATUS.NEW,
     call_type: lead.call_type || null,
     vertical: lead.vertical || null,
     sub_vertical: lead.sub_vertical || null,
@@ -241,8 +249,8 @@ function aggregateLeads(leadRows) {
     if (l.discarded) continue;
     jobs++;
     const js = l.job_status || null;
-    if (js === 'completed') completed++;
-    else if (!TERMINAL_STATUSES.has(js) && !TERMINAL_STATUSES.has(l.status)) open++;
+    if (js === JOB_STATUS.COMPLETED) completed++;
+    else if (!CLOSED_LOST_STATUSES.has(js) && !CLOSED_LOST_STATUSES.has(l.status)) open++;
     revenue += leadRevenue(l);
     const ts = l.updated_at || l.created_at;
     if (ts && (!lastActivityAt || ts > lastActivityAt)) lastActivityAt = ts;
@@ -273,10 +281,10 @@ const STALE_INQUIRY_MS = STALE_INQUIRY_DAYS * 24 * 60 * 60 * 1000;
 // booked engagement, "Active Inquiry" for an open inquiry) — these labels drive
 // badges only, so a booked job's badge reads "Booked".
 const ENGAGEMENT_LABELS = {
-  inquiry: 'Active Inquiry',
-  booked: 'Booked',
-  completed: 'Completed',
-  lost: 'Closed',
+  [ENGAGEMENT_STATUS.INQUIRY]: 'Active Inquiry',
+  [ENGAGEMENT_STATUS.BOOKED]: 'Booked',
+  [ENGAGEMENT_STATUS.COMPLETED]: 'Completed',
+  [ENGAGEMENT_STATUS.LOST]: 'Closed',
 };
 
 function localTodayStr() {
@@ -332,30 +340,30 @@ function paidInvoiceContextForCustomer(businessId, customerId) {
 // own linked invoice, or a customer-level invoice — see paidInvoiceContextForCustomer);
 // completion still also requires the pickup date to have passed.
 function leadIsCompleted(lead, paidCtx) {
-  if ((lead.job_status || '') === 'completed') return true;
+  if ((lead.job_status || '') === JOB_STATUS.COMPLETED) return true;
   const paidByInvoice = !!paidCtx
     && (paidCtx.hasUnlinked || paidCtx.leadIds.has(lead.id));
   const paid = !!lead.paid_at || paidByInvoice;
   return paid && pickupHasPassed(lead.pickup_date);
 }
 function leadIsBooked(lead) {
-  return OPERATIONAL_STATUSES.has(lead.job_status) || lead.status === 'booked';
+  return ACTIVE_JOB_STATUS_SET.has(lead.job_status) || lead.status === LEGACY_STATUS.BOOKED;
 }
 function leadIsClosedLost(lead) {
-  return lead.job_status === 'lost' || lead.job_status === 'spam';
+  return CLOSED_LOST_STATUSES.has(lead.job_status);
 }
 
 // Engagement status from its calls (chronological asc; the last is newest = the
 // representative whose details the engagement shows). Most-advanced state wins for
 // completed/booked; a manually-closed (lost) newest call closes an Active Inquiry.
 function engagementStatusOf(leadsAsc, paidCtx) {
-  if (leadsAsc.some((l) => leadIsCompleted(l, paidCtx))) return 'completed';
-  if (leadsAsc.some(leadIsBooked)) return 'booked';
-  if (leadIsClosedLost(leadsAsc[leadsAsc.length - 1])) return 'lost';
-  return 'inquiry';
+  if (leadsAsc.some((l) => leadIsCompleted(l, paidCtx))) return ENGAGEMENT_STATUS.COMPLETED;
+  if (leadsAsc.some(leadIsBooked)) return ENGAGEMENT_STATUS.BOOKED;
+  if (leadIsClosedLost(leadsAsc[leadsAsc.length - 1])) return ENGAGEMENT_STATUS.LOST;
+  return ENGAGEMENT_STATUS.INQUIRY;
 }
 function engagementIsOpen(status) {
-  return status === 'inquiry' || status === 'booked';
+  return status === ENGAGEMENT_STATUS.INQUIRY || status === ENGAGEMENT_STATUS.BOOKED;
 }
 
 // "Has booking signals" = the booking-signal detector already recorded at least one
@@ -377,7 +385,7 @@ function leadHasBookingSignals(lead) {
 // (lost) are skipped: a follow-up revives a real job, never a lost inquiry.
 function mostRecentJobEngagement(engagements) {
   for (let i = engagements.length - 1; i >= 0; i--) {
-    if (engagements[i].status === 'booked' || engagements[i].status === 'completed') {
+    if (engagements[i].status === ENGAGEMENT_STATUS.BOOKED || engagements[i].status === ENGAGEMENT_STATUS.COMPLETED) {
       return engagements[i];
     }
   }
@@ -443,10 +451,10 @@ function shapeEngagement(eng) {
   // become the newest call (rep) and blank the job's schedule/price. Null for an
   // inquiry, which keeps reflecting the latest call. Read-only — never writes.
   let jobLead = null;
-  if (status === 'booked' || status === 'completed') {
+  if (status === ENGAGEMENT_STATUS.BOOKED || status === ENGAGEMENT_STATUS.COMPLETED) {
     const rev = [...leadsAsc].reverse();
     jobLead = rev.find(leadIsBooked)
-      || rev.find((l) => (l.job_status || '') === 'completed')
+      || rev.find((l) => (l.job_status || '') === JOB_STATUS.COMPLETED)
       || rev.find((l) => !!l.paid_at)
       || rep;
   }
@@ -475,7 +483,7 @@ function shapeEngagement(eng) {
   // Stale is a display-only flag: an Active Inquiry with no new call/update for
   // two weeks. It never closes, books, or otherwise changes the engagement.
   const lastMs = tsToMs(lastActivityAt);
-  const stale = status === 'inquiry' && lastMs != null
+  const stale = status === ENGAGEMENT_STATUS.INQUIRY && lastMs != null
     ? (Date.now() - lastMs) >= STALE_INQUIRY_MS
     : false;
 
@@ -491,7 +499,7 @@ function shapeEngagement(eng) {
     // persisted on the call's vertical_data by the close route. Drives the
     // Past-inquiries label; null for open/booked/completed. Defaults to 'lost'
     // (the generic terminal state) for older closes that predate this field.
-    close_reason: status === 'lost' ? (vd.closeReason || 'lost') : null,
+    close_reason: status === ENGAGEMENT_STATUS.LOST ? (vd.closeReason || 'lost') : null,
     service: leadServiceSummary(detailLead),
     address: detailLead.address || detailVd.deliveryAddress || detailVd.propertyAddress || null,
     delivery_date: jobCol('delivery_date') || null,
@@ -699,9 +707,9 @@ function getCustomerDetail(businessId, customerId) {
     totals: {
       // "Total Jobs" = engagements that became real jobs (booked or completed).
       // An open, never-booked Active Inquiry is NOT a job, so it doesn't count.
-      jobs: engagements.filter((e) => e.status === 'booked' || e.status === 'completed').length,
+      jobs: engagements.filter((e) => e.status === ENGAGEMENT_STATUS.BOOKED || e.status === ENGAGEMENT_STATUS.COMPLETED).length,
       open_jobs: engagements.filter((e) => e.is_open).length,
-      completed_jobs: engagements.filter((e) => e.status === 'completed').length,
+      completed_jobs: engagements.filter((e) => e.status === ENGAGEMENT_STATUS.COMPLETED).length,
       total_revenue: Math.round(engagements.reduce((s, e) => s + (e.estimated_revenue || 0), 0)),
     },
   };

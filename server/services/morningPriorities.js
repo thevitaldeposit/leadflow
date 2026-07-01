@@ -6,11 +6,13 @@
 const db = require('../db/database');
 const { sendToAll } = require('./apns');
 const { getDefaultBusinessId } = require('./businesses');
+const { LEGACY_STATUS, LEGACY_TERMINAL_STATUSES } = require('../config/jobStatus');
 
 const MS_HOUR = 60 * 60 * 1000;
 const MS_DAY = 24 * MS_HOUR;
 const STALE_THRESHOLD_MS = 48 * MS_HOUR;
-const TERMINAL_STATUSES = new Set(['booked', 'lost', 'spam']);
+// This module reads the LEGACY leads.status column; LEGACY_TERMINAL_STATUSES
+// ({booked, lost, spam}) are the legacy values meaning "not an active lead".
 
 function safeParse(json) {
   if (!json) return {};
@@ -62,8 +64,8 @@ function parseFollowUpDate(value) {
 
 function getActionState(lead, now) {
   const vd = safeParse(lead.vertical_data);
-  const status = lead.status || 'new';
-  const isActive = !TERMINAL_STATUSES.has(status);
+  const status = lead.status || LEGACY_STATUS.NEW;
+  const isActive = !LEGACY_TERMINAL_STATUSES.has(status);
 
   let intent = ['high', 'warm', 'cold'].includes(vd.intentLevel) ? vd.intentLevel : null;
   if (!intent) {
@@ -77,13 +79,13 @@ function getActionState(lead, now) {
   const ageMs = createdAt ? (now - createdAt) : 0;
 
   const followUpDueToday = !!(followUpDate && isActive && followUpDate <= endOfDay(now));
-  const stale = isActive && status === 'new' && ageMs >= STALE_THRESHOLD_MS;
+  const stale = isActive && status === LEGACY_STATUS.NEW && ageMs >= STALE_THRESHOLD_MS;
 
   let bucket = 'other';
   if (followUpDueToday) bucket = 'follow_up_due';
-  else if (intent === 'high' && status === 'new') bucket = 'high_intent_new';
+  else if (intent === 'high' && status === LEGACY_STATUS.NEW) bucket = 'high_intent_new';
   else if (stale) bucket = 'stale';
-  else if (status === 'waiting_on_customer') bucket = 'waiting';
+  else if (status === LEGACY_STATUS.WAITING_ON_CUSTOMER) bucket = 'waiting';
 
   const BUCKET_FLOOR = {
     follow_up_due: 4000,
@@ -130,7 +132,7 @@ function computeMorningSummary(now = new Date(), businessId = getDefaultBusiness
   const followUpsToday = enriched.filter(e => e.state.followUpDueToday).length;
   const highIntent = enriched.filter(e => e.state.intent === 'high').length;
   const staleCount = enriched.filter(e => e.state.stale).length;
-  const booked = leads.filter(l => l.status === 'booked').length;
+  const booked = leads.filter(l => l.status === LEGACY_STATUS.BOOKED).length;
 
   let top = null;
   if (priorityLeads.length > 0) {

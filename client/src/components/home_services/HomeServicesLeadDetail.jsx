@@ -16,6 +16,7 @@ import {
   HOME_SERVICES_STATUSES,
   HOME_SERVICES_OUTCOMES,
   JOB_STATUSES,
+  JOB_STATUS,
   URGENCY_VALUES,
   INTENT_VALUES,
   INTENT_LABELS,
@@ -580,7 +581,7 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
       </div>
 
       {/* Payment Link — only shown for booked jobs */}
-      {(lead.job_status === 'booked' || lead.payment_sms_sent_at || lead.paid_at) && (
+      {(lead.job_status === JOB_STATUS.BOOKED || lead.payment_sms_sent_at || lead.paid_at) && (
         <PaymentLinkSection lead={lead} onUpdate={(updated) => { setLead(updated); onUpdate?.(updated); }} />
       )}
 

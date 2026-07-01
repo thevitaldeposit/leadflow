@@ -28,6 +28,84 @@ export const JOB_STATUSES = [
   { value: 'spam', label: 'Spam' },
 ];
 
+// ── Canonical status source of truth (CLIENT) ─────────────────────────────────
+// The one place the web app defines job-status VALUES and the named status GROUPS
+// it tests membership against. Mirrored on the server in server/config/jobStatus.js
+// (that CommonJS module can't import this ES module) — keep the two IDENTICAL in
+// membership. Any change here must be mirrored there and vice-versa.
+//
+// Memberships are preserved EXACTLY as they were when these Sets were duplicated
+// across the app, including two intentional inconsistencies left for the upcoming
+// job-lifecycle work:
+//   • OPERATIONAL_JOB_STATUSES (here) INCLUDES 'completed'; the server's active-job
+//     set EXCLUDES it ('completed' is handled separately for inventory + the
+//     repeat-customer ladder). ACTIVE_JOB_STATUS_SET below is the completed-excluded set.
+//   • TERMINAL_JOB_STATUSES = {completed, lost, spam}; CLOSED_LOST_STATUSES =
+//     {lost, spam}; LEGACY_TERMINAL_STATUSES = {booked, lost, spam} runs over the
+//     legacy leads.status column, where 'booked' meant "deal closed / not an open lead".
+
+// The 10 job_status values as named constants (same strings as JOB_STATUSES above).
+export const JOB_STATUS = Object.freeze({
+  INQUIRY: 'inquiry',
+  OPPORTUNITY: 'opportunity',
+  BOOKED: 'booked',
+  SCHEDULED: 'scheduled',
+  DELIVERED: 'delivered',
+  ACTIVE_RENTAL: 'active_rental',
+  PICKED_UP: 'picked_up',
+  COMPLETED: 'completed',
+  LOST: 'lost',
+  SPAM: 'spam',
+});
+
+// A confirmed job occupying the calendar/inventory, EXCLUDING completed (ordered
+// array for SQL/params parity with the server, plus a Set for O(1) membership).
+export const ACTIVE_JOB_STATUSES = Object.freeze([
+  JOB_STATUS.BOOKED, JOB_STATUS.SCHEDULED, JOB_STATUS.DELIVERED,
+  JOB_STATUS.ACTIVE_RENTAL, JOB_STATUS.PICKED_UP,
+]);
+export const ACTIVE_JOB_STATUS_SET = new Set(ACTIVE_JOB_STATUSES);
+
+// Operational INCLUDING completed — the job is confirmed, no longer a sales lead.
+// Used by getLeadActionState (isOperational / isOpportunity).
+export const OPERATIONAL_JOB_STATUSES = new Set([...ACTIVE_JOB_STATUSES, JOB_STATUS.COMPLETED]);
+
+// Confirmed but not yet delivered — the delivering-soon / upcoming-pipeline pair.
+export const UPCOMING_JOB_STATUSES = Object.freeze([JOB_STATUS.BOOKED, JOB_STATUS.SCHEDULED]);
+export const UPCOMING_JOB_STATUS_SET = new Set(UPCOMING_JOB_STATUSES);
+
+// Non-actionable terminal states INCLUDING completed — used by getLeadActionState (isActive).
+export const TERMINAL_JOB_STATUSES = new Set([JOB_STATUS.COMPLETED, JOB_STATUS.LOST, JOB_STATUS.SPAM]);
+
+// Closed-lost / dead job_status values, EXCLUDING completed.
+export const CLOSED_LOST_STATUSES = new Set([JOB_STATUS.LOST, JOB_STATUS.SPAM]);
+
+// Legacy leads.status vocabulary (parallel column, being phased out; read only as a
+// fallback when job_status is null). job_status drives the Phase-2 UI.
+export const LEGACY_STATUS = Object.freeze({
+  NEW: 'new',
+  NEEDS_FOLLOW_UP: 'needs_follow_up',
+  WAITING_ON_CUSTOMER: 'waiting_on_customer',
+  BOOKED: 'booked',
+  LOST: 'lost',
+  SPAM: 'spam',
+  CONTACTED: 'contacted',
+  QUOTE_SENT: 'quote_sent',
+});
+// Legacy status values meaning "not an active lead" — fallback terminal set for a
+// lead that has no job_status yet.
+export const LEGACY_TERMINAL_STATUSES = new Set([LEGACY_STATUS.BOOKED, LEGACY_STATUS.LOST, LEGACY_STATUS.SPAM]);
+
+// Engagement status — the reduced inquiry → booked → completed (/ lost) lifecycle a
+// single engagement can be in (derived server-side in customerService; consumed by
+// the customer profile).
+export const ENGAGEMENT_STATUS = Object.freeze({
+  INQUIRY: 'inquiry',
+  BOOKED: 'booked',
+  COMPLETED: 'completed',
+  LOST: 'lost',
+});
+
 export const JOB_STATUS_STYLES = {
   inquiry: 'bg-brand/10 text-brand border-brand/30',
   opportunity: 'bg-warning/10 text-warning border-warning/30',
@@ -320,10 +398,8 @@ const MS_HOUR = 60 * 60 * 1000;
 const MS_DAY = 24 * MS_HOUR;
 const STALE_THRESHOLD_MS = 48 * MS_HOUR;
 
-// Job statuses where the job is confirmed — no longer a sales lead
-export const OPERATIONAL_JOB_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up', 'completed']);
-// Non-actionable terminal states
-export const TERMINAL_JOB_STATUSES = new Set(['completed', 'lost', 'spam']);
+// OPERATIONAL_JOB_STATUSES and TERMINAL_JOB_STATUSES are defined once in the
+// canonical status block near the top of this file.
 
 function isSameLocalDay(a, b) {
   return a.getFullYear() === b.getFullYear()
@@ -401,7 +477,7 @@ export function getLeadActionState(lead, now = new Date()) {
   // are kept out of the Action Queue — see classifyForQueue.
   const isDead = isDeadLead(lead, vd);
   const jobStatus = lead?.job_status || vd.job_status || null;
-  const status = lead?.status || 'new';
+  const status = lead?.status || LEGACY_STATUS.NEW;
   // Missed calls are NOT leads — they live only in the dashboard Action Queue
   // (which classifies them on its own). They must never read as an opportunity,
   // an active lead, or operational work, or they'd leak into All Opportunities,
@@ -410,7 +486,7 @@ export function getLeadActionState(lead, now = new Date()) {
   // isActive: not terminal — show in dashboard priority buckets
   const isActive = isMissedCall ? false : (jobStatus
     ? !TERMINAL_JOB_STATUSES.has(jobStatus)
-    : !new Set(['booked', 'lost', 'spam']).has(status));
+    : !LEGACY_TERMINAL_STATUSES.has(status));
   // isOpportunity: pre-booked, in the sales funnel (not yet confirmed as a job)
   const isOpportunity = isMissedCall ? false : (jobStatus
     ? !OPERATIONAL_JOB_STATUSES.has(jobStatus) && !TERMINAL_JOB_STATUSES.has(jobStatus)
@@ -434,7 +510,7 @@ export function getLeadActionState(lead, now = new Date()) {
   const followUpDueToday = !!(followUpDate && isActive && followUpDate <= endOfDay(now));
   const followUpOverdue = !!(followUpDate && isActive && followUpDate < startOfDay(now));
   // Cold-going leads: 48h old, no follow-up resolution, still active, never contacted.
-  const neverContacted = (jobStatus === 'inquiry' || jobStatus === null) && status === 'new';
+  const neverContacted = (jobStatus === JOB_STATUS.INQUIRY || jobStatus === null) && status === LEGACY_STATUS.NEW;
   const stale = isActive && neverContacted && ageMs >= STALE_THRESHOLD_MS;
 
   // ASAP leads in pre-booked states must surface immediately regardless of follow-up date.
@@ -444,7 +520,7 @@ export function getLeadActionState(lead, now = new Date()) {
   // High-intent lead with no confirmed delivery date — needs a follow-up call to lock in the date.
   const noConfirmedDelivery = !!(
     isOpportunity && isActive && intent === 'high' && !lead?.delivery_date &&
-    (jobStatus === 'inquiry' || jobStatus === 'opportunity' || jobStatus === null)
+    (jobStatus === JOB_STATUS.INQUIRY || jobStatus === JOB_STATUS.OPPORTUNITY || jobStatus === null)
   );
   // Voicemail leads: the customer is waiting for a callback, so surface them in
   // Needs Attention until the owner takes a first action.
@@ -459,7 +535,7 @@ export function getLeadActionState(lead, now = new Date()) {
     else if (noConfirmedDelivery) recommendation = 'Confirm delivery date — customer agreed to price and size but no date was set.';
     else if (stale) recommendation = 'Lead is going cold — reach out to re-engage.';
     else if (intent === 'high') recommendation = 'Call today — high-intent lead with no follow-up yet.';
-    else if (status === 'waiting_on_customer') recommendation = 'Check back with the customer.';
+    else if (status === LEGACY_STATUS.WAITING_ON_CUSTOMER) recommendation = 'Check back with the customer.';
     else recommendation = 'Review and decide on next step.';
   }
   // Voicemail leads always read as a callback prompt, naming the caller.
@@ -495,7 +571,7 @@ export function getLeadActionState(lead, now = new Date()) {
   else if (highIntentUncontacted) bucket = 'high_intent_new';
   else if (noConfirmedDelivery) bucket = 'no_delivery_date';
   else if (stale) bucket = 'stale';
-  else if (status === 'waiting_on_customer') bucket = 'waiting';
+  else if (status === LEGACY_STATUS.WAITING_ON_CUSTOMER) bucket = 'waiting';
 
   // Priority floor by bucket gives stable ranking; intra-bucket tiebreaker is
   // overdueness (older follow-up date first) then lead age.

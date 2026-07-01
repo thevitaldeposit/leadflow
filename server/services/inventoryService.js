@@ -1,4 +1,5 @@
 const db = require('../db/database');
+const { ACTIVE_JOB_STATUSES } = require('../config/jobStatus');
 
 // Normalize a size string to a leading integer for comparison.
 // "10 yard", "10-yard dumpster", "10 yd", "10" → 10
@@ -8,8 +9,8 @@ function normalizeSize(s) {
   return m ? parseInt(m[0], 10) : null;
 }
 
-// Job statuses that occupy a unit from the pool while active.
-const ACTIVE_JOB_STATUSES = ['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up'];
+// Job statuses that occupy a unit from the pool while active come from the canonical
+// module (ACTIVE_JOB_STATUSES — a confirmed job, EXCLUDING completed).
 
 // Count confirmed jobs, grouped by normalized size, whose [delivery, pickup)
 // window overlaps the requested window. Job size is read from

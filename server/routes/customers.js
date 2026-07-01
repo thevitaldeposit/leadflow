@@ -16,6 +16,7 @@ const {
 } = require('../services/customerService');
 const { resolveEffectivePricing } = require('../services/pricingService');
 const { logActivity } = require('../services/activityLog');
+const { JOB_STATUS, CLOSED_LOST_STATUSES } = require('../config/jobStatus');
 
 // Customers is a web-dashboard (and, later, authenticated iOS) surface. Unlike
 // the shared /api/leads routes, it must never fall back to the default business,
@@ -220,7 +221,7 @@ router.post('/:id/engagements/close', (req, res) => {
         .get(rawId, customer.id, businessId);
       // Only close still-open inquiry calls; never a booked/completed/already-terminal one.
       if (!lead || leadIsCompleted(lead, paidCtx) || leadIsBooked(lead)) continue;
-      if (lead.job_status === 'lost' || lead.job_status === 'spam') continue;
+      if (CLOSED_LOST_STATUSES.has(lead.job_status)) continue;
       // Record which action closed it ('lost' vs 'closed') on the call's
       // vertical_data (additive merge — never wipes other fields) so the profile's
       // Past-inquiries list can label it correctly. Does not change booking state.
@@ -228,7 +229,7 @@ router.post('/:id/engagements/close', (req, res) => {
       try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
       vd.closeReason = reason;
       db.prepare('UPDATE leads SET job_status = ?, vertical_data = ?, updated_at = ? WHERE id = ?')
-        .run('lost', JSON.stringify(vd), now, lead.id);
+        .run(JOB_STATUS.LOST, JSON.stringify(vd), now, lead.id);
       logActivity(lead.id, 'status_change', note);
       closed++;
     }

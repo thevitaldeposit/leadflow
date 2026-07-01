@@ -9,6 +9,7 @@ const { attachBusiness, requireAuth } = require('../middleware/auth');
 const { reconcileCustomersForBusiness, recomputeCustomerStatus, findOrCreateCustomerForLead } = require('../services/customerService');
 const { describeBooking } = require('../services/leadActivityText');
 const { sendToAll } = require('../services/apns');
+const { JOB_STATUS, LEGACY_STATUS, ACTIVE_JOB_STATUS_SET } = require('../config/jobStatus');
 
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
 // request to the caller's business when a token is present, else to Valley Binz.
@@ -53,7 +54,7 @@ function calcPickupFromDuration(deliveryISO, days) {
 //     of being written (see the reschedule-approval flow in PUT /:id).
 // Unbooked leads (inquiries/opportunities) are never gated — booking, rescheduling,
 // and clearing all behave exactly as before until a job is actually booked.
-const OPERATIONAL_BOOKED_STATUSES = new Set(['booked', 'scheduled', 'delivered', 'active_rental', 'picked_up']);
+// The confirmed/operational set (EXCLUDING completed) is the canonical ACTIVE_JOB_STATUS_SET.
 
 function isEmptyScheduleVal(v) {
   return v === undefined || v === null || v === '';
@@ -64,7 +65,7 @@ function isEmptyScheduleVal(v) {
 // { field, from, to } entries. A no-op for any lead that isn't already booked.
 function guardBookedSchedule({ existing, updates, vdPatch, currentVd, req }) {
   const diverted = [];
-  const existingBooked = OPERATIONAL_BOOKED_STATUSES.has(existing.job_status) || existing.status === 'booked';
+  const existingBooked = ACTIVE_JOB_STATUS_SET.has(existing.job_status) || existing.status === LEGACY_STATUS.BOOKED;
   if (!existingBooked) return diverted;
 
   // Owner edits carry a valid JWT (attachBusiness populates req.user); the iOS app
@@ -378,7 +379,7 @@ router.put('/:id', (req, res) => {
     // Booking gets a single richer line ("Dumpster booked — 20 yard · delivery …")
     // instead of the generic "Status changed to booked" — one clean event, not two.
     if (updates.job_status !== undefined && updated.job_status !== existing.job_status) {
-      const description = updated.job_status === 'booked'
+      const description = updated.job_status === JOB_STATUS.BOOKED
         ? describeBooking(updated)
         : `Status changed to ${updated.job_status}`;
       logActivity(updated.id, 'status_change', description);
@@ -397,8 +398,8 @@ router.put('/:id', (req, res) => {
     }
 
     // Trigger payment SMS when a job transitions to booked for the first time
-    const wasBooked = existing.job_status === 'booked';
-    const isNowBooked = updated.job_status === 'booked';
+    const wasBooked = existing.job_status === JOB_STATUS.BOOKED;
+    const isNowBooked = updated.job_status === JOB_STATUS.BOOKED;
     const isHomeServices = updated.vertical === 'home_services';
     if (!wasBooked && isNowBooked && isHomeServices && !updated.payment_sms_sent_at) {
       sendPaymentSms(updated).then((result) => {
@@ -528,9 +529,9 @@ router.post('/manual', requireAuth, (req, res) => {
 
     // Status / intent. "Book Job" forces booked; otherwise honor the dropdown.
     const book = b.book === true;
-    const chosenJobStatus = ['inquiry', 'opportunity', 'booked'].includes(b.jobStatus)
-      ? b.jobStatus : 'inquiry';
-    const jobStatus = book ? 'booked' : chosenJobStatus;
+    const chosenJobStatus = [JOB_STATUS.INQUIRY, JOB_STATUS.OPPORTUNITY, JOB_STATUS.BOOKED].includes(b.jobStatus)
+      ? b.jobStatus : JOB_STATUS.INQUIRY;
+    const jobStatus = book ? JOB_STATUS.BOOKED : chosenJobStatus;
     const intent = ['cold', 'warm', 'high'].includes(b.intent) ? b.intent : null;
     const notes = str(b.notes);
 
@@ -548,7 +549,7 @@ router.post('/manual', requireAuth, (req, res) => {
     const pickupDate = calcPickupFromDuration(deliveryDate, rentalDurationDays);
     const fullName = [firstName, lastName].filter(Boolean).join(' ');
     const quotedPrice = hasPrice ? `$${priceNum}` : null;
-    const isBooked = jobStatus === 'booked';
+    const isBooked = jobStatus === JOB_STATUS.BOOKED;
     const outcome = isBooked ? 'booked' : 'quote_requested';
 
     // vertical_data mirrors the dumpster_rental field pack so the Industry
