@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 const { sendPaymentSms } = require('../services/smsService');
+const { sendPaymentLinkEmail } = require('../services/emailService');
+const jobLifecycle = require('../services/jobLifecycle');
 const { initiateClickToCall } = require('../services/callService');
 const { logActivity, getActivityForLead } = require('../services/activityLog');
 const { emitToBusiness } = require('../socket');
@@ -360,6 +362,30 @@ router.put('/:id', (req, res) => {
       updates.vertical_data = JSON.stringify(merged);
     }
 
+    // ── Payment-gated lifecycle reroute (home_services) ──────────────────────────
+    // Booking is INITIATED, not completed, on this write: setting a job to 'booked'
+    // while it's unpaid routes it to 'pending_payment' (email the link; reserve
+    // nothing) — payment is what books it and pulls the dumpster. And 'completed' is
+    // gated on full payment: an unpaid completion attempt lands in
+    // 'awaiting_final_payment' instead. Forward transitions only; owner edits to
+    // other fields and the reschedule-approval flow are untouched.
+    let emailPaymentLink = false;
+    const isHomeServicesLead = existing.vertical === 'home_services';
+    if (isHomeServicesLead && updates.job_status !== undefined && updates.job_status !== existing.job_status) {
+      const target = updates.job_status;
+      const leadPaidAt = updates.paid_at !== undefined ? updates.paid_at : existing.paid_at;
+      const payNow = jobLifecycle.paymentStatusFromInvoices(businessId, {
+        leadIds: [existing.id], customerId: existing.customer_id || null, leadPaidAt,
+      });
+      const isPaid = payNow === 'paid';
+      if ((target === JOB_STATUS.BOOKED || target === JOB_STATUS.PENDING_PAYMENT) && !isPaid) {
+        updates.job_status = JOB_STATUS.PENDING_PAYMENT;
+        if (!existing.payment_link_emailed_at) emailPaymentLink = true;
+      } else if (target === JOB_STATUS.COMPLETED && !isPaid) {
+        updates.job_status = JOB_STATUS.AWAITING_FINAL_PAYMENT;
+      }
+    }
+
     if (Object.keys(updates).length === 0) {
       return res.json(existing);
     }
@@ -371,7 +397,7 @@ router.put('/:id', (req, res) => {
 
     db.prepare(`UPDATE leads SET ${setClauses} WHERE id = ? AND business_id = ?`).run(...values);
 
-    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    let updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
 
     // Log a status_change touchpoint whenever job_status actually changes, and
     // refresh the linked customer's derived lifecycle status so the Customers
@@ -379,9 +405,10 @@ router.put('/:id', (req, res) => {
     // Booking gets a single richer line ("Dumpster booked — 20 yard · delivery …")
     // instead of the generic "Status changed to booked" — one clean event, not two.
     if (updates.job_status !== undefined && updated.job_status !== existing.job_status) {
-      const description = updated.job_status === JOB_STATUS.BOOKED
-        ? describeBooking(updated)
-        : `Status changed to ${updated.job_status}`;
+      let description;
+      if (updated.job_status === JOB_STATUS.BOOKED) description = describeBooking(updated);
+      else if (updated.job_status === JOB_STATUS.PENDING_PAYMENT) description = 'Booking initiated — payment link emailed (payment reserves the dumpster)';
+      else description = `Status changed to ${updated.job_status}`;
       logActivity(updated.id, 'status_change', description);
       if (updated.customer_id) recomputeCustomerStatus(updated.customer_id);
     }
@@ -397,20 +424,28 @@ router.put('/:id', (req, res) => {
       logActivity(updated.id, 'job_updated', editSummary.slice(0, 500));
     }
 
-    // Trigger payment SMS when a job transitions to booked for the first time
-    const wasBooked = existing.job_status === JOB_STATUS.BOOKED;
-    const isNowBooked = updated.job_status === JOB_STATUS.BOOKED;
-    const isHomeServices = updated.vertical === 'home_services';
-    if (!wasBooked && isNowBooked && isHomeServices && !updated.payment_sms_sent_at) {
-      sendPaymentSms(updated).then((result) => {
+    // Booking initiation EMAILS the payment link (SMS retired for this while A2P
+    // approval is pending — sendPaymentSms is left intact but unused here). The send
+    // stamps payment_link_emailed_at and is fire-and-forget so it never blocks the PUT.
+    if (emailPaymentLink) {
+      sendPaymentLinkEmail(updated).then((result) => {
         if (result.sent) {
-          emitToBusiness(updated.business_id, 'payment_sms_sent', {
-            leadId: updated.id,
-            customerName: result.customerName,
-            phone: result.phone,
+          emitToBusiness(updated.business_id, 'payment_link_emailed', {
+            leadId: updated.id, to: result.to, customerName: result.customerName,
           });
         }
-      }).catch((err) => console.error('[leads] SMS send error:', err));
+      }).catch((err) => console.error('[leads] payment email error:', err));
+    }
+
+    // Owner recorded payment (Mark Paid sets paid_at) → recompute the payment axis
+    // and auto-advance the lifecycle (pending_payment → booked and reserve+schedule,
+    // or awaiting_final_payment → completed when fully paid). Re-read so the response
+    // reflects any advance.
+    if (updates.paid_at !== undefined && updates.paid_at) {
+      try {
+        jobLifecycle.advanceOnPayment(businessId, updated.id);
+        updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+      } catch (e) { console.error('[leads] advanceOnPayment error:', e.message); }
     }
 
     // A call-driven attempt to change the booked schedule was diverted (not
@@ -527,11 +562,17 @@ router.post('/manual', requireAuth, (req, res) => {
     const paymentStatus = b.paymentStatus === 'paid'
       ? 'Paid' : (b.paymentStatus === 'not_paid' ? 'Not paid' : null);
 
-    // Status / intent. "Book Job" forces booked; otherwise honor the dropdown.
+    // Status / intent. "Book Job" (or picking Booked) INITIATES booking, which is
+    // payment-gated: unpaid → pending_payment (email the link, reserve nothing);
+    // already paid (owner collected offline) → booked immediately.
     const book = b.book === true;
     const chosenJobStatus = [JOB_STATUS.INQUIRY, JOB_STATUS.OPPORTUNITY, JOB_STATUS.BOOKED].includes(b.jobStatus)
       ? b.jobStatus : JOB_STATUS.INQUIRY;
-    const jobStatus = book ? JOB_STATUS.BOOKED : chosenJobStatus;
+    const wantsBooked = book || chosenJobStatus === JOB_STATUS.BOOKED;
+    const alreadyPaid = paymentStatus === 'Paid';
+    const jobStatus = wantsBooked
+      ? (alreadyPaid ? JOB_STATUS.BOOKED : JOB_STATUS.PENDING_PAYMENT)
+      : chosenJobStatus;
     const intent = ['cold', 'warm', 'high'].includes(b.intent) ? b.intent : null;
     const notes = str(b.notes);
 
@@ -550,7 +591,8 @@ router.post('/manual', requireAuth, (req, res) => {
     const fullName = [firstName, lastName].filter(Boolean).join(' ');
     const quotedPrice = hasPrice ? `$${priceNum}` : null;
     const isBooked = jobStatus === JOB_STATUS.BOOKED;
-    const outcome = isBooked ? 'booked' : 'quote_requested';
+    const isPendingPayment = jobStatus === JOB_STATUS.PENDING_PAYMENT;
+    const outcome = (isBooked || isPendingPayment) ? 'booked' : 'quote_requested';
 
     // vertical_data mirrors the dumpster_rental field pack so the Industry
     // Details / Quote sections render the same as a call-captured lead.
@@ -582,7 +624,8 @@ router.post('/manual', requireAuth, (req, res) => {
     const nowISO = new Date().toISOString();
     const legacyStatus = isBooked ? 'booked' : 'new';
     // Already-collected payment: record it and skip the payment link below.
-    const paidAt = paymentStatus === 'Paid' ? nowISO : null;
+    const paidAt = alreadyPaid ? nowISO : null;
+    const paymentStatusCol = alreadyPaid ? 'paid' : 'unpaid';
 
     const insert = db.prepare(`
       INSERT INTO leads (
@@ -590,15 +633,15 @@ router.post('/manual', requireAuth, (req, res) => {
         customer_first_name, customer_last_name, phone, email,
         status, job_status, outcome, customer_intent,
         delivery_date, raw_delivery_date, pickup_date, estimated_revenue,
-        paid_at, vertical_data, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        paid_at, payment_status, vertical_data, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = insert.run(
       businessId, vertical, subVertical, 'manual', 'manual', 'manual',
       firstName, lastName || null, phone, email || null,
       legacyStatus, jobStatus, outcome, intent || null,
       deliveryDate || null, deliveryDate || null, pickupDate || null, hasPrice ? priceNum : null,
-      paidAt, JSON.stringify(verticalData), nowISO, nowISO
+      paidAt, paymentStatusCol, JSON.stringify(verticalData), nowISO, nowISO
     );
 
     const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(Number(result.lastInsertRowid));
@@ -609,18 +652,17 @@ router.post('/manual', requireAuth, (req, res) => {
     // away so it surfaces under the right person in the Customers section.
     try { reconcileCustomersForBusiness(businessId); } catch (e) { console.error('[leads/manual] reconcile error:', e.message); }
 
-    // Booked directly → same payment SMS path the PUT booking transition uses,
-    // unless the owner already marked it paid.
-    if (isBooked && !paidAt) {
-      sendPaymentSms(lead).then((r) => {
+    // Booking initiated but unpaid → email the payment link (payment reserves the
+    // dumpster). A booked+paid manual entry needs no link. Same email channel the
+    // PUT booking transition + auto-book use.
+    if (isPendingPayment) {
+      sendPaymentLinkEmail(lead).then((r) => {
         if (r.sent) {
-          emitToBusiness(lead.business_id, 'payment_sms_sent', {
-            leadId: lead.id,
-            customerName: r.customerName,
-            phone: r.phone,
+          emitToBusiness(lead.business_id, 'payment_link_emailed', {
+            leadId: lead.id, to: r.to, customerName: r.customerName,
           });
         }
-      }).catch((err) => console.error('[leads/manual] SMS send error:', err));
+      }).catch((err) => console.error('[leads/manual] payment email error:', err));
     }
 
     emitToBusiness(lead.business_id, 'new_lead', lead);
@@ -628,6 +670,112 @@ router.post('/manual', requireAuth, (req, res) => {
   } catch (err) {
     console.error('POST /leads/manual error:', err);
     res.status(500).json({ error: 'Failed to create lead' });
+  }
+});
+
+// POST /api/leads/:id/dump-ticket — manual weight / dump-ticket entry for a returned
+// unit (the OCR feature will call the SAME jobLifecycle path with source:'ocr'). Body:
+//   { weightTons?, swap?, unitsRemaining?, note? }
+// Records the ticket + any overage (invoice when a rate is configured, else flagged),
+// then advances the lifecycle SWAP-SAFELY (only past active_rental once no unit is
+// still out). Web-dashboard only → hard auth.
+router.post('/:id/dump-ticket', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const b = req.body || {};
+    const weightTons = b.weightTons === '' || b.weightTons == null ? null : Number(b.weightTons);
+    if (weightTons != null && (Number.isNaN(weightTons) || weightTons < 0)) {
+      return res.status(400).json({ error: 'weightTons must be a non-negative number' });
+    }
+    const result = jobLifecycle.recordDumpTicket(businessId, lead, {
+      weightTons,
+      swap: b.swap === true,
+      unitsRemaining: b.unitsRemaining,
+      note: typeof b.note === 'string' ? b.note.trim() : null,
+      source: 'manual',
+    });
+    if (result.error === 'not_found') return res.status(404).json({ error: 'Lead not found' });
+
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    res.json({
+      lead: updated,
+      overage: result.overage || null,
+      advancedTo: result.advancedTo || null,
+      unitsOut: result.unitsOut,
+      overageInvoiceId: result.overageInvoiceId || null,
+    });
+  } catch (err) {
+    console.error('POST /leads/:id/dump-ticket error:', err);
+    res.status(500).json({ error: 'Failed to record dump ticket' });
+  }
+});
+
+// POST /api/leads/:id/cancel — resolve a confirm-first cancellation (the Action
+// Queue "Customer expressed intent to cancel — confirm or disregard" item). Body:
+//   { confirm: true }  → move the job to the 'lost' terminal state.
+//   { confirm: false } → disregard: leave the job unchanged, and stamp the call so
+//                        the nudge stops re-surfacing.
+// Confirm-first by design — a detected cancellation intent NEVER auto-cancels. Web
+// dashboard only → hard auth.
+router.post('/:id/cancel', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    let vd = {};
+    try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+    const now = new Date().toISOString();
+    const confirm = req.body && req.body.confirm === true;
+
+    if (confirm) {
+      vd.cancelledAt = now;
+      vd.closeReason = 'cancelled';
+      delete vd.cancelRequest;
+      db.prepare('UPDATE leads SET job_status = ?, vertical_data = ?, updated_at = ? WHERE id = ?')
+        .run(JOB_STATUS.LOST, JSON.stringify(vd), now, lead.id);
+      logActivity(lead.id, 'status_change', 'Cancellation confirmed — job marked lost');
+    } else {
+      // Disregard: record that the owner dismissed the cancellation cue so the
+      // Action Queue nudge doesn't keep re-appearing. Job left exactly as-is.
+      vd.cancelDismissedAt = now;
+      delete vd.cancelRequest;
+      db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(vd), now, lead.id);
+      logActivity(lead.id, 'note_added', 'Cancellation cue disregarded — job unchanged');
+    }
+
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (updated.customer_id) recomputeCustomerStatus(updated.customer_id);
+    emitToBusiness(updated.business_id, 'lead_updated', updated);
+    res.json({ lead: updated, cancelled: confirm });
+  } catch (err) {
+    console.error('POST /leads/:id/cancel error:', err);
+    res.status(500).json({ error: 'Failed to resolve cancellation' });
+  }
+});
+
+// POST /api/leads/:id/email-payment-link — (re)send the payment link by EMAIL (the
+// approved channel while SMS/A2P is pending). Used by the Open Job card's Payment
+// Link action. Forces a resend even if one was already emailed.
+router.post('/:id/email-payment-link', requireAuth, async (req, res) => {
+  try {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    const result = await sendPaymentLinkEmail(lead, true);
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
+    if (result.sent) {
+      emitToBusiness(updated.business_id, 'payment_link_emailed', {
+        leadId: updated.id, to: result.to, customerName: result.customerName,
+      });
+    }
+    res.json({ ...result, lead: updated });
+  } catch (err) {
+    console.error('POST /leads/:id/email-payment-link error:', err);
+    res.status(500).json({ error: 'Failed to email payment link' });
   }
 });
 

@@ -11,6 +11,8 @@ import {
   CUSTOMER_STATUSES, CUSTOMER_STATUS_STYLES, getCustomerStatusLabel,
   getTerminology,
   INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
+  PAYMENT_STATUS_STYLES, getPaymentStatusLabel,
+  JOB_STATUS_STYLES, getJobStatusLabel,
   ENGAGEMENT_STATUS,
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
@@ -886,6 +888,118 @@ export default function CustomerDetailPage() {
   );
 }
 
+// Manual dump-ticket / weight entry for a job with a dumpster still out. This is the
+// TRIGGER the future photo-OCR feature will reuse (same api.recordDumpTicket path —
+// OCR just auto-fills the weight). Records the weight (computing/flagging any overage
+// server-side) and advances the lifecycle swap-safely: only the LAST unit back
+// advances the job past active_rental. onDone refreshes the profile.
+function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], overageNeedsRate, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [weight, setWeight] = useState('');
+  const [swap, setSwap] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const submit = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await api.recordDumpTicket(leadId, {
+        weightTons: weight === '' ? null : Number(weight),
+        swap,
+      });
+      const parts = [];
+      if (res.overage && res.overage.overTons > 0) {
+        parts.push(res.overage.amount != null
+          ? `Overage: ${res.overage.overTons}t ($${res.overage.amount})`
+          : `Overage: ${res.overage.overTons}t — set a per-ton rate to bill it`);
+      }
+      if (res.advancedTo === 'completed') parts.push('Job completed.');
+      else if (res.advancedTo === 'awaiting_final_payment') parts.push('Awaiting final payment.');
+      else parts.push(`${res.unitsOut} unit(s) still out.`);
+      setMsg(parts.join(' '));
+      setWeight(''); setSwap(false); setOpen(false);
+      onDone?.();
+    } catch (e) {
+      setMsg('Failed to record — check server logs.');
+      console.error('Dump ticket error:', e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
+        <Briefcase size={15} className="text-muted" />
+        <h3 className="text-sm font-semibold text-content">Dump Ticket / Weight</h3>
+        <span className="ml-auto text-[11px] font-medium text-muted">
+          {unitsOut != null ? `${unitsOut} dumpster${unitsOut === 1 ? '' : 's'} out` : ''}
+        </span>
+      </div>
+      <div className="p-4 space-y-3">
+        {dumpTickets.length > 0 && (
+          <ul className="text-xs text-muted space-y-1">
+            {dumpTickets.map((t, i) => (
+              <li key={i} className="flex items-center gap-2">
+                <Check size={12} className="text-success flex-shrink-0" />
+                <span>
+                  {t.weightTons != null ? `${t.weightTons} tons` : 'weight not entered'}
+                  {t.swap ? ' · swap-out' : ''}
+                  {t.overageTons > 0 ? (t.overageAmount != null ? ` · overage $${t.overageAmount}` : ' · overage (rate needed)') : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {overageNeedsRate && (
+          <p className="text-xs text-warning bg-warning/10 px-2 py-1.5 rounded-lg">
+            Overage recorded but not priced — set a per-ton overage rate in Settings to bill it.
+          </p>
+        )}
+        {!open ? (
+          <button
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-1.5 text-sm font-medium text-brand bg-brand/10 hover:bg-brand/10 px-3 py-2 rounded-lg transition-colors"
+          >
+            <Plus size={13} /> Add dump ticket / enter weight
+          </button>
+        ) : (
+          <div className="space-y-2.5">
+            <div>
+              <label className="text-xs font-medium text-muted uppercase tracking-wide mb-1 block">Weight (tons)</label>
+              <input
+                type="number" min="0" step="0.01" value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                placeholder="e.g. 3.5"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-divider bg-surface text-content focus:outline-none focus:ring-2 focus:ring-brand/30"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm text-content">
+              <input type="checkbox" checked={swap} onChange={(e) => setSwap(e.target.checked)} className="rounded" />
+              Swap-out — a replacement dumpster was dropped (a unit is still on site)
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={submit} disabled={busy}
+                className="flex items-center gap-1.5 text-sm font-medium text-white bg-brand hover:opacity-90 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+              >
+                <Check size={13} /> {busy ? 'Saving…' : 'Record ticket'}
+              </button>
+              <button
+                onClick={() => { setOpen(false); setMsg(null); }}
+                className="flex items-center gap-1.5 text-sm font-medium text-muted bg-surface-2 hover:bg-surface-2 px-3 py-2 rounded-lg transition-colors"
+              >
+                <X size={13} /> Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {msg && <p className="text-xs text-content bg-surface-2 px-2 py-1.5 rounded-lg">{msg}</p>}
+      </div>
+    </div>
+  );
+}
+
 // The body shared by the active engagement and an expanded history row: the
 // newest call's full intelligence (booking signals, dates, industry fields, AI
 // summary, recording) plus any earlier calls in the same engagement, expandable.
@@ -951,16 +1065,29 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
           engagement's booked lead (not the newest call). Reuses the same component
           and api methods (api.updateLead paid_at, api.resendPaymentSms) as the lead
           detail page; onUpdate reloads the profile so completion / paid state sync. */}
-      {e.booked_lead_id && (
-        <div className="px-5 pb-5 pt-1">
+      {(e.booked_lead_id || e.job_stage === 'pending_payment') && (
+        <div className="px-5 pb-5 pt-1 space-y-3">
           <PaymentLinkSection
             lead={{
-              id: e.booked_lead_id,
+              id: e.booked_lead_id || e.representative_lead_id,
               paid_at: e.booked_paid_at,
+              payment_link_emailed_at: e.booked_payment_link_emailed_at,
               payment_sms_sent_at: e.booked_payment_sms_sent_at,
             }}
+            paymentStatus={e.payment_status}
             onUpdate={() => onPaymentChange?.()}
           />
+          {/* Dump-ticket / weight entry appears once a dumpster is out for the job
+              (units_out > 0 after delivery). The manual trigger the OCR feature reuses. */}
+          {e.units_out != null && e.units_out > 0 && (
+            <DumpTicketAction
+              leadId={e.booked_lead_id}
+              unitsOut={e.units_out}
+              dumpTickets={e.dump_tickets || []}
+              overageNeedsRate={e.overage_needs_rate}
+              onDone={() => onPaymentChange?.()}
+            />
+          )}
         </div>
       )}
     </>
@@ -982,7 +1109,11 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
   // an unbooked Active Inquiry or a booked Open Job alike.
   const [editLead, setEditLead] = useState(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
-  const canBook = e.status === ENGAGEMENT_STATUS.INQUIRY;
+  // Mark Booked initiates booking; hide it once booking is already in flight
+  // (pending_payment — the payment link is out and payment is what books it).
+  const canBook = e.status === ENGAGEMENT_STATUS.INQUIRY && e.job_stage !== 'pending_payment';
+  // The operational stages worth showing as the first indicator (paired with payment).
+  const showStage = ['pending_payment', 'booked', 'active_rental', 'awaiting_final_payment'].includes(e.job_stage);
 
   const close = async (reason) => {
     const msg = reason === 'lost'
@@ -1079,6 +1210,18 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
       )}
     >
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
+        {/* Two INDEPENDENT indicators: operational stage (job_status) + payment state,
+            so "work done, still owed" and "booking initiated, unpaid" are both visible. */}
+        {showStage && (
+          <span className={`${badgeCls} ${JOB_STATUS_STYLES[e.job_stage] || ''}`}>
+            {getJobStatusLabel(e.job_stage)}
+          </span>
+        )}
+        {showStage && e.payment_status && (
+          <span className={`${badgeCls} ${PAYMENT_STATUS_STYLES[e.payment_status] || PAYMENT_STATUS_STYLES.unpaid}`}>
+            {getPaymentStatusLabel(e.payment_status)}
+          </span>
+        )}
         {e.stale && (
           <span className={`${badgeCls} bg-warning/10 text-warning border-warning/30`}>
             <Clock size={11} /> Stale

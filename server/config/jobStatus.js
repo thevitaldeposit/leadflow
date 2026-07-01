@@ -5,67 +5,113 @@
 // systems (CommonJS here, ES modules there) can't share one file, so these MUST be
 // kept byte-for-byte identical in membership. Change one → change the other.
 //
-// PURE-REFACTOR NOTE: the memberships below are preserved EXACTLY as they were when
-// these Sets/arrays were scattered and duplicated across the codebase — including
-// the two known inconsistencies flagged for the upcoming job-lifecycle work. Do NOT
-// "fix" a membership here without a deliberate behavior-change review.
+// The rationalized lifecycle (see the job-lifecycle work):
+//   inquiry → pending_payment → booked → active_rental → awaiting_final_payment → completed
+//   plus terminal side-states: lost, spam.
+// pending_payment / awaiting_final_payment are free-text values (no migration to add).
+// The old mid-states scheduled / delivered / picked_up are RETIRED from active use
+// (nothing transitions INTO them) but kept defined for back-compat; existing rows on
+// them are mapped to the nearest active-chain state at READ time by mapLegacyJobStatus
+// (never destructively rewritten).
 //
-// KNOWN INCONSISTENCIES (intentionally preserved — resolve in the lifecycle prompt):
-//   • "Operational" means different things by side. The client's
-//     OPERATIONAL_JOB_STATUSES INCLUDES 'completed'; the server's active-job set
-//     (ACTIVE_JOB_STATUSES / ACTIVE_JOB_STATUS_SET) EXCLUDES it — 'completed' is
-//     handled separately for the repeat-customer ladder, inventory, and calendar.
-//   • "Terminal" means different things. TERMINAL_JOB_STATUSES = {completed, lost,
-//     spam}; CLOSED_LOST_STATUSES = {lost, spam} (no 'completed'); and the legacy
-//     fallback LEGACY_TERMINAL_STATUSES = {booked, lost, spam} runs over the OLD
-//     leads.status vocabulary, where 'booked' meant "deal closed / not an open lead".
+// The two historical inconsistencies are now RESOLVED here (and identically on the client):
+//   1. "Operational/active" EXCLUDES completed everywhere. A completed job is terminal —
+//      it must not appear in active-job lists, inventory, or the schedule.
+//   2. "Terminal" = { completed, lost, spam } everywhere. The legacy "booked = deal
+//      closed" meaning is dropped; booked now means a confirmed, in-flight job.
 
-// The 10-value job_status lifecycle vocabulary.
+// The full job_status lifecycle vocabulary (active chain + retired mid-states + terminal).
 const JOB_STATUS = Object.freeze({
   INQUIRY: 'inquiry',
   OPPORTUNITY: 'opportunity',
+  PENDING_PAYMENT: 'pending_payment',
   BOOKED: 'booked',
+  // Retired mid-states — kept for back-compat, mapped at read time. Nothing transitions in.
   SCHEDULED: 'scheduled',
   DELIVERED: 'delivered',
   ACTIVE_RENTAL: 'active_rental',
   PICKED_UP: 'picked_up',
+  AWAITING_FINAL_PAYMENT: 'awaiting_final_payment',
   COMPLETED: 'completed',
   LOST: 'lost',
   SPAM: 'spam',
 });
 
-// A confirmed job occupying the calendar / inventory, EXCLUDING completed. The array
-// form is needed for SQL `IN (…)` placeholder generation + params; the Set form is
-// for O(1) `.has()` membership. Previously duplicated (identical membership) as:
-//   customerService.OPERATIONAL_STATUSES, leads.OPERATIONAL_BOOKED_STATUSES,
-//   HomeServicesDashboard.PENDING_STATUSES, inventoryService.ACTIVE_JOB_STATUSES,
-//   and the inline schedule.js `job_status IN (...)` literal.
+// The separate PAYMENT axis (leads.payment_status). Independent of job_status so the
+// UI can show "work done, still owed" (operational stage + payment state as two
+// indicators). Derived from the job's invoices ("all settled" rollup) — see
+// services/jobLifecycle.js.
+const PAYMENT_STATUS = Object.freeze({
+  UNPAID: 'unpaid',
+  PARTIAL: 'partial',
+  PAID: 'paid',
+});
+
+// RESERVES a unit from the pool + occupies the calendar/schedule. Booked is PAID +
+// locked in (payment is what reserves the dumpster). EXCLUDES:
+//   • pending_payment — booking initiated but unpaid, nothing reserved yet;
+//   • awaiting_final_payment / picked_up — the unit is already back;
+//   • completed — terminal.
+// Legacy scheduled/delivered are kept so pre-lifecycle rows still occupy correctly
+// (scheduled ≈ booked, delivered ≈ active_rental). The array form drives SQL
+// `IN (…)` placeholder generation; the Set form is O(1) `.has()`.
 const ACTIVE_JOB_STATUSES = Object.freeze([
   JOB_STATUS.BOOKED,
   JOB_STATUS.SCHEDULED,
   JOB_STATUS.DELIVERED,
   JOB_STATUS.ACTIVE_RENTAL,
-  JOB_STATUS.PICKED_UP,
 ]);
 const ACTIVE_JOB_STATUS_SET = new Set(ACTIVE_JOB_STATUSES);
 
-// Operational INCLUDING completed — the client's isOperational / isOpportunity gate.
-// (No server site uses this today; exported for vocabulary parity with the client.)
-const OPERATIONAL_JOB_STATUSES = new Set([...ACTIVE_JOB_STATUSES, JOB_STATUS.COMPLETED]);
+// A real, committed JOB — the deal is closed (paid) and it's somewhere in the
+// fulfillment chain, EXCLUDING completed (handled separately for the repeat-customer
+// ladder) and the unpaid pending_payment stage. Drives the engagement "is a Job"
+// test and the customer lifecycle. Includes the post-return billing stage
+// (awaiting_final_payment) and the legacy picked_up so those still read as jobs.
+const CONFIRMED_JOB_STATUSES = Object.freeze([
+  JOB_STATUS.BOOKED,
+  JOB_STATUS.SCHEDULED,
+  JOB_STATUS.DELIVERED,
+  JOB_STATUS.ACTIVE_RENTAL,
+  JOB_STATUS.PICKED_UP,
+  JOB_STATUS.AWAITING_FINAL_PAYMENT,
+]);
+const CONFIRMED_JOB_STATUS_SET = new Set(CONFIRMED_JOB_STATUSES);
 
-// Confirmed but not yet delivered — the "delivering soon / upcoming pipeline" pair.
-// Previously duplicated as inline {booked, scheduled} tests in morningBrief and the
-// dashboard.
+// Operational = the owner has committed to the job and it's in flight, from the
+// moment booking is initiated (pending_payment) through the final-payment stage,
+// EXCLUDING completed (terminal) — the client's isOperational gate. Resolves
+// inconsistency #1: completed is NOT operational.
+const OPERATIONAL_JOB_STATUSES = new Set([JOB_STATUS.PENDING_PAYMENT, ...CONFIRMED_JOB_STATUSES]);
+
+// Confirmed + PAID but not yet delivered — the "delivering soon / upcoming pipeline"
+// pair. (Legacy scheduled kept alongside booked.)
 const UPCOMING_JOB_STATUSES = Object.freeze([JOB_STATUS.BOOKED, JOB_STATUS.SCHEDULED]);
 const UPCOMING_JOB_STATUS_SET = new Set(UPCOMING_JOB_STATUSES);
 
-// Non-actionable terminal states INCLUDING completed — the client's isActive gate.
+// Non-actionable terminal states — the client's isActive gate. Standardized
+// (inconsistency #2): { completed, lost, spam } everywhere.
 const TERMINAL_JOB_STATUSES = new Set([JOB_STATUS.COMPLETED, JOB_STATUS.LOST, JOB_STATUS.SPAM]);
 
-// Closed-lost / dead job_status values, EXCLUDING completed. Previously
-// customerService.TERMINAL_STATUSES; also applied to the legacy leads.status column
-// (lost/spam exist there with the same meaning).
+// Closed-lost / dead job_status values, EXCLUDING completed. Also applied to the
+// legacy leads.status column (lost/spam exist there with the same meaning).
 const CLOSED_LOST_STATUSES = new Set([JOB_STATUS.LOST, JOB_STATUS.SPAM]);
+
+// Map a RETIRED mid-state to its nearest active-chain equivalent for READ-time
+// display + lifecycle logic. Non-destructive — the stored row is never rewritten;
+// callers that care about the rationalized chain (labels, the lifecycle engine)
+// route the stored value through this. Active-chain and terminal values pass through.
+//   scheduled  → booked                  (confirmed, awaiting delivery)
+//   delivered  → active_rental           (a unit is out)
+//   picked_up  → awaiting_final_payment  (the unit is back; billing/closeout)
+const LEGACY_STATE_MAP = Object.freeze({
+  [JOB_STATUS.SCHEDULED]: JOB_STATUS.BOOKED,
+  [JOB_STATUS.DELIVERED]: JOB_STATUS.ACTIVE_RENTAL,
+  [JOB_STATUS.PICKED_UP]: JOB_STATUS.AWAITING_FINAL_PAYMENT,
+});
+function mapLegacyJobStatus(jobStatus) {
+  return LEGACY_STATE_MAP[jobStatus] || jobStatus || null;
+}
 
 // ── Legacy leads.status vocabulary (parallel column, being phased out) ─────────
 // job_status is the source of truth for the Phase-2 UI; a handful of readers still
@@ -82,8 +128,8 @@ const LEGACY_STATUS = Object.freeze({
 });
 
 // Legacy status values meaning "not an active lead" — the fallback terminal set used
-// when a lead has no job_status yet. Previously verticalConfig's inline
-// new Set(['booked','lost','spam']) and morningPriorities.TERMINAL_STATUSES.
+// when a lead has no job_status yet. (On the legacy column, 'booked' meant "deal
+// closed / not an open lead"; kept only for that column's null-job_status fallback.)
 const LEGACY_TERMINAL_STATUSES = new Set([
   LEGACY_STATUS.BOOKED,
   LEGACY_STATUS.LOST,
@@ -103,13 +149,17 @@ const ENGAGEMENT_STATUS = Object.freeze({
 
 module.exports = {
   JOB_STATUS,
+  PAYMENT_STATUS,
   ACTIVE_JOB_STATUSES,
   ACTIVE_JOB_STATUS_SET,
+  CONFIRMED_JOB_STATUSES,
+  CONFIRMED_JOB_STATUS_SET,
   OPERATIONAL_JOB_STATUSES,
   UPCOMING_JOB_STATUSES,
   UPCOMING_JOB_STATUS_SET,
   TERMINAL_JOB_STATUSES,
   CLOSED_LOST_STATUSES,
+  mapLegacyJobStatus,
   LEGACY_STATUS,
   LEGACY_TERMINAL_STATUSES,
   ENGAGEMENT_STATUS,

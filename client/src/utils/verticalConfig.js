@@ -13,15 +13,20 @@ export const HOME_SERVICES_STATUSES = [
   { value: 'spam', label: 'Spam' },
 ];
 
-// Phase 2: full job lifecycle
+// Phase 2: full job lifecycle. The active chain is
+//   inquiry → pending_payment → booked → active_rental → awaiting_final_payment → completed.
+// scheduled / delivered / picked_up are RETIRED mid-states — kept for back-compat
+// labels only (nothing transitions into them; legacy rows map at read time).
 export const JOB_STATUSES = [
   { value: 'inquiry', label: 'Inquiry' },
   { value: 'opportunity', label: 'Opportunity' },
+  { value: 'pending_payment', label: 'Pending Payment' },
   { value: 'booked', label: 'Booked' },
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'delivered', label: 'Delivered' },
   { value: 'active_rental', label: 'Active Rental' },
   { value: 'picked_up', label: 'Picked Up' },
+  { value: 'awaiting_final_payment', label: 'Awaiting Final Payment' },
   { value: 'completed', label: 'Completed' },
   // Non-job terminal states
   { value: 'lost', label: 'Lost' },
@@ -34,51 +39,84 @@ export const JOB_STATUSES = [
 // (that CommonJS module can't import this ES module) — keep the two IDENTICAL in
 // membership. Any change here must be mirrored there and vice-versa.
 //
-// Memberships are preserved EXACTLY as they were when these Sets were duplicated
-// across the app, including two intentional inconsistencies left for the upcoming
-// job-lifecycle work:
-//   • OPERATIONAL_JOB_STATUSES (here) INCLUDES 'completed'; the server's active-job
-//     set EXCLUDES it ('completed' is handled separately for inventory + the
-//     repeat-customer ladder). ACTIVE_JOB_STATUS_SET below is the completed-excluded set.
-//   • TERMINAL_JOB_STATUSES = {completed, lost, spam}; CLOSED_LOST_STATUSES =
-//     {lost, spam}; LEGACY_TERMINAL_STATUSES = {booked, lost, spam} runs over the
-//     legacy leads.status column, where 'booked' meant "deal closed / not an open lead".
+// The rationalized lifecycle:
+//   inquiry → pending_payment → booked → active_rental → awaiting_final_payment → completed
+//   plus terminal side-states lost, spam. scheduled/delivered/picked_up are RETIRED
+//   mid-states (labels only; legacy rows map at read time via mapLegacyJobStatus).
+// The two historical inconsistencies are RESOLVED (identically on the server):
+//   1. OPERATIONAL/active EXCLUDES 'completed' — a completed job is terminal and must
+//      not appear in active-job lists, inventory, or the schedule.
+//   2. TERMINAL = {completed, lost, spam} everywhere; the legacy "booked = deal closed"
+//      meaning is dropped (booked now means a confirmed, in-flight job).
 
-// The 10 job_status values as named constants (same strings as JOB_STATUSES above).
+// The job_status values as named constants (same strings as JOB_STATUSES above).
 export const JOB_STATUS = Object.freeze({
   INQUIRY: 'inquiry',
   OPPORTUNITY: 'opportunity',
+  PENDING_PAYMENT: 'pending_payment',
   BOOKED: 'booked',
   SCHEDULED: 'scheduled',
   DELIVERED: 'delivered',
   ACTIVE_RENTAL: 'active_rental',
   PICKED_UP: 'picked_up',
+  AWAITING_FINAL_PAYMENT: 'awaiting_final_payment',
   COMPLETED: 'completed',
   LOST: 'lost',
   SPAM: 'spam',
 });
 
-// A confirmed job occupying the calendar/inventory, EXCLUDING completed (ordered
-// array for SQL/params parity with the server, plus a Set for O(1) membership).
+// The separate PAYMENT axis (leads.payment_status) — shown as a second indicator
+// alongside job_status so "work done, still owed" is visible.
+export const PAYMENT_STATUS = Object.freeze({
+  UNPAID: 'unpaid',
+  PARTIAL: 'partial',
+  PAID: 'paid',
+});
+
+// RESERVES a unit + occupies the calendar/inventory. Booked is PAID + reserved.
+// EXCLUDES pending_payment (nothing reserved pre-payment), awaiting_final_payment /
+// picked_up (unit already back), and completed. Legacy scheduled/delivered kept so
+// pre-lifecycle rows still occupy correctly.
 export const ACTIVE_JOB_STATUSES = Object.freeze([
-  JOB_STATUS.BOOKED, JOB_STATUS.SCHEDULED, JOB_STATUS.DELIVERED,
-  JOB_STATUS.ACTIVE_RENTAL, JOB_STATUS.PICKED_UP,
+  JOB_STATUS.BOOKED, JOB_STATUS.SCHEDULED, JOB_STATUS.DELIVERED, JOB_STATUS.ACTIVE_RENTAL,
 ]);
 export const ACTIVE_JOB_STATUS_SET = new Set(ACTIVE_JOB_STATUSES);
 
-// Operational INCLUDING completed — the job is confirmed, no longer a sales lead.
-// Used by getLeadActionState (isOperational / isOpportunity).
-export const OPERATIONAL_JOB_STATUSES = new Set([...ACTIVE_JOB_STATUSES, JOB_STATUS.COMPLETED]);
+// A real, committed JOB (deal closed/paid, in fulfillment), EXCLUDING completed and
+// the unpaid pending_payment stage. Includes the post-return billing stage and
+// legacy picked_up so those still read as jobs.
+export const CONFIRMED_JOB_STATUSES = Object.freeze([
+  JOB_STATUS.BOOKED, JOB_STATUS.SCHEDULED, JOB_STATUS.DELIVERED,
+  JOB_STATUS.ACTIVE_RENTAL, JOB_STATUS.PICKED_UP, JOB_STATUS.AWAITING_FINAL_PAYMENT,
+]);
+export const CONFIRMED_JOB_STATUS_SET = new Set(CONFIRMED_JOB_STATUSES);
 
-// Confirmed but not yet delivered — the delivering-soon / upcoming-pipeline pair.
+// Operational = committed + in flight, from booking initiation (pending_payment)
+// through the final-payment stage, EXCLUDING completed. Used by getLeadActionState
+// (isOperational / isOpportunity).
+export const OPERATIONAL_JOB_STATUSES = new Set([JOB_STATUS.PENDING_PAYMENT, ...CONFIRMED_JOB_STATUSES]);
+
+// Confirmed + PAID but not yet delivered — the delivering-soon / upcoming-pipeline pair.
 export const UPCOMING_JOB_STATUSES = Object.freeze([JOB_STATUS.BOOKED, JOB_STATUS.SCHEDULED]);
 export const UPCOMING_JOB_STATUS_SET = new Set(UPCOMING_JOB_STATUSES);
 
-// Non-actionable terminal states INCLUDING completed — used by getLeadActionState (isActive).
+// Non-actionable terminal states — used by getLeadActionState (isActive).
 export const TERMINAL_JOB_STATUSES = new Set([JOB_STATUS.COMPLETED, JOB_STATUS.LOST, JOB_STATUS.SPAM]);
 
 // Closed-lost / dead job_status values, EXCLUDING completed.
 export const CLOSED_LOST_STATUSES = new Set([JOB_STATUS.LOST, JOB_STATUS.SPAM]);
+
+// Map a RETIRED mid-state to its nearest active-chain equivalent for read-time
+// display + logic (non-destructive). scheduled→booked, delivered→active_rental,
+// picked_up→awaiting_final_payment; active-chain/terminal values pass through.
+const LEGACY_STATE_MAP = Object.freeze({
+  [JOB_STATUS.SCHEDULED]: JOB_STATUS.BOOKED,
+  [JOB_STATUS.DELIVERED]: JOB_STATUS.ACTIVE_RENTAL,
+  [JOB_STATUS.PICKED_UP]: JOB_STATUS.AWAITING_FINAL_PAYMENT,
+});
+export function mapLegacyJobStatus(jobStatus) {
+  return LEGACY_STATE_MAP[jobStatus] || jobStatus || null;
+}
 
 // Legacy leads.status vocabulary (parallel column, being phased out; read only as a
 // fallback when job_status is null). job_status drives the Phase-2 UI.
@@ -109,16 +147,31 @@ export const ENGAGEMENT_STATUS = Object.freeze({
 export const JOB_STATUS_STYLES = {
   inquiry: 'bg-brand/10 text-brand border-brand/30',
   opportunity: 'bg-warning/10 text-warning border-warning/30',
+  // Booking initiated, awaiting payment (nothing reserved yet) → amber.
+  pending_payment: 'bg-warning/10 text-warning border-warning/30',
   booked: 'bg-success/10 text-success border-success/30',
   scheduled: 'bg-info/10 text-info border-info/30',
   // Job is live or done → green (success), per the product's status color language.
   delivered: 'bg-success/10 text-success border-success/30',
   active_rental: 'bg-success/10 text-success border-success/30',
   picked_up: 'bg-success/10 text-success border-success/30',
+  // Work done, balance owed → amber (not yet complete).
+  awaiting_final_payment: 'bg-warning/10 text-warning border-warning/30',
   completed: 'bg-success/10 text-success border-success/30',
   lost: 'bg-danger/10 text-danger border-danger/30',
   spam: 'bg-surface-2 text-muted border-divider',
 };
+
+// The PAYMENT axis, rendered as a second indicator next to job_status.
+export const PAYMENT_STATUS_LABELS = { unpaid: 'Unpaid', partial: 'Partially Paid', paid: 'Paid' };
+export const PAYMENT_STATUS_STYLES = {
+  unpaid: 'bg-danger/10 text-danger border-danger/30',
+  partial: 'bg-warning/10 text-warning border-warning/30',
+  paid: 'bg-success/10 text-success border-success/30',
+};
+export function getPaymentStatusLabel(value) {
+  return PAYMENT_STATUS_LABELS[value] || 'Unpaid';
+}
 
 export const HOME_SERVICES_STATUS_STYLES = {
   new: 'bg-brand/10 text-brand border-brand/30',
@@ -562,6 +615,19 @@ export function getLeadActionState(lead, now = new Date()) {
     recommendation = 'Customer requested reschedule — approve?';
   }
 
+  // A detected cancellation cue held for the owner to confirm or disregard (mirrors
+  // the reschedule-approval pattern — never auto-cancels).
+  const cancelRequested = !!vd.cancelRequest && !vd.cancelDismissedAt;
+  if (cancelRequested) {
+    recommendation = 'Customer expressed intent to cancel — confirm or disregard';
+  }
+
+  // PAYMENT axis + the two new lifecycle stages, surfaced for the two-indicator UI
+  // and the pending-payment / balance-chaser nudges.
+  const paymentStatus = lead?.payment_status || 'unpaid';
+  const pendingPayment = jobStatus === JOB_STATUS.PENDING_PAYMENT;
+  const awaitingFinalPayment = jobStatus === JOB_STATUS.AWAITING_FINAL_PAYMENT;
+
   // Buckets used by Today's Priorities — ordered by priority floor below.
   // asap sits above follow_up_due so ASAP customers are never buried.
   let bucket = 'other';
@@ -636,6 +702,10 @@ export function getLeadActionState(lead, now = new Date()) {
     isOperational,
     isDead,
     rescheduleRequested,
+    cancelRequested,
+    paymentStatus,
+    pendingPayment,
+    awaitingFinalPayment,
     jobStatus,
   };
 }

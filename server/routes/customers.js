@@ -16,6 +16,7 @@ const {
 } = require('../services/customerService');
 const { resolveEffectivePricing } = require('../services/pricingService');
 const { logActivity } = require('../services/activityLog');
+const { advanceDueDeliveries } = require('../services/jobLifecycle');
 const { JOB_STATUS, CLOSED_LOST_STATUSES } = require('../config/jobStatus');
 
 // Customers is a web-dashboard (and, later, authenticated iOS) surface. Unlike
@@ -29,6 +30,9 @@ router.get('/', (req, res) => {
   try {
     const businessId = req.business.id;
     reconcileCustomersForBusiness(businessId);
+    // Forward-advance any booked jobs whose delivery date has arrived (booked →
+    // active_rental) before rendering — reconcile-on-read, non-destructive.
+    advanceDueDeliveries(businessId);
     const { status, search } = req.query;
     res.json(listCustomers(businessId, { status, search }));
   } catch (err) {
@@ -43,6 +47,7 @@ router.get('/:id', (req, res) => {
   try {
     const businessId = req.business.id;
     reconcileCustomersForBusiness(businessId);
+    advanceDueDeliveries(businessId);
     const detail = getCustomerDetail(businessId, req.params.id);
     if (!detail) return res.status(404).json({ error: 'Customer not found' });
 

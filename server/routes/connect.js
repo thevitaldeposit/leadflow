@@ -5,6 +5,7 @@ const { logActivity } = require('../services/activityLog');
 const { emitToBusiness } = require('../socket');
 const connectService = require('../services/connectService');
 const invoiceService = require('../services/invoiceService');
+const jobLifecycle = require('../services/jobLifecycle');
 
 // ── Stripe Connect (Express) — owner onboarding + Connect webhook ──────────────
 // Owner-facing endpoints (authed) let a business connect its own Stripe to accept
@@ -111,6 +112,9 @@ function applyPaidIntent(accountId, paymentIntent) {
     if (result.invoice.lead_id) {
       logActivity(result.invoice.lead_id, 'invoice_paid', `Invoice ${result.invoice.invoice_number} paid online`);
     }
+    // Advance the job's lifecycle now that money landed (pending_payment → booked and
+    // reserve+schedule; awaiting_final_payment → completed once fully paid).
+    try { jobLifecycle.advanceForInvoice(business.id, result.invoice); } catch (e) { console.error('[connect] advanceForInvoice error:', e.message); }
     emitToBusiness(business.id, 'invoice_updated', { id: result.invoice.id, paid: true });
     console.log(`[connect] invoice ${result.invoice.invoice_number} (business ${business.id}) marked paid via ${paymentIntent.id}`);
   }

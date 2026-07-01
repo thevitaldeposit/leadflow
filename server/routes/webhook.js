@@ -10,6 +10,7 @@ const { transcribe } = require('../services/transcriptionService');
 const { emitToBusiness } = require('../socket');
 const { resolveDeliveryDate, parseRentalDays, addDaysToISO, resolvePickupPhrase, enforceAutoBookAvailability } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
+const { sendPaymentLinkEmail } = require('../services/emailService');
 const { logActivity, formatDuration } = require('../services/activityLog');
 const { getTimezone } = require('../services/settingsService');
 const { getBusinessIdByTwilioNumber, getDefaultBusinessId } = require('../services/businesses');
@@ -443,16 +444,25 @@ async function processRecording(payload) {
         console.warn(`[webhook] Auto-book BLOCKED for lead ${lead.id} — no ${verticalData.dumpsterSize || 'matching size'} available for ${lead.delivery_date}→${lead.pickup_date}; flagged as inventory conflict, no payment link sent`);
       }
 
-      // Send payment SMS only for auto-booked jobs that passed the availability
-      // check. A blocked booking has had verticalData.autoBooked cleared above.
+      // Auto-book now INITIATES booking (→ pending_payment) and EMAILS the payment
+      // link — payment is what reserves the dumpster. Nothing is reserved or put on
+      // the schedule until the customer pays (pending_payment is not an occupying
+      // status). SMS is retired for this while A2P approval is pending — sendPaymentSms
+      // stays defined but unused here. Auto-book's TRIGGER threshold is unchanged;
+      // only the resulting status and the notify channel (SMS → email) change. A
+      // blocked booking has had verticalData.autoBooked cleared above.
       if (verticalData.autoBooked === true && !bookingBlocked) {
-        sendPaymentSms(lead).then((smsResult) => {
-          if (smsResult.sent) {
+        db.prepare("UPDATE leads SET job_status = 'pending_payment', updated_at = ? WHERE id = ?")
+          .run(new Date().toISOString(), lead.id);
+        lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+        logActivity(lead.id, 'status_change', 'Auto-booked — payment link emailed (payment reserves the dumpster)');
+        sendPaymentLinkEmail(lead).then((result) => {
+          if (result.sent) {
             lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
           }
           emitToBusiness(lead.business_id, 'new_lead', lead);
         }).catch((err) => {
-          console.error('[webhook] SMS error:', err);
+          console.error('[webhook] payment email error:', err);
           emitToBusiness(lead.business_id, 'new_lead', lead);
         });
       } else {

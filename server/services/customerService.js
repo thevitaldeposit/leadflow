@@ -1,7 +1,7 @@
 const db = require('../db/database');
 const {
   JOB_STATUS,
-  ACTIVE_JOB_STATUS_SET,
+  CONFIRMED_JOB_STATUS_SET,
   CLOSED_LOST_STATUSES,
   LEGACY_STATUS,
   ENGAGEMENT_STATUS,
@@ -16,9 +16,10 @@ const {
 // which the customers routes call before every list/detail read.
 
 // Job-status GROUP membership comes from the canonical module (server/config/jobStatus):
-//   ACTIVE_JOB_STATUS_SET = a confirmed job occupying the calendar/inventory,
+//   CONFIRMED_JOB_STATUS_SET = a real, committed job (deal closed/paid, in fulfillment),
 //     EXCLUDING completed ('completed' is handled separately so it can drive the
-//     repeat-customer ladder).
+//     repeat-customer ladder) and the unpaid pending_payment stage. Includes the
+//     post-return billing stage awaiting_final_payment and legacy picked_up.
 //   CLOSED_LOST_STATUSES  = {lost, spam} — applied below to job_status AND the legacy
 //     leads.status column (both vocabularies share those two values).
 
@@ -67,9 +68,11 @@ function deriveStatus(leadRows) {
     const js = l.job_status || null;
     const legacy = l.status || null;
     if (js === JOB_STATUS.COMPLETED) { completed++; continue; }
-    if (ACTIVE_JOB_STATUS_SET.has(js) || legacy === LEGACY_STATUS.BOOKED) { active++; continue; }
+    if (CONFIRMED_JOB_STATUS_SET.has(js) || legacy === LEGACY_STATUS.BOOKED) { active++; continue; }
     if (CLOSED_LOST_STATUSES.has(js) || CLOSED_LOST_STATUSES.has(legacy)) continue;
-    if (js === JOB_STATUS.OPPORTUNITY) { opp++; continue; }
+    // pending_payment = booking initiated but unpaid (a live, hot deal, not yet a job);
+    // ranks with opportunities on the customer ladder.
+    if (js === JOB_STATUS.OPPORTUNITY || js === JOB_STATUS.PENDING_PAYMENT) { opp++; continue; }
     leadish++; // inquiry / new / null — a live but un-quoted lead
   }
   if (completed >= 2) return 'repeat';
@@ -226,6 +229,10 @@ function toJob(lead) {
     pickup_date: lead.pickup_date || null,
     estimated_revenue: leadRevenue(lead),
     paid_at: lead.paid_at || null,
+    // PAYMENT axis (independent of job_status): 'unpaid' | 'partial' | 'paid'.
+    payment_status: lead.payment_status || 'unpaid',
+    // Dumpsters currently out for the job (swap-safe lifecycle); null until active_rental.
+    units_out: lead.units_out == null ? null : lead.units_out,
     // Lightweight call-intelligence so the profile can render the booking-signals
     // panel (most recent call) and per-row hints without a second round-trip. The
     // heavy bits (recording, transcript, full summary) are lazy-loaded per call
@@ -341,13 +348,19 @@ function paidInvoiceContextForCustomer(businessId, customerId) {
 // completion still also requires the pickup date to have passed.
 function leadIsCompleted(lead, paidCtx) {
   if ((lead.job_status || '') === JOB_STATUS.COMPLETED) return true;
-  const paidByInvoice = !!paidCtx
-    && (paidCtx.hasUnlinked || paidCtx.leadIds.has(lead.id));
-  const paid = !!lead.paid_at || paidByInvoice;
-  return paid && pickupHasPassed(lead.pickup_date);
+  // Legacy auto-complete: a FULLY-paid job whose pickup date has passed. Completion is
+  // gated on payment (a lingering balance must never read as completed), so "fully
+  // paid" here means the payment axis is 'paid' (all invoices settled) — kept fresh on
+  // the row by jobLifecycle. Falls back to paid_at / a covering paid invoice only for
+  // rows that predate the payment_status column.
+  const paidByInvoice = !!paidCtx && (paidCtx.hasUnlinked || paidCtx.leadIds.has(lead.id));
+  const fullyPaid = lead.payment_status
+    ? lead.payment_status === 'paid'
+    : (!!lead.paid_at || paidByInvoice);
+  return fullyPaid && pickupHasPassed(lead.pickup_date);
 }
 function leadIsBooked(lead) {
-  return ACTIVE_JOB_STATUS_SET.has(lead.job_status) || lead.status === LEGACY_STATUS.BOOKED;
+  return CONFIRMED_JOB_STATUS_SET.has(lead.job_status) || lead.status === LEGACY_STATUS.BOOKED;
 }
 function leadIsClosedLost(lead) {
   return CLOSED_LOST_STATUSES.has(lead.job_status);
@@ -513,6 +526,11 @@ function shapeEngagement(eng) {
     booked_lead_id: jobLead ? jobLead.id : null,
     booked_paid_at: jobLead ? (jobLead.paid_at || null) : null,
     booked_payment_sms_sent_at: jobLead ? (jobLead.payment_sms_sent_at || null) : null,
+    booked_payment_link_emailed_at: jobLead ? (jobLead.payment_link_emailed_at || null) : null,
+    // The fine job_status STAGE — the operational axis shown alongside the payment
+    // axis. From the booked lead for a job, else the representative call (so a
+    // pending_payment inquiry surfaces its stage + payment controls before it books).
+    job_stage: (jobLead ? jobLead.job_status : rep.job_status) || null,
     booking_signals: Array.isArray(vd.bookingSignalsDetected) ? vd.bookingSignalsDetected : [],
     booking_confidence: vd.bookingConfidence || null,
     intent_level: vd.intentLevel || null,
@@ -627,13 +645,47 @@ function getCustomerDetail(businessId, customerId) {
   ).all(customerId, businessId);
 
   const activeLeads = leadRows.filter((l) => !l.discarded);
+
+  // Refresh the PAYMENT axis for this customer's confirmed/pending job leads at read
+  // time (reconcile-on-read) so completion-gating + the two-axis display reflect the
+  // latest invoice state. jobLifecycle is required lazily to avoid a load-time cycle
+  // (it depends on this module); it mutates each lead row (payment_status / paid_at)
+  // in place, so the fresh values feed aggregate/jobs/engagements below.
+  try {
+    const { recomputeLeadPaymentStatus } = require('./jobLifecycle');
+    for (const l of activeLeads) {
+      if (CONFIRMED_JOB_STATUS_SET.has(l.job_status) || l.job_status === JOB_STATUS.PENDING_PAYMENT || l.paid_at) {
+        recomputeLeadPaymentStatus(businessId, l);
+      }
+    }
+  } catch { /* jobLifecycle unavailable — fall back to stored columns */ }
+
   const agg = aggregateLeads(activeLeads);
   const jobs = activeLeads.map(toJob);
   // Engagements: the customer's calls grouped into inquiry→job→completed records.
-  // A job completes on payment + pickup-passed; payment may live on the lead
-  // (leads.paid_at) or on a paid invoice for this customer (paidCtx).
+  // A job completes on full payment + pickup-passed; payment may live on the lead
+  // (leads.paid_at / payment_status) or on a paid invoice for this customer (paidCtx).
   const paidCtx = paidInvoiceContextForCustomer(businessId, customer.id);
   const engagements = engagementsForLeads(activeLeads, paidCtx);
+
+  // Attach the derived PAYMENT axis + swap-safe unit count to each engagement (the
+  // job's "all invoices settled" rollup — leads.paid_at may live on the booked lead).
+  try {
+    const { paymentStatusFromInvoices } = require('./jobLifecycle');
+    for (const e of engagements) {
+      const bookedLead = e.booked_lead_id ? activeLeads.find((l) => l.id === e.booked_lead_id) : null;
+      e.payment_status = paymentStatusFromInvoices(businessId, {
+        leadIds: e.lead_ids,
+        customerId: customer.id,
+        leadPaidAt: (bookedLead && bookedLead.paid_at) || e.paid_at || null,
+      });
+      e.units_out = bookedLead && bookedLead.units_out != null ? bookedLead.units_out : null;
+      let bvd = {};
+      try { bvd = bookedLead && bookedLead.vertical_data ? JSON.parse(bookedLead.vertical_data) : {}; } catch { bvd = {}; }
+      e.dump_tickets = Array.isArray(bvd.dumpTickets) ? bvd.dumpTickets : [];
+      e.overage_needs_rate = !!bvd.overageNeedsRate;
+    }
+  } catch { /* jobLifecycle unavailable — engagements omit the payment axis */ }
 
   // Addresses: the customer's primary plus every distinct job address.
   const addrSet = new Set();

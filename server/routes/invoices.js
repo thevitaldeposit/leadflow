@@ -6,6 +6,7 @@ const { emitToBusiness } = require('../socket');
 const { sendInvoiceEmail } = require('../services/emailService');
 const { sendInvoiceSms } = require('../services/smsService');
 const invoiceService = require('../services/invoiceService');
+const jobLifecycle = require('../services/jobLifecycle');
 
 // Owner-facing invoice management. Like /api/customers, this is a hard-auth
 // dashboard surface (and, later, authenticated iOS) — it must never fall back to
@@ -184,6 +185,9 @@ router.post('/:id/mark-paid', (req, res) => {
     const result = invoiceService.markPaid(req.business.id, req.params.id, req.body || {});
     if (result.error === 'not_found') return res.status(404).json({ error: 'Invoice not found' });
     if (result.invoice.lead_id) logActivity(result.invoice.lead_id, 'invoice_paid', `Invoice ${result.invoice.invoice_number} marked paid`);
+    // Recompute the job's payment axis + auto-advance its lifecycle (pending_payment →
+    // booked and reserve+schedule; awaiting_final_payment → completed once fully paid).
+    try { jobLifecycle.advanceForInvoice(req.business.id, result.invoice); } catch (e) { console.error('[invoices] advanceForInvoice error:', e.message); }
     emitToBusiness(req.business.id, 'invoice_updated', { id: Number(req.params.id) });
     res.json(result.invoice);
   } catch (err) {

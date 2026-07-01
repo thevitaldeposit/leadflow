@@ -141,11 +141,43 @@ function formatDeliveryDate(value) {
 // tier-first, then most-overdue follow-up, then highest revenue. See getAttentionTier.
 
 const MS_HOUR = 60 * 60 * 1000;
+const MS_DAY = 24 * MS_HOUR;
+// How long an outstanding balance may linger before the balance-chaser nudge fires.
+const BALANCE_CHASE_DAYS = 3;
 
 // End of a local calendar day (23:59:59.999) — used as the anchor for ASAP
 // delivery-date expiry so the grace period counts from the delivery day's close.
 function endOfLocalDay(d) {
   const c = new Date(d); c.setHours(23, 59, 59, 999); return c;
+}
+
+// Parse a SQLite/ISO timestamp to ms (naive "YYYY-MM-DD HH:MM:SS" is UTC).
+function tsToMs(ts) {
+  if (!ts) return null;
+  const s = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(ts) ? `${ts.replace(' ', 'T')}Z` : ts;
+  const ms = new Date(s).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+function daysSince(ts, now) {
+  const ms = tsToMs(ts);
+  return ms == null ? 0 : (now.getTime() - ms) / MS_DAY;
+}
+// True once `now` is on a later calendar day than `sinceTs` AND ≥18h have elapsed —
+// approximates "by the next business day" (without weekend logic) for the
+// pending-payment nudge.
+function isPastNextDay(sinceTs, now) {
+  const ms = tsToMs(sinceTs);
+  if (ms == null) return false;
+  const sinceDay = new Date(ms); sinceDay.setHours(0, 0, 0, 0);
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  return today.getTime() > sinceDay.getTime() && (now.getTime() - ms) >= 18 * MS_HOUR;
+}
+// The customer's first name for a nudge, or a neutral fallback.
+function leadFirstName(lead, vd) {
+  const n = vd.customerName
+    || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ')
+    || 'This customer';
+  return String(n).split(' ')[0] || 'This customer';
 }
 
 // True when a delivery date falls on today or tomorrow (local). Used to surface
@@ -257,14 +289,41 @@ function classifyForQueue(e, now, cfg) {
   return { inQueue: anyActive, expired: !anyActive, reason: null };
 }
 
-// Operational risk on a booked/scheduled job that jumps it to the top tier:
-// (1) a pending call-driven reschedule request the owner must approve/reject, or
-// (2) a job delivering today/tomorrow still missing the delivery address or payment.
+// Operational risk on an in-flight job that jumps it to the top tier. In priority
+// order: (1) a detected cancellation cue to confirm/disregard; (2) a held reschedule
+// request; (3) a pending-payment job that hasn't paid by the next business day (hot
+// lead going cold); (4) a lingering outstanding balance (balance chaser — completion
+// is blocked until it's settled); (5) a job delivering today/tomorrow still missing
+// the delivery address (or, for legacy unpaid rows, payment).
 function bookedAttentionReason(lead, vd, now) {
-  if (!UPCOMING_JOB_STATUS_SET.has(lead.job_status)) return null;
-  // A held reschedule request surfaces regardless of delivery date — the booked
-  // schedule wasn't changed (see the server guard); the owner decides.
+  const js = lead.job_status;
+
+  // (1) Cancellation cue — confirm-first decision (never auto-cancels).
+  if (vd.cancelRequest && !vd.cancelDismissedAt) {
+    return 'Customer expressed intent to cancel — confirm or disregard';
+  }
+  // (2) Held reschedule request — booked schedule unchanged; owner decides.
   if (vd.rescheduleRequest) return 'Customer requested reschedule — approve?';
+
+  // (3) Pending-payment SALES nudge: booking initiated but unpaid by the next
+  // business day. Nothing is reserved during pending_payment — this is about not
+  // losing the deal, separate from inventory.
+  if (js === JOB_STATUS.PENDING_PAYMENT && lead.payment_status !== 'paid' && !lead.paid_at) {
+    return isPastNextDay(lead.updated_at || lead.created_at, now)
+      ? "Customer expressed high intent but hasn't paid — follow up"
+      : null;
+  }
+
+  // (4) Balance chaser: work done, money still owed for more than a few days.
+  if (js === JOB_STATUS.AWAITING_FINAL_PAYMENT && lead.payment_status !== 'paid') {
+    return daysSince(lead.updated_at || lead.created_at, now) >= BALANCE_CHASE_DAYS
+      ? `${leadFirstName(lead, vd)} has an outstanding balance — job can't complete until it's settled`
+      : null;
+  }
+
+  // (5) Imminent delivery still missing the delivery address (booked jobs are paid
+  // by the payment gate, so payment is only flagged for legacy unpaid rows).
+  if (!UPCOMING_JOB_STATUS_SET.has(js)) return null;
   const d = parseLocalDate(lead.delivery_date || vd.deliveryDateISO || vd.deliveryDate);
   if (!d) return null;
   const today = new Date(now); today.setHours(0, 0, 0, 0);
@@ -272,7 +331,7 @@ function bookedAttentionReason(lead, vd, now) {
   if (d.getTime() !== today.getTime() && d.getTime() !== tomorrow.getTime()) return null;
   const missing = [];
   if (!vd.deliveryAddress) missing.push('delivery address');
-  if (!lead.paid_at) missing.push('payment');
+  if (lead.payment_status !== 'paid' && !lead.paid_at) missing.push('payment');
   if (missing.length === 0) return null;
   const when = d.getTime() === today.getTime() ? 'today' : 'tomorrow';
   return `Delivering ${when} — missing ${missing.join(' & ')}`;
@@ -538,13 +597,16 @@ function CallButton({ lead, name }) {
 
 // Compact Action Queue row. Shows intent/critical badge, name + phone, the
 // operational reason it's in the queue, a time indicator, and call + dismiss.
-function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onMissedCallClick }) {
+function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onCancel, onMissedCallClick }) {
   const navigate = useNavigate();
   const isMissedCall = lead.call_type === 'missed_call';
   const isVoicemail = lead.call_type === 'voicemail';
   // A pending call-driven reschedule swaps the call/dismiss actions for an
   // explicit Approve / Reject decision (see handleRescheduleDecision).
   const isReschedule = !!state.rescheduleRequested;
+  // A detected cancellation cue swaps in an explicit Confirm / Disregard decision
+  // (see handleCancelDecision). Never auto-cancels — the owner decides.
+  const isCancel = !!state.cancelRequested;
   const name = getLeadName(lead);
   // Missed calls often have no name yet — fall back to the caller's number.
   const displayName = (isMissedCall && name === 'Unknown')
@@ -616,7 +678,28 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onMi
         </span>
       )}
       <div className="flex items-center justify-end gap-0.5 flex-shrink-0 w-14" onClick={e => e.stopPropagation()}>
-        {isReschedule ? (
+        {isCancel ? (
+          <>
+            {/* Confirm moves the job to Lost; Disregard leaves it unchanged and
+                stops the cue from re-surfacing. Confirm-first — never auto-cancels. */}
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(lead, true); }}
+              className="p-1.5 rounded-lg text-danger hover:bg-danger/10 transition-colors"
+              title="Confirm cancellation (mark lost)"
+              aria-label="Confirm cancellation"
+            >
+              <Check size={15} />
+            </button>
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(lead, false); }}
+              className="p-1.5 rounded-lg text-muted hover:text-content hover:bg-surface-2 transition-colors"
+              title="Disregard — keep the job"
+              aria-label="Disregard cancellation"
+            >
+              <X size={14} />
+            </button>
+          </>
+        ) : isReschedule ? (
           <>
             {/* Approve applies the requested schedule (owner edit — allowed by the
                 server guard); Reject leaves the booked schedule unchanged. Either
@@ -1323,6 +1406,26 @@ export default function HomeServicesDashboard() {
     }
   }, []);
 
+  // Confirm or disregard a detected cancellation cue (confirm-first — never
+  // auto-cancels). Confirm moves the job to Lost; disregard stamps the call so the
+  // cue stops re-surfacing and leaves the job untouched. Either way the item drops
+  // out of the Action Queue.
+  const handleCancelDecision = useCallback(async (lead, confirm) => {
+    // Optimistically clear the cue so the row leaves the queue immediately.
+    const vd = parseVerticalData(lead);
+    const clearedVd = JSON.stringify({ ...vd, cancelRequest: null, cancelDismissedAt: new Date().toISOString() });
+    setLeads(prev => prev.map(l => l.id === lead.id
+      ? { ...l, vertical_data: clearedVd, job_status: confirm ? 'lost' : l.job_status }
+      : l));
+    try {
+      const res = await api.resolveCancel(lead.id, confirm);
+      if (res && res.lead) setLeads(prev => prev.map(l => l.id === res.lead.id ? res.lead : l));
+    } catch (err) {
+      console.error('Failed to resolve cancellation', lead.id, err);
+      loadRef.current().catch(() => {}); // resync on failure
+    }
+  }, []);
+
   // Missed-call decision modal actions. A missed call is not a lead until the
   // owner explicitly acts on it here.
   // Create Lead: open the manual form prefilled with the caller's number; the
@@ -1601,6 +1704,7 @@ export default function HomeServicesDashboard() {
                   reason={bookedReason}
                   onDismiss={handleDismiss}
                   onReschedule={handleRescheduleDecision}
+                  onCancel={handleCancelDecision}
                   onMissedCallClick={setMissedCallModal}
                 />
               ))}

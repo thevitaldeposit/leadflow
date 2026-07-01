@@ -72,6 +72,24 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  // Record a dump ticket / weight for a returned unit (swap-safe lifecycle advance).
+  // Body: { weightTons?, swap?, unitsRemaining?, note? }.
+  recordDumpTicket: (id, body) =>
+    request(`/leads/${id}/dump-ticket`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    }),
+  // Resolve a confirm-first cancellation cue. confirm=true → mark lost; false → keep.
+  resolveCancel: (id, confirm) =>
+    request(`/leads/${id}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: !!confirm }),
+    }),
+  // (Re)send the payment link by email — the approved channel while SMS/A2P pends.
+  emailPaymentLink: (id) =>
+    request(`/leads/${id}/email-payment-link`, { method: 'POST' }),
 
   // Customers — the unified person-level record (consolidates leads/opportunities)
   getCustomers: (params = {}) => {

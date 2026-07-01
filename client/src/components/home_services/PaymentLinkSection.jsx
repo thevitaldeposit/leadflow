@@ -1,43 +1,45 @@
 import { useState } from 'react';
 import { Link, Send, X, Check } from 'lucide-react';
 import { api } from '../../utils/api';
+import { PAYMENT_STATUS_STYLES, getPaymentStatusLabel } from '../../utils/verticalConfig';
 
 const PAYMENT_BASE = 'https://leadflow-production-9c02.up.railway.app';
 
 // Reusable Payment Link + Mark Paid block. Renders the /pay/:id link, the
-// Send/Resend payment-SMS button (api.resendPaymentSms), and the Paid/Unpaid
-// toggle (api.updateLead with paid_at). Shared by the lead-detail page AND the
-// customer profile's Open Job card — both pass the BOOKED lead plus an onUpdate
-// callback. Strictly reuses existing endpoints; it never re-runs extraction or
-// booking. onUpdate receives the server's updated lead (toggle) / { lead } (SMS).
-export default function PaymentLinkSection({ lead, onUpdate }) {
-  const [resending, setResending] = useState(false);
-  const [resendMsg, setResendMsg] = useState(null);
+// Send/Resend payment-link EMAIL button (api.emailPaymentLink — the approved channel
+// while SMS/A2P is pending), and the Paid/Unpaid toggle (api.updateLead with paid_at).
+// Shared by the lead-detail page AND the customer profile's Open Job card — both pass
+// the BOOKED lead plus an onUpdate callback. When a derived `paymentStatus`
+// ('unpaid'|'partial'|'paid') is passed, it renders the two-axis badge (job status is
+// shown separately) so a partially-paid multi-invoice job reads correctly. Strictly
+// reuses existing endpoints; it never re-runs extraction or booking. onUpdate receives
+// the server's updated lead (toggle) / { lead } (email).
+export default function PaymentLinkSection({ lead, onUpdate, paymentStatus }) {
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState(null);
 
   const paymentUrl = `${PAYMENT_BASE}/pay/${lead.id}`;
-  const isPaid = !!lead.paid_at;
+  const isPaid = !!lead.paid_at || paymentStatus === 'paid';
 
-  const handleResend = async () => {
-    setResending(true);
-    setResendMsg(null);
+  const handleSend = async () => {
+    setSending(true);
+    setSendMsg(null);
     try {
-      const result = await api.resendPaymentSms(lead.id);
+      const result = await api.emailPaymentLink(lead.id);
       if (result.sent) {
         onUpdate?.(result.lead);
-        setResendMsg('Payment link resent successfully.');
+        setSendMsg('Payment link emailed successfully.');
       } else {
-        setResendMsg(result.reason === 'no_phone'
-          ? 'No phone number on file — add one in Contact section.'
-          : result.reason === 'disabled'
-            ? 'SMS is disabled in Settings.'
-            : result.reason === 'no_credentials'
-              ? 'Twilio not configured.'
-              : 'Could not send SMS.');
+        setSendMsg(result.reason === 'no_email'
+          ? 'No email on file — add one in the Contact section.'
+          : result.reason === 'no_email_provider'
+            ? 'Email is not configured (RESEND_API_KEY).'
+            : 'Could not send the email.');
       }
     } catch {
-      setResendMsg('Failed to send — check server logs.');
+      setSendMsg('Failed to send — check server logs.');
     } finally {
-      setResending(false);
+      setSending(false);
     }
   };
 
@@ -51,15 +53,22 @@ export default function PaymentLinkSection({ lead, onUpdate }) {
     }
   };
 
-  const smsSentDate = lead.payment_sms_sent_at
-    ? new Date(lead.payment_sms_sent_at).toLocaleString()
+  const emailedDate = lead.payment_link_emailed_at
+    ? new Date(lead.payment_link_emailed_at).toLocaleString()
     : null;
+
+  // Prefer the derived axis (all-invoices-settled rollup) when available; else paid_at.
+  // 'partial' means some — but not all — of the job's invoices are settled.
+  const axis = paymentStatus || (isPaid ? 'paid' : 'unpaid');
 
   return (
     <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
         <Link size={15} className="text-muted" />
         <h3 className="text-sm font-semibold text-content">Payment Link</h3>
+        <span className={`ml-auto text-[11px] font-medium px-2 py-0.5 rounded-md border ${PAYMENT_STATUS_STYLES[axis] || PAYMENT_STATUS_STYLES.unpaid}`}>
+          {getPaymentStatusLabel(axis)}
+        </span>
       </div>
       <div className="p-4 space-y-3">
         {/* URL */}
@@ -73,38 +82,39 @@ export default function PaymentLinkSection({ lead, onUpdate }) {
           >
             {paymentUrl}
           </a>
+          <p className="text-[11px] text-muted mt-1">Payment reserves the dumpster — nothing is held until the customer pays.</p>
         </div>
 
-        {/* SMS status */}
+        {/* Email status */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <p className="text-xs font-medium text-muted uppercase tracking-wide mb-1">SMS Status</p>
-            {smsSentDate
-              ? <p className="text-sm text-content">Sent on {smsSentDate}</p>
+            <p className="text-xs font-medium text-muted uppercase tracking-wide mb-1">Email Status</p>
+            {emailedDate
+              ? <p className="text-sm text-content">Emailed on {emailedDate}</p>
               : <p className="text-sm text-muted italic">Not sent yet</p>}
           </div>
           <button
-            onClick={handleResend}
-            disabled={resending}
+            onClick={handleSend}
+            disabled={sending}
             className="flex items-center gap-1.5 text-sm font-medium text-brand bg-brand/10 hover:bg-brand/10 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
           >
             <Send size={13} />
-            {resending ? 'Sending…' : smsSentDate ? 'Resend Payment Link' : 'Send Payment Link'}
+            {sending ? 'Sending…' : emailedDate ? 'Resend Payment Link' : 'Email Payment Link'}
           </button>
         </div>
 
-        {resendMsg && (
-          <p className={`text-xs px-2 py-1.5 rounded-lg ${resendMsg.includes('success') ? 'text-success bg-success/10' : 'text-danger bg-danger/10'}`}>
-            {resendMsg}
+        {sendMsg && (
+          <p className={`text-xs px-2 py-1.5 rounded-lg ${sendMsg.includes('success') ? 'text-success bg-success/10' : 'text-danger bg-danger/10'}`}>
+            {sendMsg}
           </p>
         )}
 
-        {/* Payment status toggle */}
+        {/* Payment status toggle (manual bookkeeping — records paid_at) */}
         <div className="flex items-center justify-between pt-2 border-t border-divider">
           <div>
             <p className="text-xs font-medium text-muted uppercase tracking-wide mb-0.5">Payment Status</p>
             <p className={`text-sm font-semibold ${isPaid ? 'text-success' : 'text-warning'}`}>
-              {isPaid ? `Paid ${new Date(lead.paid_at).toLocaleDateString()}` : 'Unpaid'}
+              {axis === 'partial' ? 'Partially Paid' : isPaid ? `Paid${lead.paid_at ? ` ${new Date(lead.paid_at).toLocaleDateString()}` : ''}` : 'Unpaid'}
             </p>
           </div>
           <button

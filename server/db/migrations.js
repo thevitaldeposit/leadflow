@@ -41,6 +41,17 @@ const NEW_COLUMNS = [
   // Payment system
   'ALTER TABLE leads ADD COLUMN paid_at TEXT',
   'ALTER TABLE leads ADD COLUMN payment_sms_sent_at TEXT',
+  // Job-lifecycle payment axis (independent of job_status). Derived from the job's
+  // invoices ("all settled" rollup). Backfills existing rows to 'unpaid'.
+  "ALTER TABLE leads ADD COLUMN payment_status TEXT DEFAULT 'unpaid'",
+  // When the auto-book / booking payment link was emailed (channel-agnostic marker,
+  // parallel to payment_sms_sent_at which is now unused by auto-book).
+  'ALTER TABLE leads ADD COLUMN payment_link_emailed_at TEXT',
+  // Swap-safe lifecycle: how many dumpsters are currently OUT for this job
+  // (delivered-but-not-yet-returned). NULL until the job reaches active_rental.
+  // A dump ticket returns one unit; the job only advances past active_rental when
+  // this reaches 0 (no unit still out).
+  'ALTER TABLE leads ADD COLUMN units_out INTEGER',
   // Recording lifecycle
   'ALTER TABLE leads ADD COLUMN recording_deleted_at TEXT',
   // Voicemail capture: distinguishes voicemail leads from answered calls
@@ -127,6 +138,17 @@ function runMigrations() {
   db.prepare(
     "UPDATE leads SET sub_vertical = 'dumpster_rental' WHERE vertical = 'home_services' AND (sub_vertical IS NULL OR sub_vertical = '')"
   ).run();
+
+  // Backfill payment_status for rows that predate the payment axis: a lead already
+  // stamped paid_at is 'paid'. Cheap + idempotent (only touches non-paid rows with a
+  // paid_at). The invoice-driven "all settled" rollup refines this on the next
+  // read/mutation (services/jobLifecycle.js) — this just seeds a correct baseline so
+  // historical paid jobs don't read as 'unpaid'.
+  try {
+    db.prepare(
+      "UPDATE leads SET payment_status = 'paid' WHERE paid_at IS NOT NULL AND (payment_status IS NULL OR payment_status <> 'paid')"
+    ).run();
+  } catch { /* column not present yet on a partial migration — safe to skip */ }
 
   // Devices table for APNs tokens
   db.exec(`
