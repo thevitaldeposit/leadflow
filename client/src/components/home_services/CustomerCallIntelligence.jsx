@@ -45,7 +45,7 @@ function ROField({ label, value }) {
 // AUTO-BOOK SAFETY: this only GETs the lead (api.getLead). It never writes and
 // never re-runs extraction or booking, so mounting it cannot trigger or change
 // auto-booking. Editing still happens on the full lead detail via the link below.
-export default function CustomerCallIntelligence({ jobId, compact = false, refreshKey = 0, schedule = null }) {
+export default function CustomerCallIntelligence({ jobId, compact = false, refreshKey = 0, schedule = null, showInquiryFields = true }) {
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -119,10 +119,12 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
         bookingConfidence={vd.bookingConfidence || null}
       />
 
-      {/* Industry fields + key dates + intent / urgency / follow-up (read-only;
-          stored values, never recomputed). For dumpster jobs these always render
-          (dash when blank) so a details-less manual inquiry still shows them; other
-          verticals self-hide fields the call didn't capture. */}
+      {/* Industry fields + key dates (read-only; stored values, never recomputed).
+          For dumpster jobs these always render (dash when blank) so a details-less
+          manual inquiry still shows them; other verticals self-hide fields the call
+          didn't capture. Intent / Urgency / Follow-up are inquiry-only: they render
+          while this is an Active Inquiry (showInquiryFields) and are hidden once the
+          engagement is a booked/operational job, where they're no longer relevant. */}
       <div className="bg-surface rounded-xl border border-divider shadow-sm p-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
         {(isDumpster || schedSize) && <ROField label="Dumpster Size" value={schedSize} />}
         {(isDumpster || schedDuration) && <ROField label="Rental Duration" value={schedDuration} />}
@@ -130,9 +132,9 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
         <ROField label={t.startDate} value={fmtDate(schedDelivery)} />
         <ROField label={t.endDate} value={fmtDate(schedPickup)} />
         <ROField label={t.startTime} value={formatTime12(schedTime)} />
-        <ROField label="Intent" value={intent} />
-        <ROField label="Urgency" value={vd.urgency} />
-        <ROField label="Follow-Up" value={fmtDateTime(vd.followUpDate)} />
+        {showInquiryFields && <ROField label="Intent" value={intent} />}
+        {showInquiryFields && <ROField label="Urgency" value={vd.urgency} />}
+        {showInquiryFields && <ROField label="Follow-Up" value={fmtDateTime(vd.followUpDate)} />}
       </div>
 
       {/* AI Summary */}

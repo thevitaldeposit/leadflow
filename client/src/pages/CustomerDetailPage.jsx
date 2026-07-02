@@ -4,14 +4,13 @@ import {
   ArrowLeft, Phone, PhoneMissed, PhoneOutgoing, MessageSquare, Voicemail,
   StickyNote, RefreshCw, MapPin, Mail, Edit2, Trash2, Check, X, FileText,
   DollarSign, Plus, ChevronDown, ChevronRight, Zap, Briefcase, Clock,
-  Activity, AlertCircle, CheckCircle2,
+  Activity, AlertCircle, CheckCircle2, ArrowUp,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
   CUSTOMER_STATUSES, CUSTOMER_STATUS_STYLES, getCustomerStatusLabel,
   getTerminology,
   INVOICE_STATUS_STYLES, getInvoiceStatusLabel,
-  PAYMENT_STATUS_STYLES, getPaymentStatusLabel,
   JOB_STATUS_STYLES, getJobStatusLabel,
   ENGAGEMENT_STATUS,
 } from '../utils/verticalConfig';
@@ -83,13 +82,14 @@ function scrollToWhenReady(targetId, attempts = 15) {
   requestAnimationFrame(() => scrollToWhenReady(targetId, attempts - 1));
 }
 
-function Card({ id, title, icon: Icon, children, action }) {
+function Card({ id, title, icon: Icon, children, action, titleAccessory }) {
   return (
     <div id={id} className={`bg-surface rounded-xl border border-divider shadow-sm overflow-hidden ${id ? 'scroll-mt-6' : ''}`}>
       <div className="px-5 py-3.5 border-b border-divider flex items-center justify-between">
         <div className="flex items-center gap-2">
           {Icon && <Icon size={15} className="text-brand" />}
           <h2 className="text-sm font-bold text-content">{title}</h2>
+          {titleAccessory}
         </div>
         {action}
       </div>
@@ -1044,6 +1044,9 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
       <CustomerCallIntelligence
         jobId={e.representative_lead_id}
         refreshKey={refreshKey}
+        // Intent / Urgency / Follow-up are inquiry-only — show them only while this is
+        // an Active Inquiry; a booked/operational Open Job hides them.
+        showInquiryFields={e.status === ENGAGEMENT_STATUS.INQUIRY}
         schedule={{
           delivery_date: e.delivery_date,
           pickup_date: e.pickup_date,
@@ -1225,6 +1228,13 @@ function ActiveEngagement({ id, engagement: e, onClose, onSendPaymentLink, onMar
       id={id}
       title={headerTitle}
       icon={e.status === ENGAGEMENT_STATUS.BOOKED ? Briefcase : MessageSquare}
+      // Operational stage badge (e.g. Active Rental) sits inline to the RIGHT of the
+      // header title. Only the operational stages get a badge; a plain inquiry doesn't.
+      titleAccessory={showStage ? (
+        <span className={`${badgeCls} ${JOB_STATUS_STYLES[e.job_stage] || ''}`}>
+          {getJobStatusLabel(e.job_stage)}
+        </span>
+      ) : null}
       action={(
         <div className="flex items-center gap-2">
           <button
@@ -1248,18 +1258,9 @@ function ActiveEngagement({ id, engagement: e, onClose, onSendPaymentLink, onMar
       )}
     >
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
-        {/* Two INDEPENDENT indicators: operational stage (job_status) + payment state,
-            so "work done, still owed" and "booking initiated, unpaid" are both visible. */}
-        {showStage && (
-          <span className={`${badgeCls} ${JOB_STATUS_STYLES[e.job_stage] || ''}`}>
-            {getJobStatusLabel(e.job_stage)}
-          </span>
-        )}
-        {showStage && e.payment_status && (
-          <span className={`${badgeCls} ${PAYMENT_STATUS_STYLES[e.payment_status] || PAYMENT_STATUS_STYLES.unpaid}`}>
-            {getPaymentStatusLabel(e.payment_status)}
-          </span>
-        )}
+        {/* Secondary flags + the deal amount. The operational stage badge now sits
+            inline with the header title (titleAccessory above); payment state shows in
+            the Payment Link section below — neither is duplicated in this row. */}
         {e.stale && (
           <span className={`${badgeCls} bg-warning/10 text-warning border-warning/30`}>
             <Clock size={11} /> Stale
@@ -1383,24 +1384,33 @@ function PastInquiries({ engagements, forceOpenId = null, onPaymentChange }) {
 // expands the job's call intelligence in place — no separate page.
 function JobHistoryRow({ engagement: e, onPaymentChange, forceOpen = false }) {
   const [open, setOpen] = useState(false);
-  // Expand in place when this row is the focus target (?call / "View job"). Only
-  // opens — the owner can still collapse it afterward.
-  useEffect(() => { if (forceOpen) setOpen(true); }, [forceOpen]);
+  // The currently-open job is already rendered in full in the Open Job card at the top
+  // of the page. Its row here must NOT expand a duplicate detail block — clicking its
+  // Job ID (or the row) just scrolls back up to that card. Past/completed jobs expand
+  // in place as usual.
+  const isCurrentOpen = !!e.is_active;
+  // Expand in place when this row is the focus target (?call / "View job") — but never
+  // the current open job's row (it jumps up instead). Only opens; still collapsible.
+  useEffect(() => { if (forceOpen && !isCurrentOpen) setOpen(true); }, [forceOpen, isCurrentOpen]);
   // Service column shows the service TYPE (e.g. "Dumpster rental") from the
   // vertical config — the size lives in its own column. Status is display-only:
   // a booked/open job reads "In progress", a completed one "Completed".
   const serviceType = getTerminology(e.vertical, e.sub_vertical).serviceType;
   const statusText = e.status === ENGAGEMENT_STATUS.COMPLETED ? 'Completed' : 'In progress';
-  const toggle = () => setOpen(o => !o);
+  const toggle = () => {
+    if (isCurrentOpen) { scrollToWhenReady('active-inquiry'); return; } // jump to the Open Job card
+    setOpen(o => !o);
+  };
   return (
     <Fragment>
       <tr id={`eng-${e.id}`} className="hover:bg-surface-2 cursor-pointer transition-colors scroll-mt-6" onClick={toggle}>
         <td className="px-5 py-3 whitespace-nowrap">
           <button
             onClick={(ev) => { ev.stopPropagation(); toggle(); }}
+            title={isCurrentOpen ? 'Shown in the Open Job card above — jump up' : undefined}
             className="inline-flex items-center gap-1.5 text-brand font-medium hover:underline"
           >
-            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {isCurrentOpen ? <ArrowUp size={14} /> : (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
             #{e.id}
           </button>
         </td>
@@ -1417,7 +1427,7 @@ function JobHistoryRow({ engagement: e, onPaymentChange, forceOpen = false }) {
         </td>
         <td className="px-5 py-3 text-right text-content font-medium whitespace-nowrap">{e.estimated_revenue ? money(e.estimated_revenue) : '—'}</td>
       </tr>
-      {open && (
+      {open && !isCurrentOpen && (
         <tr>
           <td colSpan={6} className="p-0 border-t border-divider">
             <EngagementBody engagement={e} onPaymentChange={onPaymentChange} />
