@@ -175,6 +175,36 @@ export const api = {
     }),
   deleteDiscountGroup: (id) => request(`/pricing/groups/${id}`, { method: 'DELETE' }),
 
+  // Business-wide fees (delivery, mileage/out-of-area) — each independently toggleable.
+  createPricingFee: (body) =>
+    request('/pricing/fees', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updatePricingFee: (id, body) =>
+    request(`/pricing/fees/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deletePricingFee: (id) => request(`/pricing/fees/${id}`, { method: 'DELETE' }),
+
+  // Special / restricted items (prohibited or surcharge).
+  createSpecialItem: (body) =>
+    request('/pricing/special-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateSpecialItem: (id, body) =>
+    request(`/pricing/special-items/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteSpecialItem: (id) => request(`/pricing/special-items/${id}`, { method: 'DELETE' }),
+
   // Invoices (owner-facing). Customer-facing review + sign uses the public methods
   // below (no auth, tokenized link).
   getInvoices: (params = {}) => {

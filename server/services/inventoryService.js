@@ -1,5 +1,10 @@
 const db = require('../db/database');
 const { ACTIVE_JOB_STATUSES } = require('../config/jobStatus');
+// The canonical string size key ("20 yard" → "20yd") shared with the pricing layer
+// so a size→rate join is reliable (see services/sizeKey.js). This module's own
+// availability math still keys off the numeric normalizeSize() below; normalizeSizeKey
+// is re-exported so both inventory and pricing resolve sizes through one helper.
+const { normalizeSizeKey } = require('./sizeKey');
 
 // Normalize a size string to a leading integer for comparison.
 // "10 yard", "10-yard dumpster", "10 yd", "10" → 10
@@ -372,6 +377,7 @@ module.exports = {
   parseRentalDays,
   addDaysToISO,
   normalizeSize,
+  normalizeSizeKey,
   localDateInTimeZone,
   resolveDeliveryDate,
   calculatePickupDate,

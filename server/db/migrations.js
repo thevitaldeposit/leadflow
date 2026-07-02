@@ -4,6 +4,7 @@ require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 const db = require('./database');
 const { describeBooking } = require('../services/leadActivityText');
+const { normalizeSizeKey } = require('../services/sizeKey');
 
 const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN audio_file_path TEXT',
@@ -688,6 +689,103 @@ function runMigrations() {
   `);
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_pricing_unique ON customer_pricing(customer_id, service_key)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_customer_pricing_business ON customer_pricing(business_id)');
+
+  // ── Configurable pricing model (Prompt A: data + setup only) ─────────────────
+  // pricing_config is a per-SIZE JSON blob on the price row that holds everything a
+  // business needs to price that size, each field independently set:
+  //   {
+  //     pricing_style: 'tiered' | 'flat',
+  //     flat_rate: number|null,                              // when flat
+  //     tiers: [{ label, days, rate }],                      // when tiered (any count)
+  //     weight_allowance_tons: number|null,                 // included tons
+  //     overage_rate_per_ton: number|null,                  // $/ton over allowance
+  //     day_rate: { enabled: bool, rate: number|null },     // extra-day extension
+  //     swap: { mode: 'same_as_rate'|'custom'|'off', custom_price: number|null }
+  //   }
+  // The flat unit_price column stays as the fallback/default. Overage allowance +
+  // rate now live here (closing the old "no UI / always null" settings gap) — this
+  // prompt only STORES them; wiring computeOverage to read them is Prompt B.
+  const PRICING_COLUMNS = [
+    'ALTER TABLE price_list_items ADD COLUMN pricing_config TEXT',
+  ];
+  for (const stmt of PRICING_COLUMNS) {
+    try {
+      db.exec(stmt);
+    } catch (e) {
+      if (!e.message.includes('duplicate column name')) throw e;
+    }
+  }
+
+  // Business-wide fees (delivery, mileage/out-of-area, …). Each row is independently
+  // toggleable via `enabled`; `config` is JSON for type-specific params (e.g. mileage
+  // stores { per_mile, threshold_miles }). business_id-scoped.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pricing_fees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      fee_type TEXT NOT NULL,
+      label TEXT,
+      amount REAL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      config TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_pricing_fees_business ON pricing_fees(business_id)');
+
+  // Special / restricted items. kind='prohibited' → not allowed (charge_amount null,
+  // flag/warn later); kind='surcharge' → allowed but adds charge_amount (e.g. mattress
+  // $40, tires, appliances). Surfaced together under the UI's "Prohibited Items"
+  // section. business_id-scoped.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS special_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER REFERENCES businesses(id),
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'surcharge',
+      charge_amount REAL,
+      sort_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_special_items_business ON special_items(business_id)');
+
+  // Normalize existing price_list_items size keys to the canonical "<n>yd" form so a
+  // size→rate join (inventory "20 yard" ↔ price "20yd") is reliable in Prompt B.
+  // NON-destructive: only size-shaped keys that differ are rewritten, and only when
+  // the canonical key is free within the same business (UNIQUE(business_id,
+  // service_key)) — a would-be collision is left as-is and logged, never merged.
+  try {
+    const priceRows = db.prepare('SELECT id, business_id, service_key FROM price_list_items').all();
+    const takenByBiz = new Map(); // business_id → Set(service_key)
+    for (const r of priceRows) {
+      if (!takenByBiz.has(r.business_id)) takenByBiz.set(r.business_id, new Set());
+      takenByBiz.get(r.business_id).add(r.service_key);
+    }
+    const changed = [];
+    const skipped = [];
+    for (const r of priceRows) {
+      const canonical = normalizeSizeKey(r.service_key);
+      if (!canonical || canonical === r.service_key) continue; // not a size, or already canonical
+      const taken = takenByBiz.get(r.business_id);
+      if (taken.has(canonical)) {
+        skipped.push(`biz ${r.business_id}: "${r.service_key}" → "${canonical}" (target key already exists)`);
+        continue;
+      }
+      db.prepare('UPDATE price_list_items SET service_key = ?, updated_at = ? WHERE id = ?')
+        .run(canonical, new Date().toISOString(), r.id);
+      taken.delete(r.service_key);
+      taken.add(canonical);
+      changed.push(`biz ${r.business_id}: "${r.service_key}" → "${canonical}"`);
+    }
+    if (changed.length) console.log(`[migrations] Normalized ${changed.length} price size key(s): ${changed.join('; ')}`);
+    if (skipped.length) console.warn(`[migrations] Skipped ${skipped.length} price key normalization(s) to avoid collisions: ${skipped.join('; ')}`);
+  } catch (e) {
+    console.error('[migrations] Price size-key normalization failed (non-fatal):', e.message);
+  }
 
   // Customer notes — discrete, timestamped notes the owner adds against a
   // customer (e.g. what was discussed on an outbound callback). These are a
