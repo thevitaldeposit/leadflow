@@ -343,21 +343,15 @@ function paidInvoiceContextForCustomer(businessId, customerId) {
 
 // Per-call lifecycle predicates used to derive an engagement's status. These read
 // stored fields only — they never re-evaluate booking signals or auto-book.
-// A call counts as paid when leads.paid_at is set OR a paid invoice covers it (its
-// own linked invoice, or a customer-level invoice — see paidInvoiceContextForCustomer);
-// completion still also requires the pickup date to have passed.
-function leadIsCompleted(lead, paidCtx) {
-  if ((lead.job_status || '') === JOB_STATUS.COMPLETED) return true;
-  // Legacy auto-complete: a FULLY-paid job whose pickup date has passed. Completion is
-  // gated on payment (a lingering balance must never read as completed), so "fully
-  // paid" here means the payment axis is 'paid' (all invoices settled) — kept fresh on
-  // the row by jobLifecycle. Falls back to paid_at / a covering paid invoice only for
-  // rows that predate the payment_status column.
-  const paidByInvoice = !!paidCtx && (paidCtx.hasUnlinked || paidCtx.leadIds.has(lead.id));
-  const fullyPaid = lead.payment_status
-    ? lead.payment_status === 'paid'
-    : (!!lead.paid_at || paidByInvoice);
-  return fullyPaid && pickupHasPassed(lead.pickup_date);
+// Completion is trusted from the (payment-gated) job_status column ALONE. A job reaches
+// 'completed' only through the lifecycle engine — the last unit's dump ticket returns it
+// (fully paid → completed, else awaiting_final_payment). A passed pickup date NEVER
+// auto-completes on read: a paid job past its pickup date stays an Open Job
+// (active_rental) until its weight is recorded, and the dump ticket — not the date —
+// drives progression (see jobLifecycle.recordDumpTicket). `paidCtx` is still passed by
+// callers but no longer consulted here (completion no longer depends on payment/date).
+function leadIsCompleted(lead) {
+  return (lead.job_status || '') === JOB_STATUS.COMPLETED;
 }
 function leadIsBooked(lead) {
   return CONFIRMED_JOB_STATUS_SET.has(lead.job_status) || lead.status === LEGACY_STATUS.BOOKED;
