@@ -53,9 +53,12 @@ function emptyConfig() {
 
 // Merge a stored config (possibly null / partial) over the empty shape so every
 // control is controlled and defined.
-function toFormConfig(cfg) {
+function toFormConfig(cfg, legacyRate) {
   const base = emptyConfig();
-  if (!cfg || typeof cfg !== 'object') return base;
+  // Legacy row with no saved pricing model yet: default to Flat and carry the old
+  // base rate (unit_price) forward as the flat rate, so an existing size's price
+  // migrates into the model on next save instead of being lost.
+  if (!cfg || typeof cfg !== 'object') return { ...base, flat_rate: legacyRate ?? '' };
   return {
     pricing_style: cfg.pricing_style === 'tiered' ? 'tiered' : 'flat',
     flat_rate: cfg.flat_rate ?? '',
@@ -70,12 +73,9 @@ function toFormConfig(cfg) {
 // ── Per-size config editor ─────────────────────────────────────────────────────
 function SizeConfigForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState({
-    service_key: initial?.service_key || '',
     label: initial?.label || '',
-    unit: initial?.unit || '',
-    unit_price: initial?.unit_price ?? '',
   });
-  const [cfg, setCfg] = useState(toFormConfig(initial?.pricing_config));
+  const [cfg, setCfg] = useState(toFormConfig(initial?.pricing_config, initial?.unit_price));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -87,12 +87,18 @@ function SizeConfigForm({ initial, onSave, onCancel }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.service_key.trim()) { setError('Size / service key is required'); return; }
+    const size = form.label.trim();
+    if (!size) { setError('Size is required'); return; }
     setSaving(true); setError(null);
     try {
       await onSave({
-        ...form,
-        unit_price: form.unit_price === '' ? null : Number(form.unit_price),
+        // The internal size key is derived from the Size by the shared server-side
+        // normalizer ("20 Yard Dumpster" → "20yd"); unit is always 'rental' here.
+        // Neither is shown in the form. unit_price (the legacy base rate) is omitted
+        // so an existing size's stored value is preserved on edit.
+        service_key: size,
+        label: size,
+        unit: initial?.unit || 'rental',
         pricing_config: cfg,
       });
     } catch (err) { setError(err.message || 'Save failed'); setSaving(false); }
@@ -102,16 +108,10 @@ function SizeConfigForm({ initial, onSave, onCancel }) {
     <form onSubmit={submit} className="space-y-5">
       {error && <p className="text-xs text-danger">{error}</p>}
 
-      {/* Identity + base/fallback rate */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div><label className={labelCls}>Size Key</label><input className={inputCls} value={form.service_key} onChange={(e) => set('service_key', e.target.value)} placeholder="20yd" /></div>
-        <div><label className={labelCls}>Label</label><input className={inputCls} value={form.label} onChange={(e) => set('label', e.target.value)} placeholder="20 Yard Dumpster" /></div>
-        <div><label className={labelCls}>Unit</label><input className={inputCls} value={form.unit} onChange={(e) => set('unit', e.target.value)} placeholder="rental" /></div>
-        <div>
-          <label className={labelCls}>Base Rate ($)</label>
-          <input type="number" min="0" step="0.01" className={inputCls} value={form.unit_price} onChange={(e) => set('unit_price', e.target.value)} />
-          <p className="text-[10px] text-muted mt-1">Fallback / default price.</p>
-        </div>
+      {/* Size — the human-facing name. The internal size key is derived from this. */}
+      <div className="max-w-sm">
+        <label className={labelCls}>Size</label>
+        <input className={inputCls} value={form.label} onChange={(e) => set('label', e.target.value)} placeholder="20 Yard Dumpster" />
       </div>
 
       {/* Pricing model: flat vs tiered */}
@@ -185,6 +185,7 @@ function SizeSummary({ it }) {
   const chips = [];
   if (c.pricing_style === 'tiered') chips.push(`Tiered · ${(c.tiers || []).length} tier${(c.tiers || []).length === 1 ? '' : 's'}`);
   else if (c.pricing_style === 'flat' && c.flat_rate != null) chips.push(`Flat $${c.flat_rate}`);
+  else if (it.unit_price != null) chips.push(`Flat $${it.unit_price}`); // legacy row: show base rate until re-saved
   if (c.weight_allowance_tons != null) chips.push(`${c.weight_allowance_tons}t incl.`);
   if (c.overage_rate_per_ton != null) chips.push(`$${c.overage_rate_per_ton}/ton over`);
   if (c.day_rate && c.day_rate.enabled && c.day_rate.rate != null) chips.push(`+$${c.day_rate.rate}/day`);
@@ -433,8 +434,6 @@ export default function PricingPage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-content">{it.label || it.service_key}</span>
-                    <span className="text-xs text-muted">{it.service_key}</span>
-                    {it.unit_price != null && <span className="text-sm text-content font-semibold">· ${it.unit_price}</span>}
                   </div>
                   <SizeSummary it={it} />
                 </div>
