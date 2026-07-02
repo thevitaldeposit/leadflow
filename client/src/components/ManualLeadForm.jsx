@@ -134,11 +134,10 @@ export default function ManualLeadForm() {
     [form.deliveryDate, form.rentalDuration]
   );
 
-  const hasJobDetail = !!(
-    form.dumpsterSize || form.debrisType || form.deliveryDate || form.rentalDuration ||
-    form.deliveryAddress || form.accessNotes || form.price
-  );
-  const isValid = form.firstName.trim() && form.phone.trim() && hasJobDetail;
+  // Job details are ALL optional — only minimal contact (name + phone) is required.
+  // A customer can be saved with every job field blank; it lands as an inquiry whose
+  // blank fields show (as dashes) and stay editable on the profile via Edit Job Details.
+  const isValid = form.firstName.trim() && form.phone.trim();
   const fullName = [form.firstName, form.lastName].map(s => s.trim()).filter(Boolean).join(' ');
 
   // mode: 'inquiry' (save only, nothing sent), 'link' (book → email payment link →
@@ -288,8 +287,8 @@ export default function ManualLeadForm() {
         <h2 className="text-lg font-bold text-content mt-0.5">Create Job</h2>
         <p className="text-sm text-muted mt-0.5">
           {customerId
-            ? 'Confirm this customer and enter the job details. You choose how to book on the next step.'
-            : 'Add a customer who walked in, texted, emailed, or was booked directly. Only name, phone, and one job detail are required.'}
+            ? 'Confirm this customer and (optionally) enter the job details. You choose how to book on the next step.'
+            : 'Add a customer who walked in, texted, emailed, or was booked directly. Only name and phone are required — job details are optional and can be filled in later.'}
         </p>
       </div>
 
@@ -309,8 +308,8 @@ export default function ManualLeadForm() {
         </Field>
       </SectionCard>
 
-      {/* Job details */}
-      <SectionCard title="Job Details" icon={Wrench}>
+      {/* Job details — all optional; blank fields still render + stay editable on the profile */}
+      <SectionCard title="Job Details (Optional)" icon={Wrench}>
         <Field label={t.sizeLabel}>
           <select className={inputCls} value={form.dumpsterSize} onChange={set('dumpsterSize')}>
             <option value="">Select a size…</option>
@@ -378,7 +377,7 @@ export default function ManualLeadForm() {
         </button>
         {!isValid && (
           <span className="flex items-center gap-1.5 text-xs text-muted">
-            <MessageSquare size={13} /> Name, phone, and one job detail required.
+            <MessageSquare size={13} /> Name and phone required. Job details are optional.
           </span>
         )}
       </div>

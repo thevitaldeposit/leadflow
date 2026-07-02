@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, PlusCircle, Search, X, Check } from 'lucide-react';
+import { Users, PlusCircle, Search } from 'lucide-react';
 import { api } from '../utils/api';
 import socket from '../socket';
 import { CUSTOMER_STATUSES, CUSTOMER_STATUS_STYLES, getCustomerStatusLabel } from '../utils/verticalConfig';
@@ -16,47 +16,6 @@ function StatusBadge({ status }) {
     <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${style}`}>
       {getCustomerStatusLabel(status)}
     </span>
-  );
-}
-
-function NewCustomerForm({ onSave, onCancel }) {
-  const [form, setForm] = useState({ firstName: '', lastName: '', company: '', phone: '', email: '', address: '' });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!form.firstName.trim() && !form.company.trim() && !form.phone.trim()) {
-      setError('Enter a name, company, or phone'); return;
-    }
-    setSaving(true); setError(null);
-    try { await onSave(form); }
-    catch (err) {
-      setError(err.message || 'Save failed');
-      setSaving(false);
-    }
-  };
-
-  const input = 'w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent';
-  const label = 'block text-xs font-medium text-muted uppercase tracking-wide mb-1';
-
-  return (
-    <form onSubmit={submit} className="space-y-3">
-      {error && <p className="text-xs text-danger">{error}</p>}
-      <div className="grid grid-cols-2 gap-3">
-        <div><label className={label}>First Name</label><input className={input} value={form.firstName} onChange={e => set('firstName', e.target.value)} /></div>
-        <div><label className={label}>Last Name</label><input className={input} value={form.lastName} onChange={e => set('lastName', e.target.value)} /></div>
-        <div><label className={label}>Company</label><input className={input} value={form.company} onChange={e => set('company', e.target.value)} placeholder="Optional" /></div>
-        <div><label className={label}>Phone</label><input className={input} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
-        <div><label className={label}>Email</label><input className={input} value={form.email} onChange={e => set('email', e.target.value)} /></div>
-        <div><label className={label}>Address</label><input className={input} value={form.address} onChange={e => set('address', e.target.value)} /></div>
-      </div>
-      <div className="flex gap-2 justify-end pt-1">
-        <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-3 py-2 rounded-lg"><X size={14} /> Cancel</button>
-        <button type="submit" disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-4 py-2 rounded-lg"><Check size={14} /> {saving ? 'Saving…' : 'Create'}</button>
-      </div>
-    </form>
   );
 }
 
@@ -76,7 +35,6 @@ export default function CustomersListPage() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('all');
   const [search, setSearch] = useState('');
-  const [showAdd, setShowAdd] = useState(false);
   const navigate = useNavigate();
 
   const load = useCallback(() => {
@@ -102,12 +60,6 @@ export default function CustomersListPage() {
     return () => { socket.off('new_lead', refetch); socket.off('lead_updated', refetch); };
   }, []);
 
-  const handleAdd = async (form) => {
-    const created = await api.createCustomer(form);
-    setShowAdd(false);
-    navigate(`/customers/${created.id}`);
-  };
-
   return (
     <div className="max-w-5xl mx-auto space-y-4">
       {/* Header + search + add */}
@@ -127,11 +79,12 @@ export default function CustomersListPage() {
               className="text-sm border border-divider rounded-lg pl-8 pr-3 py-1.5 w-64 focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
-          {!showAdd && (
-            <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 px-3 py-1.5 rounded-lg">
-              <PlusCircle size={14} /> New Customer
-            </button>
-          )}
+          {/* New Customer opens the SAME combined create form the dashboard "Create Job"
+              uses (contact + optional job details in one pass) — not a contact-only form.
+              It reconciles to a customer and lands on that customer's profile. */}
+          <button onClick={() => navigate('/new/manual')} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 px-3 py-1.5 rounded-lg">
+            <PlusCircle size={14} /> New Customer
+          </button>
         </div>
       </div>
 
@@ -151,13 +104,6 @@ export default function CustomersListPage() {
           </button>
         ))}
       </div>
-
-      {showAdd && (
-        <div className="bg-surface rounded-xl border border-divider shadow-sm p-5">
-          <p className="text-xs font-semibold text-muted mb-3">New Customer</p>
-          <NewCustomerForm onSave={handleAdd} onCancel={() => setShowAdd(false)} />
-        </div>
-      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-48">

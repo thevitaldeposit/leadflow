@@ -597,16 +597,13 @@ router.post('/manual', requireAuth, (req, res) => {
     const intent = ['cold', 'warm', 'high'].includes(b.intent) ? b.intent : null;
     const notes = str(b.notes);
 
-    // Validation: name + phone + at least one job detail field.
+    // Validation: minimal contact only (name + phone). Job details are ALL optional —
+    // a customer can be created with every job field blank; the lead lands as an
+    // inquiry with those fields shown blank + editable on the profile (Edit Job
+    // Details). Creation and job entry are one pass; nothing here forces a size, date,
+    // or price up front.
     if (!firstName) return res.status(400).json({ error: 'Customer first name is required' });
     if (!phone) return res.status(400).json({ error: 'Phone number is required' });
-    const hasJobDetail = !!(
-      dumpsterSize || debrisType || deliveryDate || (rentalDurationDays >= 1) ||
-      deliveryAddress || accessNotes || hasPrice
-    );
-    if (!hasJobDetail) {
-      return res.status(400).json({ error: 'Add at least one job detail (size, date, address, price, etc.)' });
-    }
 
     // Resolve an explicit customer link if one was supplied and belongs to this
     // business. Invalid/foreign ids are ignored (we fall back to phone reconcile),

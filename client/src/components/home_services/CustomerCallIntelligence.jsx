@@ -67,8 +67,14 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
   if (error || !lead) return <div className="px-5 py-4 text-sm text-muted">{error || 'Call details unavailable.'}</div>;
 
   const vd = parseVerticalData(lead);
-  const t = getTerminology(lead.vertical, getSubVertical(lead));
+  const subVertical = getSubVertical(lead);
+  const t = getTerminology(lead.vertical, subVertical);
   const intent = vd.intentLevel ? (INTENT_LABELS[vd.intentLevel] || vd.intentLevel) : null;
+  // Dumpster jobs always show the size / duration / debris fields (as a dash when
+  // blank), so a manually-created inquiry with no details still surfaces them on the
+  // profile for the owner to fill in via Edit Job Details. Other verticals keep
+  // self-hiding fields they didn't capture.
+  const isDumpster = subVertical === 'dumpster_rental';
 
   // Schedule grid only: prefer the engagement's already-resolved (booked-sourced)
   // override when present, falling back to THIS call's stored lead values. For a
@@ -114,12 +120,13 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
       />
 
       {/* Industry fields + key dates + intent / urgency / follow-up (read-only;
-          stored values, never recomputed). The industry fields self-hide when the
-          call didn't capture them (e.g. non-dumpster verticals). */}
+          stored values, never recomputed). For dumpster jobs these always render
+          (dash when blank) so a details-less manual inquiry still shows them; other
+          verticals self-hide fields the call didn't capture. */}
       <div className="bg-surface rounded-xl border border-divider shadow-sm p-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-        {schedSize && <ROField label="Dumpster Size" value={schedSize} />}
-        {schedDuration && <ROField label="Rental Duration" value={schedDuration} />}
-        {schedDebris && <ROField label="Debris Type" value={schedDebris} />}
+        {(isDumpster || schedSize) && <ROField label="Dumpster Size" value={schedSize} />}
+        {(isDumpster || schedDuration) && <ROField label="Rental Duration" value={schedDuration} />}
+        {(isDumpster || schedDebris) && <ROField label="Debris Type" value={schedDebris} />}
         <ROField label={t.startDate} value={fmtDate(schedDelivery)} />
         <ROField label={t.endDate} value={fmtDate(schedPickup)} />
         <ROField label={t.startTime} value={formatTime12(schedTime)} />

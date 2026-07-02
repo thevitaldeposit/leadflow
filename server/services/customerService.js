@@ -393,6 +393,15 @@ function leadHasBookingSignals(lead) {
   return Array.isArray(vd.bookingSignalsDetected) && vd.bookingSignalsDetected.length > 0;
 }
 
+// A manually-created entry (owner walk-in / text / email, or the profile "Create Job")
+// is a deliberate NEW inquiry/job — never a follow-up call — so it always starts its
+// own engagement and is never absorbed into a prior booked/completed job as call
+// history. Twilio-captured follow-up calls (a non-'manual' source) keep the
+// attach-on-read behavior in buildEngagements.
+function isManualLead(lead) {
+  return (lead.source || '') === 'manual';
+}
+
 // The most-recent real JOB (a booked or completed engagement) in the walk so far —
 // the job a no-booking-signal follow-up call logically belongs to. Closed inquiries
 // (lost) are skipped: a follow-up revives a real job, never a lost inquiry.
@@ -427,10 +436,13 @@ function buildEngagements(activeLeads, paidCtx) {
   let open = null;
   for (const lead of asc) {
     if (!open) {
-      // No open engagement. A follow-up call with no booking signals rejoins the
+      // No open engagement. A follow-up CALL with no booking signals rejoins the
       // most-recent job (if any) rather than opening a new Active Inquiry. The job
       // stays closed (we never set `open`); the call is recorded as history only.
-      if (!leadHasBookingSignals(lead)) {
+      // A manual entry is exempt — it's an explicit new inquiry/job, so it always
+      // opens its own engagement (e.g. profile "Create Job" for a repeat customer
+      // whose only prior engagement is a completed job).
+      if (!leadHasBookingSignals(lead) && !isManualLead(lead)) {
         const job = mostRecentJobEngagement(engagements);
         if (job) { job.leads.push(lead); continue; }
       }
