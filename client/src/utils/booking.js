@@ -1,7 +1,7 @@
-// Booking date math + the Confirm Booking update builder. Shared by the lead
-// detail header (HomeServicesStickyHeader) and the customer profile's manual
-// "Mark Booked" so a booking persists identically from either surface. Pure
-// functions only — no extraction, booking-signal, or auto-book logic lives here.
+// Booking date math + the booking update builder. Shared by the lead detail header
+// (HomeServicesStickyHeader) and the customer profile's "Create Job" flow so a
+// booking persists identically from either surface. Pure functions only — no
+// extraction, booking-signal, or auto-book logic lives here.
 
 export function parseRentalDays(str) {
   if (!str) return null;

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
-const { getAvailabilityBySize, normalizeSize } = require('../services/inventoryService');
+const { getAvailabilityBySize, getNextAvailableDate, normalizeSize } = require('../services/inventoryService');
 
 // Every inventory route is scoped to the authenticated business.
 router.use(requireAuth);
@@ -40,6 +40,29 @@ router.get('/', (req, res) => {
   } catch (err) {
     console.error('GET /dumpsters error:', err);
     res.status(500).json({ error: 'Failed to retrieve inventory' });
+  }
+});
+
+// GET /api/dumpsters/next-available — the earliest delivery date after the
+// requested one on which a unit of `size` is free for the same rental length.
+// Powers the "Next available: …" hint on the manual-booking surfaces when the
+// requested window is full. Advisory: the owner can still choose to overbook.
+// Params: size, delivery_date (YYYY-MM-DD), rental_duration (days), exclude_lead_id?
+router.get('/next-available', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const { size, delivery_date, rental_duration, exclude_lead_id } = req.query;
+    if (!size || !delivery_date || !rental_duration) {
+      return res.status(400).json({ error: 'size, delivery_date, and rental_duration are required' });
+    }
+    const days = parseInt(rental_duration, 10);
+    if (!(days >= 1)) return res.status(400).json({ error: 'rental_duration must be a positive integer' });
+
+    const nextAvailableDate = getNextAvailableDate(size, delivery_date, days, exclude_lead_id || null, businessId);
+    res.json({ nextAvailableDate: nextAvailableDate || null });
+  } catch (err) {
+    console.error('GET /dumpsters/next-available error:', err);
+    res.status(500).json({ error: 'Failed to compute next availability' });
   }
 });
 

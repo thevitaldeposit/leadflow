@@ -283,6 +283,14 @@ export const api = {
     }),
   deleteInventory: (id) => request(`/dumpsters/${id}`, { method: 'DELETE' }),
 
+  // Earliest delivery date after the requested one with a free unit of `size` for
+  // the same rental length (the "Next available: …" hint when a window is full).
+  // params: { size, delivery_date, rental_duration, exclude_lead_id? }
+  getNextAvailability: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/dumpsters/next-available${qs ? `?${qs}` : ''}`);
+  },
+
   // Schedule
   getAvailability: (deliveryDate, rentalDuration) =>
     request(`/schedule/availability?delivery_date=${encodeURIComponent(deliveryDate)}&rental_duration=${encodeURIComponent(rentalDuration)}`),

@@ -18,7 +18,7 @@ import {
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
 import PaymentLinkSection from '../components/home_services/PaymentLinkSection';
 import VoicemailBadge from '../components/home_services/VoicemailBadge';
-import { BookedModal, EditJobDetailsModal } from '../components/home_services/HomeServicesStickyHeader';
+import { CreateJobModal, EditJobDetailsModal } from '../components/home_services/HomeServicesStickyHeader';
 import { buildBookingUpdates } from '../utils/booking';
 
 const money = (n, c = 'USD') => {
@@ -470,15 +470,29 @@ export default function CustomerDetailPage() {
     await load();
   };
 
-  // Manually mark the Active Inquiry booked from the profile. The system only
-  // ingests inbound calls, so a booking taken on an OUTBOUND call (e.g. returning
-  // a voicemail) has no entry point — this is it. Reuses the lead-detail header's
-  // exact path: the same Confirm Booking modal (availability + pickup math run
-  // in-modal) and buildBookingUpdates (job_status/status='booked'), applied to the
-  // engagement's representative (newest) call so it becomes a Job. No extraction,
-  // booking-signal, or auto-book logic runs here.
-  const handleBookEngagement = async (engagement, payload) => {
+  // Create Job from the profile's Active Inquiry. The system only ingests inbound
+  // calls, so a booking taken on an OUTBOUND call (e.g. returning a voicemail) has no
+  // entry point — this is it. The Create Job modal offers the two lifecycle-correct
+  // paths, both applied to the engagement's representative (newest) call so it becomes
+  // a Job. No extraction, booking-signal, or auto-book logic runs here.
+  //
+  // Send Payment Link: set job_status='booked' via buildBookingUpdates — the server
+  // payment-gate reroutes an unpaid job to pending_payment and emails the link
+  // (payment is what reserves the unit).
+  const handleSendPaymentLink = async (engagement, payload) => {
     await api.updateLead(engagement.representative_lead_id, buildBookingUpdates(payload));
+    await load();
+  };
+
+  // Mark Paid: payment was collected outside Stream, so book directly —
+  // book_without_payment bypasses the payment-gate reroute, and paid_at records the
+  // payment now → booked + reserved, no link sent.
+  const handleMarkPaidBooking = async (engagement, payload) => {
+    await api.updateLead(engagement.representative_lead_id, {
+      ...buildBookingUpdates(payload),
+      paid_at: new Date().toISOString(),
+      book_without_payment: true,
+    });
     await load();
   };
 
@@ -688,10 +702,19 @@ export default function CustomerDetailPage() {
 
           {/* Active Inquiry — the current active engagement, expanded by default */}
           {activeEngagement ? (
-            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} onBook={handleBookEngagement} onEdit={handleEditEngagement} onPaymentChange={handlePaymentChange} refreshKey={detailRefresh} />
+            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} onSendPaymentLink={handleSendPaymentLink} onMarkPaid={handleMarkPaidBooking} onEdit={handleEditEngagement} onPaymentChange={handlePaymentChange} refreshKey={detailRefresh} />
           ) : (
             <Card id="active-inquiry" title="Active Inquiry" icon={MessageSquare}>
-              <div className="px-5 py-8 text-center text-sm text-muted">No active inquiry. A new call opens one automatically.</div>
+              <div className="px-5 py-8 text-center">
+                <p className="text-sm text-muted">No active inquiry.</p>
+                <p className="text-xs text-muted mt-1">A new call opens one automatically — or start a job for this customer now.</p>
+                <button
+                  onClick={() => navigate('/new/manual', { state: { customerId: c.id, firstName: c.first_name, lastName: c.last_name, phone: c.phone, email: c.email } })}
+                  className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-content bg-brand hover:bg-brand-hover px-4 py-2 rounded-lg"
+                >
+                  <Plus size={14} /> Create Job
+                </button>
+              </div>
             </Card>
           )}
 
@@ -1096,20 +1119,21 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
 
 // The active engagement — the open Active Inquiry or booked Job — rendered
 // expanded with its status, a Stale flag for an idle inquiry, and (for an open
-// inquiry) the manual Close / Mark Lost actions plus the green "Mark Booked"
-// header action. Mark Booked reuses the lead-detail Confirm Booking modal and
-// its booking path verbatim; it never re-runs extraction or auto-book logic.
-function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymentChange, refreshKey = 0 }) {
+// inquiry) the manual Close / Mark Lost actions plus the green "Create Job"
+// header action. Create Job opens the booking flow (availability + Send Payment
+// Link / Mark Paid) on the engagement's representative call; it never re-runs
+// extraction or auto-book logic.
+function ActiveEngagement({ id, engagement: e, onClose, onSendPaymentLink, onMarkPaid, onEdit, onPaymentChange, refreshKey = 0 }) {
   const [closing, setClosing] = useState(false);
-  // Manual booking is offered only while the inquiry is still open (status
-  // 'inquiry'); once it's a booked Job or completed, the button is hidden.
+  // Create Job is offered only while the inquiry is still open (status 'inquiry');
+  // once it's a booked Job or completed, the button is hidden.
   const [bookingLead, setBookingLead] = useState(null);
   const [loadingBooking, setLoadingBooking] = useState(false);
   // Editing job details is available the whole time the engagement is open —
   // an unbooked Active Inquiry or a booked Open Job alike.
   const [editLead, setEditLead] = useState(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
-  // Mark Booked initiates booking; hide it once booking is already in flight
+  // Create Job initiates booking; hide it once booking is already in flight
   // (pending_payment — the payment link is out and payment is what books it).
   const canBook = e.status === ENGAGEMENT_STATUS.INQUIRY && e.job_stage !== 'pending_payment';
   // The operational stages worth showing as the first indicator (paired with payment).
@@ -1140,13 +1164,27 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
     }
   };
 
-  const confirmBooking = async (payload) => {
+  // Both booking paths persist via the parent then close the modal on success. On
+  // failure we re-throw so the modal re-enables its buttons and stays open for retry.
+  const sendPaymentLink = async (payload) => {
     try {
-      await onBook(e, payload);
+      await onSendPaymentLink(e, payload);
       setBookingLead(null);
     } catch (err) {
-      console.error('Booking failed:', err);
+      console.error('Send payment link failed:', err);
+      alert('Could not send the payment link. Please try again.');
+      throw err;
+    }
+  };
+
+  const markPaidBooking = async (payload) => {
+    try {
+      await onMarkPaid(e, payload);
+      setBookingLead(null);
+    } catch (err) {
+      console.error('Mark paid booking failed:', err);
       alert('Could not book this job. Please try again.');
+      throw err;
     }
   };
 
@@ -1203,7 +1241,7 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
               disabled={loadingBooking}
               className="flex items-center gap-1.5 text-xs font-medium text-background bg-success hover:bg-success/90 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors"
             >
-              <CheckCircle2 size={14} /> {loadingBooking ? 'Loading…' : 'Mark Booked'}
+              <CheckCircle2 size={14} /> {loadingBooking ? 'Loading…' : 'Create Job'}
             </button>
           )}
         </div>
@@ -1247,7 +1285,12 @@ function ActiveEngagement({ id, engagement: e, onClose, onBook, onEdit, onPaymen
       )}
 
       {bookingLead && (
-        <BookedModal lead={bookingLead} onConfirm={confirmBooking} onClose={() => setBookingLead(null)} />
+        <CreateJobModal
+          lead={bookingLead}
+          onSendPaymentLink={sendPaymentLink}
+          onMarkPaid={markPaidBooking}
+          onClose={() => setBookingLead(null)}
+        />
       )}
 
       {editLead && (

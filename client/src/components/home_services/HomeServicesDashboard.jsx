@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   AlertTriangle, UserPlus, CalendarCheck2, Truck, CheckCircle2, DollarSign,
   Phone, CalendarSearch, Calendar, Sparkles, X, Check, ArrowRight, ArrowUpRight,
-  ArrowDownRight, FileText, Briefcase, AlertCircle,
+  ArrowDownRight, FileText, Briefcase, AlertCircle, Plus,
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import socket from '../../socket';
@@ -1649,12 +1649,20 @@ export default function HomeServicesDashboard() {
   return (
     <div className="space-y-6">
       {/* Greeting */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-content">{greeting}, {settings.ownerFirstName || 'there'}! 👋</h1>
           <p className="text-sm text-muted mt-1">Here's what's happening with your business today.</p>
         </div>
-        <p className="text-sm text-muted mt-1 flex-shrink-0">{today}</p>
+        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+          <button
+            onClick={() => navigate('/new/manual')}
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-content bg-brand hover:bg-brand-hover px-3.5 py-2 rounded-lg transition-colors"
+          >
+            <Plus size={15} /> Create Job
+          </button>
+          <p className="text-sm text-muted">{today}</p>
+        </div>
       </div>
 
       {/* Morning Brief banner — renders only in the morning, until dismissed */}

@@ -370,6 +370,12 @@ router.put('/:id', (req, res) => {
     // 'awaiting_final_payment' instead. Forward transitions only; owner edits to
     // other fields and the reschedule-approval flow are untouched.
     let emailPaymentLink = false;
+    // Explicit owner override (Mark Paid / book-without-link): book the job now
+    // WITHOUT emailing a payment link — payment was collected outside Stream, so the
+    // booking reserves the dumpster immediately. Confirmed in the UI and never
+    // auto-set. When present it lets 'booked' persist for a job the invoice rollup
+    // still reads as unpaid, instead of the normal reroute to pending_payment.
+    const bookWithoutPayment = req.body.book_without_payment === true;
     const isHomeServicesLead = existing.vertical === 'home_services';
     if (isHomeServicesLead && updates.job_status !== undefined && updates.job_status !== existing.job_status) {
       const target = updates.job_status;
@@ -378,7 +384,7 @@ router.put('/:id', (req, res) => {
         leadIds: [existing.id], customerId: existing.customer_id || null, leadPaidAt,
       });
       const isPaid = payNow === 'paid';
-      if ((target === JOB_STATUS.BOOKED || target === JOB_STATUS.PENDING_PAYMENT) && !isPaid) {
+      if ((target === JOB_STATUS.BOOKED || target === JOB_STATUS.PENDING_PAYMENT) && !isPaid && !bookWithoutPayment) {
         updates.job_status = JOB_STATUS.PENDING_PAYMENT;
         if (!existing.payment_link_emailed_at) emailPaymentLink = true;
       } else if (target === JOB_STATUS.COMPLETED && !isPaid) {
@@ -543,6 +549,13 @@ router.post('/manual', requireAuth, (req, res) => {
     const phone = str(b.phone);
     const email = str(b.email);
 
+    // Optional explicit customer link (from the customer profile's Create Job flow).
+    // Today leads reconcile to a customer by phone only; when the owner starts a job
+    // FROM a customer profile we link that customer directly (validated below), so the
+    // job lands under the right person even if the phone is edited. NULL → phone
+    // reconciliation runs after insert, exactly as before.
+    const customerIdRaw = b.customerId == null ? null : Number(b.customerId);
+
     // Job details (dumpster_rental). vertical/sub_vertical are accepted so this
     // endpoint stays usable as more verticals get manual entry, defaulting to the
     // home_services dumpster_rental schema the form is built around.
@@ -555,20 +568,28 @@ router.post('/manual', requireAuth, (req, res) => {
       ? null : Number(b.rentalDuration);
     const deliveryAddress = str(b.deliveryAddress);
     const accessNotes = str(b.accessNotes);
+    const scheduledTime = str(b.scheduledTime); // "HH:mm" delivery time (optional)
 
     // Quote / payment
     const priceNum = b.price === '' || b.price == null ? null : Number(b.price);
     const hasPrice = priceNum != null && !Number.isNaN(priceNum);
-    const paymentStatus = b.paymentStatus === 'paid'
+    // "Mark Paid" is the book-without-link override: the owner collected payment
+    // outside Stream (cash/card in person). It books immediately AND records the
+    // payment — no link is emailed — and is treated the same as an explicit paid
+    // status below.
+    const markPaid = b.markPaid === true;
+    const paymentStatus = (markPaid || b.paymentStatus === 'paid')
       ? 'Paid' : (b.paymentStatus === 'not_paid' ? 'Not paid' : null);
 
-    // Status / intent. "Book Job" (or picking Booked) INITIATES booking, which is
-    // payment-gated: unpaid → pending_payment (email the link, reserve nothing);
-    // already paid (owner collected offline) → booked immediately.
+    // Status / intent. "Send Payment Link" / "Book Job" (or picking Booked)
+    // INITIATES booking, which is payment-gated: unpaid → pending_payment (email the
+    // link, reserve nothing); already paid — Mark Paid or an explicit paid status —
+    // → booked immediately (reserved). Booking a job and recording payment are
+    // independent axes, so Mark Paid does both in one shot.
     const book = b.book === true;
     const chosenJobStatus = [JOB_STATUS.INQUIRY, JOB_STATUS.OPPORTUNITY, JOB_STATUS.BOOKED].includes(b.jobStatus)
       ? b.jobStatus : JOB_STATUS.INQUIRY;
-    const wantsBooked = book || chosenJobStatus === JOB_STATUS.BOOKED;
+    const wantsBooked = book || markPaid || chosenJobStatus === JOB_STATUS.BOOKED;
     const alreadyPaid = paymentStatus === 'Paid';
     const jobStatus = wantsBooked
       ? (alreadyPaid ? JOB_STATUS.BOOKED : JOB_STATUS.PENDING_PAYMENT)
@@ -585,6 +606,15 @@ router.post('/manual', requireAuth, (req, res) => {
     );
     if (!hasJobDetail) {
       return res.status(400).json({ error: 'Add at least one job detail (size, date, address, price, etc.)' });
+    }
+
+    // Resolve an explicit customer link if one was supplied and belongs to this
+    // business. Invalid/foreign ids are ignored (we fall back to phone reconcile),
+    // never trusted, so this can't attach a job to another tenant's customer.
+    let linkedCustomerId = null;
+    if (Number.isFinite(customerIdRaw)) {
+      const cust = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(customerIdRaw, businessId);
+      if (cust) linkedCustomerId = cust.id;
     }
 
     const pickupDate = calcPickupFromDuration(deliveryDate, rentalDurationDays);
@@ -629,18 +659,18 @@ router.post('/manual', requireAuth, (req, res) => {
 
     const insert = db.prepare(`
       INSERT INTO leads (
-        business_id, vertical, sub_vertical, source, call_type, extraction_type,
+        business_id, customer_id, vertical, sub_vertical, source, call_type, extraction_type,
         customer_first_name, customer_last_name, phone, email,
         status, job_status, outcome, customer_intent,
-        delivery_date, raw_delivery_date, pickup_date, estimated_revenue,
+        delivery_date, raw_delivery_date, pickup_date, scheduled_time, estimated_revenue,
         paid_at, payment_status, vertical_data, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = insert.run(
-      businessId, vertical, subVertical, 'manual', 'manual', 'manual',
+      businessId, linkedCustomerId, vertical, subVertical, 'manual', 'manual', 'manual',
       firstName, lastName || null, phone, email || null,
       legacyStatus, jobStatus, outcome, intent || null,
-      deliveryDate || null, deliveryDate || null, pickupDate || null, hasPrice ? priceNum : null,
+      deliveryDate || null, deliveryDate || null, pickupDate || null, scheduledTime || null, hasPrice ? priceNum : null,
       paidAt, paymentStatusCol, JSON.stringify(verticalData), nowISO, nowISO
     );
 
@@ -648,9 +678,14 @@ router.post('/manual', requireAuth, (req, res) => {
 
     logActivity(lead.id, 'note_added', 'Lead manually created by owner');
 
-    // Attach the new lead to a customer record (find-or-create by phone) right
-    // away so it surfaces under the right person in the Customers section.
-    try { reconcileCustomersForBusiness(businessId); } catch (e) { console.error('[leads/manual] reconcile error:', e.message); }
+    // Attach the new lead to a customer. An explicit customer_id (Create Job from a
+    // profile) was set on insert above — just refresh that customer's derived status.
+    // Otherwise fall back to find-or-create by phone so it still surfaces under the
+    // right person in the Customers section.
+    try {
+      if (linkedCustomerId) recomputeCustomerStatus(linkedCustomerId);
+      else reconcileCustomersForBusiness(businessId);
+    } catch (e) { console.error('[leads/manual] reconcile error:', e.message); }
 
     // Booking initiated but unpaid → email the payment link (payment reserves the
     // dumpster). A booked+paid manual entry needs no link. Same email channel the

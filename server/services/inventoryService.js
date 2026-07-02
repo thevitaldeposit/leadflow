@@ -85,6 +85,29 @@ function getAvailabilityForSize(requestedSize, deliveryDate, pickupDate, exclude
   return all.find(a => normalizeSize(a.size) === requestedNum) || null;
 }
 
+// The earliest delivery date AFTER `deliveryDate` on which a unit of the requested
+// size is free for the SAME rental length. Used by the manual-booking surfaces to
+// answer "if today's window is full, when's the next opening?" — advisory only, so
+// the caller can still intentionally overbook. Scans forward one day at a time up to
+// `horizonDays`; returns a YYYY-MM-DD string, or null if no opening in that horizon
+// (or if there's no pool for the size at all). Pure availability math — no writes,
+// no auto-book logic.
+function getNextAvailableDate(requestedSize, deliveryDate, rentalDays, excludeLeadId = null, businessId, horizonDays = 60) {
+  const days = Number(rentalDays);
+  if (!deliveryDate || !(days >= 1)) return null;
+  if (normalizeSize(requestedSize) === null) return null;
+
+  for (let offset = 1; offset <= horizonDays; offset++) {
+    const candidateDelivery = addDaysToISO(deliveryDate, offset);
+    const candidatePickup = addDaysToISO(candidateDelivery, days);
+    const avail = getAvailabilityForSize(requestedSize, candidateDelivery, candidatePickup, excludeLeadId, businessId);
+    // A null row means the size has no pool — nothing will ever be available for it.
+    if (avail === null) return null;
+    if (avail.available > 0) return candidateDelivery;
+  }
+  return null;
+}
+
 // Parse a rental duration string to integer days.
 // "7 days" → 7, "1 week" → 7, "2 weeks" → 14, "10" → 10, etc.
 function parseRentalDays(str) {
@@ -345,6 +368,7 @@ module.exports = {
   getActiveJobCountsBySize,
   getAvailabilityBySize,
   getAvailabilityForSize,
+  getNextAvailableDate,
   parseRentalDays,
   addDaysToISO,
   normalizeSize,

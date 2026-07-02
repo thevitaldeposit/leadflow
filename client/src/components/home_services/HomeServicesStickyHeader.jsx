@@ -3,7 +3,11 @@ import {
   Sparkles,
   CheckCircle2,
   XCircle,
+  Send,
+  Banknote,
+  AlertTriangle,
 } from 'lucide-react';
+import AvailabilityCheck from './AvailabilityCheck';
 import UrgencyBadge from './UrgencyBadge';
 import IntentBadge from './IntentBadge';
 import VoicemailBadge from './VoicemailBadge';
@@ -186,6 +190,165 @@ export function BookedModal({ lead, onConfirm, onClose }) {
             Cancel
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Create Job — the customer-profile booking flow for an OPEN inquiry. Same
+// size/date/duration inputs + pool availability as Confirm Booking, but instead of a
+// single "Confirm" it presents the two lifecycle-correct choices:
+//   • Send Payment Link → job_status 'booked'; the server payment-gate reroutes the
+//     unpaid job to pending_payment and emails the link (payment reserves the unit).
+//   • Mark Paid → payment collected outside Stream → booked + reserved now, no link
+//     (the parent sends paid_at + book_without_payment).
+// Availability is advisory here too (owners may intentionally overbook) with a
+// next-available hint. Never re-runs extraction / booking-signal / auto-book logic.
+export function CreateJobModal({ lead, onSendPaymentLink, onMarkPaid, onClose }) {
+  const vd = parseVerticalData(lead);
+  const t = getTerminology(lead.vertical, getSubVertical(lead));
+  const extractedSize = vd.dumpsterSize || null;
+  const [date, setDate] = useState(lead.delivery_date || vd.deliveryDate || '');
+  const [rentalDays, setRentalDays] = useState(() => {
+    const n = parseRentalDays(vd.rentalDuration);
+    return n ? String(n) : '';
+  });
+  const [size, setSize] = useState(extractedSize || '');
+  const [poolSizes, setPoolSizes] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmPaid, setConfirmPaid] = useState(false);
+
+  const daysNum = Number(rentalDays);
+  const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
+  const isValid = !!date && daysNum >= 1 && !!size;
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getInventory()
+      .then(rows => {
+        if (cancelled) return;
+        const sizes = (rows || []).map(r => r.size).filter(Boolean);
+        setPoolSizes(sizes);
+        if (extractedSize) {
+          const match = sizes.find(s => sizeMatches(s, extractedSize));
+          if (match) setSize(match);
+        }
+      })
+      .catch(() => { if (!cancelled) setPoolSizes([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const sizeOptions = poolSizes.some(s => s === size) || !size ? poolSizes : [size, ...poolSizes];
+
+  // The parent handler persists then closes the modal (setBookingLead(null)) on
+  // success; on failure it throws, so we just re-enable the buttons and stay open.
+  const run = async (fn) => {
+    if (!isValid || submitting) return;
+    setSubmitting(true);
+    try {
+      await fn({ date, rentalDays: daysNum, size });
+    } catch (err) {
+      console.error('Create Job action failed:', err);
+      setSubmitting(false);
+    }
+  };
+
+  const fieldCls = 'w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent bg-surface';
+  const labelCls = 'block text-xs font-medium text-muted uppercase tracking-wide mb-1';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-surface rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <h3 className="text-lg font-bold text-content mb-1">Create Job</h3>
+        <p className="text-sm text-muted mb-5">{getLeadName(lead)}{size ? ` · ${size}` : ''}</p>
+        <div className="space-y-4">
+          <div>
+            <label className={labelCls}>{t.jobUnit} Size <span className="text-danger">*</span></label>
+            <select value={size} onChange={e => setSize(e.target.value)} className={fieldCls}>
+              {!size && <option value="">Select a size…</option>}
+              {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>{t.startDate} <span className="text-danger">*</span></label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={fieldCls} />
+          </div>
+          <div>
+            <label className={labelCls}>{t.durationLabel} (days) <span className="text-danger">*</span></label>
+            <input
+              type="number"
+              min="1"
+              value={rentalDays}
+              onChange={e => setRentalDays(e.target.value)}
+              placeholder="e.g. 7"
+              className={fieldCls}
+            />
+            {pickupISO ? (
+              <p className="text-xs text-muted mt-1">{t.endAction}: {formatPickupDate(pickupISO)}</p>
+            ) : (
+              <p className="text-xs text-muted mt-1">Enter duration to calculate {t.endAction.toLowerCase()} date</p>
+            )}
+          </div>
+          <div>
+            <label className={labelCls}>Availability</label>
+            {isValid ? (
+              <AvailabilityCheck size={size} deliveryDate={date} rentalDays={daysNum} excludeLeadId={lead.id} />
+            ) : (
+              <p className="text-xs text-muted">Enter a delivery date and duration to check availability.</p>
+            )}
+          </div>
+        </div>
+
+        {!confirmPaid ? (
+          <div className="mt-6 space-y-3">
+            <button
+              onClick={() => run(onSendPaymentLink)}
+              disabled={!isValid || submitting}
+              className="w-full flex items-center gap-3 text-left text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-3 rounded-xl transition-colors"
+            >
+              <Send size={18} className="flex-shrink-0" />
+              <span>
+                <span className="block text-sm font-semibold">Send Payment Link</span>
+                <span className="block text-xs opacity-90">Emails a secure link · books &amp; reserves when paid</span>
+              </span>
+            </button>
+            <button
+              onClick={() => setConfirmPaid(true)}
+              disabled={!isValid || submitting}
+              className="w-full flex items-center gap-3 text-left text-content bg-surface hover:bg-surface-2 border border-divider disabled:opacity-60 px-4 py-3 rounded-xl transition-colors"
+            >
+              <Banknote size={18} className="flex-shrink-0 text-muted" />
+              <span>
+                <span className="block text-sm font-semibold">Mark Paid</span>
+                <span className="block text-xs text-muted">Collected outside Stream · books &amp; reserves now, no link</span>
+              </span>
+            </button>
+            <button onClick={onClose} disabled={submitting} className="w-full text-sm text-muted hover:text-content px-4 py-2 rounded-xl transition-colors disabled:opacity-50">
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="mt-6 bg-warning/5 border border-warning/30 rounded-xl p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle size={18} className="text-warning flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-content">
+                Payment collected outside Stream? This <strong>books the job, reserves the {t.jobUnit.toLowerCase()}, and records it as paid</strong> — no payment link is sent.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => run(onMarkPaid)}
+                disabled={submitting}
+                className="flex items-center gap-1.5 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:opacity-60 px-4 py-2.5 rounded-xl transition-colors"
+              >
+                <Banknote size={15} /> {submitting ? 'Booking…' : 'Yes, mark paid & book'}
+              </button>
+              <button onClick={() => setConfirmPaid(false)} disabled={submitting} className="text-sm text-muted hover:text-content px-3 py-2.5 rounded-xl disabled:opacity-50">
+                Back
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
