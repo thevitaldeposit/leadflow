@@ -41,6 +41,41 @@ router.get('/', (req, res) => {
   }
 });
 
+// GET /api/customers/lookup?phone=&firstName=&lastName= — read-only check for the
+// manual booking form's "Next" step: does this phone already belong to a
+// DIFFERENT-named customer for this business? Creates nothing. Mirrors the
+// same-phone/different-name gate in POST /leads/manual: phone-only match, and the
+// existing "name" is the real name only (display_name / first+last / company) with NO
+// phone/"Unknown" fallback, so a nameless customer never counts as a different name.
+// Returns { needsConfirmation, customer: { id, name } | null }. Must be declared
+// before '/:id' so "lookup" isn't captured as an id.
+router.get('/lookup', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const np = normalizePhone(req.query.phone);
+    if (!np) return res.json({ needsConfirmation: false, customer: null });
+    const existing = db.prepare('SELECT * FROM customers WHERE business_id = ? AND normalized_phone = ?')
+      .get(businessId, np);
+    if (!existing) return res.json({ needsConfirmation: false, customer: null });
+    const existingName = (existing.display_name
+      || [existing.first_name, existing.last_name].filter(Boolean).join(' ')
+      || existing.company
+      || '').trim();
+    const enteredName = [req.query.firstName, req.query.lastName]
+      .map((s) => (typeof s === 'string' ? s.trim() : ''))
+      .filter(Boolean).join(' ').trim();
+    const namesDiffer = !!(existingName && enteredName
+      && existingName.toLowerCase() !== enteredName.toLowerCase());
+    res.json({
+      needsConfirmation: namesDiffer,
+      customer: existingName ? { id: existing.id, name: existingName } : null,
+    });
+  } catch (err) {
+    console.error('GET /customers/lookup error:', err);
+    res.status(500).json({ error: 'Failed to look up customer' });
+  }
+});
+
 // GET /api/customers/:id — full profile: contact, addresses, job history,
 // activity timeline, totals, and resolved per-client pricing.
 router.get('/:id', (req, res) => {

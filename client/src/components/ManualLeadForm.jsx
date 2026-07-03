@@ -127,9 +127,17 @@ export default function ManualLeadForm() {
   const [error, setError] = useState(null);
   const [confirmPaid, setConfirmPaid] = useState(false);
   // Set to { id, name, mode } when the entered phone already belongs to a
-  // different-named customer and the server is asking us to confirm before creating
-  // anything. `mode` is the booking action chosen, so the re-submit repeats it.
+  // different-named customer and we're asking the owner to confirm a merge. Two
+  // triggers: the read-only check on "Next" (mode:null → merging just carries the id
+  // into the booking step) and the server's 409 confirm gate as a backstop at submit
+  // time (mode set → merging re-submits that booking action).
   const [confirmCustomer, setConfirmCustomer] = useState(null);
+  // The existing customer this booking should attach to, chosen via the same-phone
+  // merge confirm. Rides the explicit-customer (book-from-profile) path on submit.
+  // Cleared when the phone is edited, since it was tied to the old number's owner.
+  const [mergeCustomerId, setMergeCustomerId] = useState(null);
+  // True while the "Next" read-only phone check is in flight.
+  const [checkingPhone, setCheckingPhone] = useState(false);
   // Computed-price prefill: the resolver's suggested amount for the chosen size +
   // duration, and whether the owner has manually edited the price (once they do, we
   // stop auto-syncing so their number is never overwritten).
@@ -137,6 +145,12 @@ export default function ManualLeadForm() {
   const [priceEdited, setPriceEdited] = useState(false);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  // Editing the phone invalidates a merge decision (it was tied to the old number's
+  // owner), so clear it — the next "Next" re-checks the new number.
+  const onPhoneChange = (e) => {
+    if (mergeCustomerId) setMergeCustomerId(null);
+    setForm((f) => ({ ...f, phone: e.target.value }));
+  };
 
   const pickupISO = useMemo(
     () => calcPickup(form.deliveryDate, form.rentalDuration),
@@ -180,35 +194,86 @@ export default function ManualLeadForm() {
   const isValid = form.firstName.trim() && form.phone.trim();
   const fullName = [form.firstName, form.lastName].map(s => s.trim()).filter(Boolean).join(' ');
 
-  // Open the same-phone / different-name confirm dialog. The server signals this by
-  // REFUSING to create the lead: it comes back as a 409 (caught below), but we accept a
-  // 2xx body too, defensively. Either way we open the dialog and never navigate — no
-  // lead exists yet. `mode` is carried so "Add to <name>" repeats the same booking action.
+  // Open the same-phone / different-name merge confirm as a BACKSTOP: if a booking is
+  // submitted without a merge id and the phone still belongs to a different-named
+  // customer, the server refuses (409, creates nothing) and we open the same modal.
+  // `mode` is carried so "Merge into <name>" repeats the chosen booking action.
   const openConfirm = (existingCustomer, mode) => {
     setConfirmCustomer({ ...(existingCustomer || {}), mode });
     setSubmitting(false);
   };
 
+  // "Next" → read-only check: does the entered phone already belong to a
+  // DIFFERENT-named customer? If so, ask before advancing (merge into them, or go back
+  // and fix the number). Creates nothing. When the phone is already pinned to a customer
+  // — a profile-initiated Create Job, or a merge the owner already confirmed — the gate
+  // can't fire, so skip the check. On any lookup failure we advance anyway (never strand
+  // the owner); the server's 409 gate is the backstop at submit time.
+  const handleNext = async () => {
+    if (!isValid || checkingPhone || submitting) return;
+    setError(null);
+    if (customerId || mergeCustomerId) { setStep(2); return; }
+    setCheckingPhone(true);
+    try {
+      const r = await api.lookupCustomerByPhone({
+        phone: form.phone, firstName: form.firstName, lastName: form.lastName,
+      });
+      if (r && r.needsConfirmation && r.customer) {
+        setConfirmCustomer({ ...r.customer, mode: null });
+        return;
+      }
+      setStep(2);
+    } catch {
+      setStep(2);
+    } finally {
+      setCheckingPhone(false);
+    }
+  };
+
+  // "Merge into <name>": attach this booking to the existing customer that owns the
+  // phone, via the same explicit-customer path as book-from-profile. From the "Next"
+  // check (mode:null) we just carry the id into the booking step; from the server
+  // backstop (mode set) we re-submit that booking action now pinned to the customer.
+  const confirmMerge = () => {
+    const c = confirmCustomer;
+    if (!c) return;
+    setMergeCustomerId(c.id);
+    setConfirmCustomer(null);
+    if (c.mode) submit(c.mode, c.id);
+    else setStep(2);
+  };
+
+  // "Go back and edit": close the merge confirm and return to Step 1 so the owner can
+  // fix the number. Creates nothing.
+  const dismissConfirm = () => {
+    setConfirmCustomer(null);
+    setConfirmPaid(false);
+    setError(null);
+    setStep(1);
+  };
+
   // mode: 'inquiry' (save only, nothing sent), 'link' (book → email payment link →
   // pending_payment), 'paid' (Mark Paid: external payment → booked + reserved, no link).
-  // confirmDifferentName re-submits past the same-phone/different-name gate, attaching
-  // the booking to the existing customer that owns the entered phone.
-  const submit = async (mode, confirmDifferentName = false) => {
+  // A merge id (from the same-phone confirm) or a profile-initiated customerId attaches
+  // the booking to that existing customer via the book-from-profile path server-side,
+  // which also bypasses the confirm gate.
+  const submit = async (mode, mergeIdOverride = null) => {
     if (!isValid || submitting) return;
     setSubmitting(true);
     setError(null);
+    const linkCustomerId = mergeIdOverride || mergeCustomerId || customerId;
     try {
       const res = await api.createManualLead({
         ...form,
         vertical,
         subVertical,
-        customerId,
+        customerId: linkCustomerId,
         book: mode !== 'inquiry',
         markPaid: mode === 'paid',
-        ...(confirmDifferentName ? { confirmDifferentName: true } : {}),
       });
-      // Defensive: should the confirmation ever arrive as a 2xx body, catch it here
-      // and open the dialog instead of treating it as a created lead.
+      // Backstop: should the different-name gate ever fire here (no merge id carried),
+      // open the same merge modal instead of treating it as a created lead. Handles a
+      // 2xx body defensively; the real signal is the 409 caught below.
       if (res && res.needsConfirmation) { openConfirm(res.existingCustomer, mode); return; }
       // Only navigate when a lead was actually created — never to a phantom id.
       if (!res || res.id == null) {
@@ -226,7 +291,7 @@ export default function ManualLeadForm() {
       navigate(`/leads/${res.id}`, { state: { fresh: true } });
     } catch (err) {
       // Same phone, different-named customer → the server (409) created nothing and wants
-      // confirmation. Open the dialog instead of surfacing it as an error or redirecting.
+      // confirmation. Open the merge modal instead of surfacing it as an error.
       if (err && err.status === 409 && err.data && err.data.needsConfirmation) {
         openConfirm(err.data.existingCustomer, mode);
         return;
@@ -236,45 +301,49 @@ export default function ManualLeadForm() {
     }
   };
 
+  // Shared merge-confirm modal — rendered on both steps (fixed overlay), driven by
+  // confirmCustomer. From "Next" it appears on Step 1; as the server backstop it can
+  // appear on Step 2. Either way the owner merges or goes back to fix the number, and
+  // is never left stuck.
+  const confirmModal = confirmCustomer && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-surface rounded-xl border border-divider shadow-lg w-full max-w-md p-5 space-y-4">
+        <div className="flex items-start gap-2.5">
+          <AlertTriangle size={18} className="text-warning flex-shrink-0 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-semibold text-content">Phone number already in use</h3>
+            <p className="text-sm text-muted mt-1">
+              An account with this phone number already exists:{' '}
+              <strong className="text-content">{confirmCustomer.name}</strong>. Merge this
+              booking into that account?
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={dismissConfirm}
+            disabled={submitting}
+            className="text-sm font-medium text-muted hover:text-content border border-divider px-4 py-2 rounded-lg disabled:opacity-50"
+          >
+            Go back and edit
+          </button>
+          <button
+            onClick={confirmMerge}
+            disabled={submitting}
+            className="text-sm font-medium text-background bg-accent hover:opacity-90 px-4 py-2 rounded-lg disabled:opacity-60"
+          >
+            Merge into {confirmCustomer.name}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // ── Step 2 — Booking ─────────────────────────────────────────────────────────
   if (step === 2) {
     return (
       <div className="max-w-3xl space-y-5">
-        {/* Same-phone / different-name confirm — the server created nothing; the owner
-            either adds this booking to the existing customer or cancels to fix the number. */}
-        {confirmCustomer && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="bg-surface rounded-xl border border-divider shadow-lg w-full max-w-md p-5 space-y-4">
-              <div className="flex items-start gap-2.5">
-                <AlertTriangle size={18} className="text-warning flex-shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="text-sm font-semibold text-content">Phone number already in use</h3>
-                  <p className="text-sm text-muted mt-1">
-                    This phone number already belongs to{' '}
-                    <strong className="text-content">{confirmCustomer.name}</strong>. Add this booking
-                    to them, or cancel and fix the number?
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  onClick={() => { setConfirmCustomer(null); setConfirmPaid(false); setError(null); setStep(1); }}
-                  disabled={submitting}
-                  className="text-sm font-medium text-muted hover:text-content border border-divider px-4 py-2 rounded-lg disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => { const m = confirmCustomer.mode; setConfirmCustomer(null); submit(m, true); }}
-                  disabled={submitting}
-                  className="text-sm font-medium text-background bg-accent hover:opacity-90 px-4 py-2 rounded-lg disabled:opacity-60"
-                >
-                  Add to {confirmCustomer.name}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {confirmModal}
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold text-muted uppercase tracking-wide">Step 2 of 2 · Booking</p>
@@ -384,6 +453,7 @@ export default function ManualLeadForm() {
   // ── Step 1 — Customer + job details ──────────────────────────────────────────
   return (
     <div className="max-w-3xl space-y-5">
+      {confirmModal}
       <div>
         <p className="text-xs font-semibold text-muted uppercase tracking-wide">Step 1 of 2 · Details</p>
         <h2 className="text-lg font-bold text-content mt-0.5">Create Job</h2>
@@ -403,7 +473,7 @@ export default function ManualLeadForm() {
           <input className={inputCls} value={form.lastName} onChange={set('lastName')} placeholder="Doe" />
         </Field>
         <Field label="Phone" required>
-          <input className={inputCls} value={form.phone} onChange={set('phone')} placeholder="555-123-4567" />
+          <input className={inputCls} value={form.phone} onChange={onPhoneChange} placeholder="555-123-4567" />
         </Field>
         <Field label="Email">
           <input className={inputCls} type="email" value={form.email} onChange={set('email')} placeholder="jane@example.com" />
@@ -487,11 +557,11 @@ export default function ManualLeadForm() {
       {/* Continue to booking */}
       <div className="flex items-center gap-3 flex-wrap">
         <button
-          onClick={() => { setError(null); setStep(2); }}
-          disabled={!isValid}
+          onClick={handleNext}
+          disabled={!isValid || checkingPhone}
           className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:opacity-90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
         >
-          Next <ArrowRight size={15} />
+          {checkingPhone ? 'Checking…' : (<>Next <ArrowRight size={15} /></>)}
         </button>
         {!isValid && (
           <span className="flex items-center gap-1.5 text-xs text-muted">

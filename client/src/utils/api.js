@@ -101,6 +101,16 @@ export const api = {
     return request(`/customers${qs ? `?${qs}` : ''}`);
   },
   getCustomer: (id) => request(`/customers/${id}`),
+  // Read-only: does this phone already belong to a DIFFERENT-named customer for this
+  // business? Powers the manual booking form's "Next" merge confirm. Creates nothing.
+  // Returns { needsConfirmation, customer: { id, name } | null }.
+  lookupCustomerByPhone: ({ phone, firstName, lastName } = {}) => {
+    const qs = new URLSearchParams();
+    if (phone) qs.set('phone', phone);
+    if (firstName) qs.set('firstName', firstName);
+    if (lastName) qs.set('lastName', lastName);
+    return request(`/customers/lookup?${qs.toString()}`);
+  },
   createCustomer: (body) =>
     request('/customers', {
       method: 'POST',
