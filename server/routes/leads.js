@@ -8,7 +8,7 @@ const { initiateClickToCall } = require('../services/callService');
 const { logActivity, getActivityForLead } = require('../services/activityLog');
 const { emitToBusiness } = require('../socket');
 const { attachBusiness, requireAuth } = require('../middleware/auth');
-const { reconcileCustomersForBusiness, recomputeCustomerStatus, findOrCreateCustomerForLead } = require('../services/customerService');
+const { reconcileCustomersForBusiness, recomputeCustomerStatus, findOrCreateCustomerForLead, normalizePhone } = require('../services/customerService');
 const { describeBooking } = require('../services/leadActivityText');
 const { sendToAll } = require('../services/apns');
 const { JOB_STATUS, LEGACY_STATUS, ACTIVE_JOB_STATUS_SET } = require('../config/jobStatus');
@@ -640,6 +640,48 @@ router.post('/manual', requireAuth, (req, res) => {
     if (Number.isFinite(customerIdRaw)) {
       const cust = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(customerIdRaw, businessId);
       if (cust) linkedCustomerId = cust.id;
+    }
+
+    // ── Same-phone / different-name confirm gate ─────────────────────────────────
+    // A phone number maps to exactly ONE customer (matching is phone-only). When this
+    // booking wasn't started from a specific customer profile (no explicit
+    // linkedCustomerId) and the entered phone already belongs to a DIFFERENT-named
+    // customer, don't silently attach the booking to that person — stop and let the
+    // owner decide. They re-submit the SAME payload with confirmDifferentName:true to
+    // attach it to that existing customer (linked directly, exactly like the
+    // book-from-profile path), or cancel and fix the number. This is a per-request
+    // flag, never a stored setting, and it changes neither the matcher nor the
+    // one-phone-one-customer rule — it only asks first.
+    const confirmDifferentName = b.confirmDifferentName === true;
+    if (!linkedCustomerId) {
+      const np = normalizePhone(phone);
+      const existingCustomer = np
+        ? db.prepare('SELECT * FROM customers WHERE business_id = ? AND normalized_phone = ?').get(businessId, np)
+        : null;
+      if (existingCustomer) {
+        // The customer's real name only (no phone/"Unknown" fallback): a nameless
+        // existing customer isn't a "different name", so it never prompts.
+        const existingName = (existingCustomer.display_name
+          || [existingCustomer.first_name, existingCustomer.last_name].filter(Boolean).join(' ')
+          || existingCustomer.company
+          || '').trim();
+        const enteredName = [firstName, lastName].filter(Boolean).join(' ').trim();
+        const namesDiffer = existingName && enteredName
+          && existingName.toLowerCase() !== enteredName.toLowerCase();
+        if (namesDiffer && !confirmDifferentName) {
+          // Nothing is created yet — the client shows a confirm dialog with these.
+          return res.status(200).json({
+            needsConfirmation: true,
+            reason: 'phone_belongs_to_different_customer',
+            existingCustomer: { id: existingCustomer.id, name: existingName },
+          });
+        }
+        // Names match/blank → fall through: linkedCustomerId stays null and phone
+        // reconcile attaches + enriches this customer exactly as before. Confirmed
+        // different name → link the booking DIRECTLY to that existing customer, the
+        // same explicit link the book-from-profile path uses.
+        if (namesDiffer) linkedCustomerId = existingCustomer.id;
+      }
     }
 
     // No explicit price but we have a size → compute the suggested amount from the

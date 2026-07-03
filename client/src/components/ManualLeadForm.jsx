@@ -126,6 +126,10 @@ export default function ManualLeadForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [confirmPaid, setConfirmPaid] = useState(false);
+  // Set to { id, name, mode } when the entered phone already belongs to a
+  // different-named customer and the server is asking us to confirm before creating
+  // anything. `mode` is the booking action chosen, so the re-submit repeats it.
+  const [confirmCustomer, setConfirmCustomer] = useState(null);
   // Computed-price prefill: the resolver's suggested amount for the chosen size +
   // duration, and whether the owner has manually edited the price (once they do, we
   // stop auto-syncing so their number is never overwritten).
@@ -178,19 +182,30 @@ export default function ManualLeadForm() {
 
   // mode: 'inquiry' (save only, nothing sent), 'link' (book → email payment link →
   // pending_payment), 'paid' (Mark Paid: external payment → booked + reserved, no link).
-  const submit = async (mode) => {
+  // confirmDifferentName re-submits past the same-phone/different-name gate, attaching
+  // the booking to the existing customer that owns the entered phone.
+  const submit = async (mode, confirmDifferentName = false) => {
     if (!isValid || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      const lead = await api.createManualLead({
+      const res = await api.createManualLead({
         ...form,
         vertical,
         subVertical,
         customerId,
         book: mode !== 'inquiry',
         markPaid: mode === 'paid',
+        ...(confirmDifferentName ? { confirmDifferentName: true } : {}),
       });
+      // Same phone, different-named customer → the server created NOTHING and is asking
+      // us to confirm. Open the dialog (carrying the chosen booking action so the
+      // re-submit repeats it exactly) instead of navigating.
+      if (res && res.needsConfirmation) {
+        setConfirmCustomer({ ...res.existingCustomer, mode });
+        setSubmitting(false);
+        return;
+      }
       // Opened from a missed call → fold the placeholder away now that it's a real
       // lead, so it leaves the Action Queue. Non-blocking.
       if (navState.missedCallId) {
@@ -198,7 +213,7 @@ export default function ManualLeadForm() {
       }
       // /leads/:id resolves to the owning customer and lands on their profile — the
       // same person for a profile-initiated Create Job — with the "saved" confirmation.
-      navigate(`/leads/${lead.id}`, { state: { fresh: true } });
+      navigate(`/leads/${res.id}`, { state: { fresh: true } });
     } catch (err) {
       setError(err.message || 'Failed to create lead');
       setSubmitting(false);
@@ -209,6 +224,41 @@ export default function ManualLeadForm() {
   if (step === 2) {
     return (
       <div className="max-w-3xl space-y-5">
+        {/* Same-phone / different-name confirm — the server created nothing; the owner
+            either adds this booking to the existing customer or cancels to fix the number. */}
+        {confirmCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="bg-surface rounded-xl border border-divider shadow-lg w-full max-w-md p-5 space-y-4">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle size={18} className="text-warning flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-semibold text-content">Phone number already in use</h3>
+                  <p className="text-sm text-muted mt-1">
+                    This phone number already belongs to{' '}
+                    <strong className="text-content">{confirmCustomer.name}</strong>. Add this booking
+                    to them, or cancel and fix the number?
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={() => { setConfirmCustomer(null); setConfirmPaid(false); setError(null); setStep(1); }}
+                  disabled={submitting}
+                  className="text-sm font-medium text-muted hover:text-content border border-divider px-4 py-2 rounded-lg disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => { const m = confirmCustomer.mode; setConfirmCustomer(null); submit(m, true); }}
+                  disabled={submitting}
+                  className="text-sm font-medium text-background bg-accent hover:opacity-90 px-4 py-2 rounded-lg disabled:opacity-60"
+                >
+                  Add to {confirmCustomer.name}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold text-muted uppercase tracking-wide">Step 2 of 2 · Booking</p>
