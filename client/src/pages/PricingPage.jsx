@@ -252,11 +252,12 @@ function FeeForm({ initial, onSave, onCancel }) {
   );
 }
 
-// ── Special / restricted item editor ───────────────────────────────────────────
+// ── Prohibited / surcharge item editor ──────────────────────────────────────────
+// Every item is just a name + a charge. The old prohibited-vs-surcharge type toggle
+// was dropped: operationally it's all "once it's in the dumpster, we charge for it."
 function SpecialItemForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState({
     name: initial?.name || '',
-    kind: initial?.kind || 'surcharge',
     charge_amount: initial?.charge_amount ?? '',
   });
   const [saving, setSaving] = useState(false);
@@ -270,8 +271,10 @@ function SpecialItemForm({ initial, onSave, onCancel }) {
     try {
       await onSave({
         name: form.name.trim(),
-        kind: form.kind,
-        charge_amount: form.kind === 'surcharge' && form.charge_amount !== '' ? Number(form.charge_amount) : null,
+        // Always stored as a surcharge. Sending kind explicitly re-maps any legacy
+        // 'prohibited' row to a surcharge so its charge is no longer force-nulled.
+        kind: 'surcharge',
+        charge_amount: form.charge_amount !== '' ? Number(form.charge_amount) : null,
       });
     } catch (err) { setError(err.message || 'Save failed'); setSaving(false); }
   };
@@ -279,17 +282,9 @@ function SpecialItemForm({ initial, onSave, onCancel }) {
   return (
     <form onSubmit={submit} className="space-y-3">
       {error && <p className="text-xs text-danger">{error}</p>}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
+      <div className="grid grid-cols-2 gap-3 items-end">
         <div><label className={labelCls}>Item</label><input className={inputCls} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Mattress" /></div>
-        <div>
-          <label className={labelCls}>Type</label>
-          <Segmented
-            value={form.kind}
-            onChange={(v) => set('kind', v)}
-            options={[{ value: 'surcharge', label: 'Surcharge' }, { value: 'prohibited', label: 'Prohibited' }]}
-          />
-        </div>
-        {form.kind === 'surcharge' && <div><label className={labelCls}>Charge ($)</label><input type="number" min="0" step="0.01" className={inputCls} value={form.charge_amount} onChange={(e) => set('charge_amount', e.target.value)} placeholder="40" /></div>}
+        <div><label className={labelCls}>Charge ($)</label><input type="number" min="0" step="0.01" className={inputCls} value={form.charge_amount} onChange={(e) => set('charge_amount', e.target.value)} placeholder="40" /></div>
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className={btnGhost}><X size={14} /> Cancel</button>
@@ -485,17 +480,17 @@ export default function PricingPage() {
         )}
       </Section>
 
-      {/* Prohibited / restricted items */}
+      {/* Prohibited / surcharge items */}
       <Section
         icon={<Ban size={16} className="text-muted" />}
-        title="Prohibited Items" count={specialItems.length}
+        title="Prohibited / Surcharge Items" count={specialItems.length}
         adding={addingSpecial}
         onAdd={() => { setAddingSpecial(true); setEditingSpecial(null); }}
         addLabel="Add Item"
       >
         {addingSpecial && <div className="px-5 py-4 border-b border-divider bg-surface-2"><SpecialItemForm onSave={saveSpecial} onCancel={() => setAddingSpecial(false)} /></div>}
         {specialItems.length === 0 && !addingSpecial ? (
-          <div className="px-5 py-8 text-center text-sm text-muted">No items. Add prohibited items or per-item surcharges (e.g. mattress, tires, appliances).</div>
+          <div className="px-5 py-8 text-center text-sm text-muted">No items yet. Add items that carry an extra charge (e.g. mattress, tires, appliances).</div>
         ) : (
           <div className="divide-y divide-divider">
             {specialItems.map((s) => editingSpecial === s.id ? (
@@ -505,9 +500,7 @@ export default function PricingPage() {
                 <div className="flex items-center gap-2">
                   <Package size={14} className="text-muted" />
                   <span className="font-medium text-content">{s.name}</span>
-                  {s.kind === 'prohibited'
-                    ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-danger/10 text-danger border border-danger/20">Prohibited</span>
-                    : <span className="text-[11px] px-2 py-0.5 rounded-full bg-surface-2 text-content border border-divider">Surcharge{s.charge_amount != null ? ` · $${s.charge_amount}` : ''}</span>}
+                  <span className="text-sm text-content font-semibold">{s.charge_amount != null ? `$${s.charge_amount}` : '—'}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0 ml-3">
                   <button onClick={() => { setEditingSpecial(s.id); setAddingSpecial(false); }} className="p-1.5 rounded text-muted hover:text-accent hover:bg-brand/10"><Edit2 size={13} /></button>
