@@ -670,10 +670,16 @@ router.post('/manual', requireAuth, (req, res) => {
           && existingName.toLowerCase() !== enteredName.toLowerCase();
         if (namesDiffer && !confirmDifferentName) {
           // Nothing is created yet — the client shows a confirm dialog with these.
-          return res.status(200).json({
+          // Sent as 409 (not 200) ON PURPOSE: a non-2xx makes any client fail SAFE —
+          // it surfaces the error instead of treating this as a created lead and
+          // redirecting to a lead that doesn't exist. The confirm-aware client reads
+          // the body to open its dialog; `error` is a sensible fallback message for
+          // any client that doesn't.
+          return res.status(409).json({
             needsConfirmation: true,
             reason: 'phone_belongs_to_different_customer',
             existingCustomer: { id: existingCustomer.id, name: existingName },
+            error: `This phone number already belongs to ${existingName}.`,
           });
         }
         // Names match/blank → fall through: linkedCustomerId stays null and phone

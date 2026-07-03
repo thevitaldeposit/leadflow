@@ -9,6 +9,10 @@ async function request(path, options = {}) {
   if (!res.ok) {
     const err = new Error((data && data.error) || `HTTP ${res.status}`);
     err.status = res.status;
+    // Surface the parsed response body so callers can read structured error payloads
+    // (e.g. a 409 "needs confirmation" response). Additive — existing catch blocks
+    // that only read err.message / err.status are unaffected.
+    err.data = data;
     throw err;
   }
   return data;

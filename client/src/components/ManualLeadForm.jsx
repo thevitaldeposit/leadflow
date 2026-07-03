@@ -180,6 +180,15 @@ export default function ManualLeadForm() {
   const isValid = form.firstName.trim() && form.phone.trim();
   const fullName = [form.firstName, form.lastName].map(s => s.trim()).filter(Boolean).join(' ');
 
+  // Open the same-phone / different-name confirm dialog. The server signals this by
+  // REFUSING to create the lead: it comes back as a 409 (caught below), but we accept a
+  // 2xx body too, defensively. Either way we open the dialog and never navigate — no
+  // lead exists yet. `mode` is carried so "Add to <name>" repeats the same booking action.
+  const openConfirm = (existingCustomer, mode) => {
+    setConfirmCustomer({ ...(existingCustomer || {}), mode });
+    setSubmitting(false);
+  };
+
   // mode: 'inquiry' (save only, nothing sent), 'link' (book → email payment link →
   // pending_payment), 'paid' (Mark Paid: external payment → booked + reserved, no link).
   // confirmDifferentName re-submits past the same-phone/different-name gate, attaching
@@ -198,11 +207,12 @@ export default function ManualLeadForm() {
         markPaid: mode === 'paid',
         ...(confirmDifferentName ? { confirmDifferentName: true } : {}),
       });
-      // Same phone, different-named customer → the server created NOTHING and is asking
-      // us to confirm. Open the dialog (carrying the chosen booking action so the
-      // re-submit repeats it exactly) instead of navigating.
-      if (res && res.needsConfirmation) {
-        setConfirmCustomer({ ...res.existingCustomer, mode });
+      // Defensive: should the confirmation ever arrive as a 2xx body, catch it here
+      // and open the dialog instead of treating it as a created lead.
+      if (res && res.needsConfirmation) { openConfirm(res.existingCustomer, mode); return; }
+      // Only navigate when a lead was actually created — never to a phantom id.
+      if (!res || res.id == null) {
+        setError('Could not create the booking. Please try again.');
         setSubmitting(false);
         return;
       }
@@ -215,6 +225,12 @@ export default function ManualLeadForm() {
       // same person for a profile-initiated Create Job — with the "saved" confirmation.
       navigate(`/leads/${res.id}`, { state: { fresh: true } });
     } catch (err) {
+      // Same phone, different-named customer → the server (409) created nothing and wants
+      // confirmation. Open the dialog instead of surfacing it as an error or redirecting.
+      if (err && err.status === 409 && err.data && err.data.needsConfirmation) {
+        openConfirm(err.data.existingCustomer, mode);
+        return;
+      }
       setError(err.message || 'Failed to create lead');
       setSubmitting(false);
     }
