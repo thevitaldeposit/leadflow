@@ -199,14 +199,14 @@ export default function InvoiceDetailPage() {
           <tbody className="divide-y divide-divider">
             {inv.line_items.map((it) => (
               <tr key={it.id}>
-                <td className="px-5 py-3 text-content">
-                  {it.description}
+                <td className="px-5 py-3 text-content align-top">
+                  <span>{it.title || it.description}</span>
                   {it.line_type && it.line_type !== 'service' && <span className="ml-2 text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-surface-2 text-muted">{it.line_type}</span>}
-                  {it.unit ? <span className="text-muted text-xs"> / {it.unit}</span> : null}
+                  {it.detail ? <div className="text-muted text-xs mt-0.5">{it.detail}</div> : null}
                 </td>
-                <td className="px-3 py-3 text-right text-muted">{it.quantity}</td>
-                <td className="px-3 py-3 text-right text-muted">{money(it.unit_rate, inv.currency)}</td>
-                <td className="px-5 py-3 text-right text-content font-medium">{money(it.amount, inv.currency)}</td>
+                <td className="px-3 py-3 text-right text-muted align-top">{it.quantity}</td>
+                <td className="px-3 py-3 text-right text-muted align-top">{money(it.unit_rate, inv.currency)}</td>
+                <td className="px-5 py-3 text-right text-content font-medium align-top">{money(it.amount, inv.currency)}</td>
               </tr>
             ))}
           </tbody>

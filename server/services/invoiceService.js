@@ -195,6 +195,60 @@ function persistTotals(invoiceId, totals, taxRate) {
   ).run(totals.subtotal, num(taxRate, 0), totals.taxAmount, totals.total, nowIso(), invoiceId);
 }
 
+// ── Line-item display formatting (title + detail) ───────────────────────────────
+// Computed line items (weight overage, swap replacement) are stored with a compact,
+// machine-built description. For DISPLAY we present a clean TITLE (size first) plus a
+// plain-language DETAIL line, modeled on a standard invoice line. This is PURELY
+// cosmetic: it never changes quantity/unit_rate/amount — only how the description
+// reads. It parses our OWN generated format and falls back to the raw description if
+// the text doesn't match (e.g. an owner-edited line), so nothing is ever mangled.
+function prettySize(s) {
+  const str = String(s || '').trim();
+  const m = str.match(/^(\d+)\s*(?:yd|yard|yards|cubic\s*yards?|cy)\b/i);
+  if (m) return `${m[1]} Yard`;
+  return str.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function describeLineItem(item) {
+  const desc = String((item && item.description) || '').trim();
+  const type = item && item.line_type;
+
+  // Weight overage: "Weight overage — 1.5 ton(s) over 1 included (20 yard)".
+  //   → title "20 Yard – Weight Overage", detail "1.5 tons over 1 ton weight allowance."
+  if (type === 'overage' && /weight overage/i.test(desc)) {
+    const allowanceM = desc.match(/over\s+([\d.]+)\s+included/i);
+    if (allowanceM) {
+      const sizeM = desc.match(/\(([^)]+)\)\s*$/);
+      const size = sizeM ? prettySize(sizeM[1]) : null;
+      const overTons = item.quantity != null ? item.quantity : null;
+      return {
+        title: size ? `${size} – Weight Overage` : 'Weight Overage',
+        detail: overTons != null ? `${overTons} tons over ${allowanceM[1]} ton weight allowance.` : null,
+      };
+    }
+  }
+
+  // Swap replacement: "Swap replacement — 20 yard (6 days)".
+  //   → title "20 Yard – Swap Replacement", detail "6 day replacement rental."
+  if (/^swap replacement/i.test(desc)) {
+    const sizeM = desc.match(/—\s*(.+?)\s*\(/);
+    const daysM = desc.match(/\((\d+)\s*days?\)/i);
+    const size = sizeM ? prettySize(sizeM[1].trim()) : null;
+    return {
+      title: size ? `${size} – Swap Replacement` : 'Swap Replacement',
+      detail: daysM ? `${daysM[1]} day replacement rental.` : null,
+    };
+  }
+
+  // Everything else reads fine already — show it as the title, no secondary line.
+  return { title: desc, detail: null };
+}
+
+// Attach title/detail to each line item for display, preserving all stored fields.
+function withDisplay(items) {
+  return (items || []).map((it) => ({ ...it, ...describeLineItem(it) }));
+}
+
 // ── Reads ─────────────────────────────────────────────────────────────────────
 function getCustomerRow(businessId, customerId) {
   if (!customerId) return null;
@@ -205,7 +259,7 @@ function getCustomerRow(businessId, customerId) {
 function getInvoice(businessId, id) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ? AND business_id = ?').get(id, businessId);
   if (!inv) return null;
-  inv.line_items = getLineItems(inv.id);
+  inv.line_items = withDisplay(getLineItems(inv.id));
   return inv;
 }
 
@@ -681,14 +735,21 @@ function toPublic(invoice, business, payment = {}) {
     bill_to_email: invoice.bill_to_email,
     bill_to_phone: invoice.bill_to_phone,
     bill_to_address: invoice.bill_to_address,
-    line_items: (invoice.line_items || []).map((it) => ({
-      description: it.description,
-      line_type: it.line_type,
-      quantity: it.quantity,
-      unit: it.unit,
-      unit_rate: it.unit_rate,
-      amount: it.amount,
-    })),
+    line_items: (invoice.line_items || []).map((it) => {
+      const d = describeLineItem(it);
+      return {
+        description: it.description,
+        // Display-only split: clean title (size first) + plain-language detail line.
+        // Amounts/qty/rate are untouched — see describeLineItem.
+        title: d.title,
+        detail: d.detail,
+        line_type: it.line_type,
+        quantity: it.quantity,
+        unit: it.unit,
+        unit_rate: it.unit_rate,
+        amount: it.amount,
+      };
+    }),
     // Whether the customer must sign before the Pay action unlocks. Drives the
     // client-side gate; the same rule is enforced server-side on the charge
     // endpoint so the UI is never the only guard.
@@ -737,6 +798,7 @@ module.exports = {
   getDefaults,
   setDefaults,
   prefill,
+  describeLineItem,
   getInvoice,
   listInvoices,
   createInvoice,

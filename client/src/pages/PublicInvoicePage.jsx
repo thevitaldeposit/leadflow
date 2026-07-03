@@ -111,38 +111,17 @@ function DrawPad({ onChange }) {
   );
 }
 
-function SignSection({ token, invoice, onSigned }) {
-  const [mode, setMode] = useState('draw'); // 'draw' | 'type'
-  const [name, setName] = useState('');
-  const [drawn, setDrawn] = useState(null);
-  const [agree, setAgree] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-
+// Presentational signature form: the tabs, name, draw/type pad and agree checkbox.
+// State lives in PublicInvoicePage so the STICKY bottom bar can share it and act as
+// the submit button — the gate (name + signature + agree) is unchanged. No submit
+// button here; the sticky bar below is the single, always-reachable sign action.
+function SignForm({ mode, setMode, name, setName, setDrawn, agree, setAgree, invoice, error }) {
   const typedSig = name.trim();
-  const canSign = agree && name.trim() && (mode === 'draw' ? !!drawn : !!typedSig) && !submitting;
-
-  const submit = async () => {
-    setError(null);
-    const signatureData = mode === 'draw' ? drawn : typedSig;
-    const signatureType = mode === 'draw' ? 'drawn' : 'typed';
-    if (!name.trim()) return setError('Please enter your full name.');
-    if (!signatureData) return setError(mode === 'draw' ? 'Please draw your signature.' : 'Please type your name as your signature.');
-    setSubmitting(true);
-    try {
-      const signed = await api.signPublicInvoice(token, { signerName: name.trim(), signatureData, signatureType });
-      onSigned(signed);
-    } catch (e) {
-      setError(e.message || 'Could not record your signature. Please try again.');
-      setSubmitting(false);
-    }
-  };
-
   const tabCls = (active) =>
     `flex-1 text-sm font-medium py-2 rounded-lg transition-colors ${active ? 'bg-well text-content' : 'bg-surface-2 text-muted hover:bg-surface-2'}`;
 
   return (
-    <div className="bg-surface rounded-2xl shadow-sm p-5 sm:p-6">
+    <div id="sign-section" className="bg-surface rounded-2xl shadow-sm p-5 sm:p-6">
       <h2 className="text-base font-bold text-content">Accept &amp; Sign</h2>
       <p className="text-sm text-muted mt-1 mb-4">
         By signing, you confirm the details above are correct and agree to the terms.
@@ -184,14 +163,9 @@ function SignSection({ token, invoice, onSigned }) {
 
       {error && <p className="text-sm text-danger mt-3">{error}</p>}
 
-      <button
-        type="button"
-        onClick={submit}
-        disabled={!canSign}
-        className="w-full mt-4 py-3.5 rounded-xl text-base font-bold text-content bg-brand hover:bg-brand/90 disabled:bg-surface-2 disabled:cursor-not-allowed transition-colors"
-      >
-        {submitting ? 'Recording…' : 'Accept & Sign'}
-      </button>
+      <p className="text-xs text-muted mt-4">
+        Complete the fields above, then tap <span className="font-semibold text-content">Accept Terms and Sign Invoice</span> at the bottom of the screen.
+      </p>
     </div>
   );
 }
@@ -420,6 +394,16 @@ export default function PublicInvoicePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Signature form state — lifted here (from the old SignSection) so the STICKY
+  // bottom bar can be the always-visible submit button while the form inputs stay in
+  // the page flow. The signing gate is unchanged: name + signature + agree required.
+  const [signMode, setSignMode] = useState('draw'); // 'draw' | 'type'
+  const [signName, setSignName] = useState('');
+  const [signDrawn, setSignDrawn] = useState(null);
+  const [signAgree, setSignAgree] = useState(false);
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState(null);
+
   useEffect(() => {
     let active = true;
     api.getPublicInvoice(token)
@@ -460,6 +444,42 @@ export default function PublicInvoicePage() {
   const handlePaid = async (updated) => {
     if (updated) { setInvoice(updated); return; }
     try { setInvoice(await api.getPublicInvoice(token)); } catch { /* keep current */ }
+  };
+
+  // Sign gate (unchanged from the old SignSection): full name + a signature (drawn or
+  // typed) + the agree checkbox. The server ALSO rejects an unsigned charge, so this
+  // is UX, not the security boundary.
+  const typedSig = signName.trim();
+  const canSign = !!(signAgree && typedSig && (signMode === 'draw' ? signDrawn : typedSig) && !signing);
+
+  const submitSign = async () => {
+    setSignError(null);
+    const signatureData = signMode === 'draw' ? signDrawn : typedSig;
+    const signatureType = signMode === 'draw' ? 'drawn' : 'typed';
+    if (!signName.trim()) return setSignError('Please enter your full name.');
+    if (!signatureData) return setSignError(signMode === 'draw' ? 'Please draw your signature.' : 'Please type your name as your signature.');
+    setSigning(true);
+    try {
+      const signed = await api.signPublicInvoice(token, { signerName: signName.trim(), signatureData, signatureType });
+      setInvoice(signed);
+    } catch (e) {
+      setSignError(e.message || 'Could not record your signature. Please try again.');
+      setSigning(false);
+    }
+  };
+
+  // The sticky bar is always tappable: when the form is complete it signs; otherwise
+  // it scrolls the signature form into view and points out what's missing (so the
+  // customer never has to hunt for it). It never bypasses the signature requirement.
+  const onStickySign = () => {
+    if (canSign) { submitSign(); return; }
+    const el = document.getElementById('sign-section');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    let msg = 'Complete the signature above to continue.';
+    if (!signName.trim()) msg = 'Enter your full name and sign above to continue.';
+    else if (signMode === 'draw' ? !signDrawn : !typedSig) msg = signMode === 'draw' ? 'Draw your signature above to continue.' : 'Type your signature above to continue.';
+    else if (!signAgree) msg = 'Check the box to agree to the terms, then continue.';
+    setSignError(msg);
   };
 
   return (
@@ -536,13 +556,13 @@ export default function PublicInvoicePage() {
                 <tr><td colSpan={4} className="px-5 py-8 text-center text-muted">No line items.</td></tr>
               ) : inv.line_items.map((it, i) => (
                 <tr key={i}>
-                  <td className="px-5 py-3 text-content">
-                    {it.description}
-                    {it.unit ? <span className="text-muted text-xs"> / {it.unit}</span> : null}
+                  <td className="px-5 py-3 text-content align-top">
+                    <div>{it.title || it.description}</div>
+                    {it.detail ? <div className="text-muted text-xs mt-0.5">{it.detail}</div> : null}
                   </td>
-                  <td className="px-3 py-3 text-right text-muted whitespace-nowrap">{it.quantity}</td>
-                  <td className="px-3 py-3 text-right text-muted whitespace-nowrap">{money(it.unit_rate, inv.currency)}</td>
-                  <td className="px-5 py-3 text-right text-content font-medium whitespace-nowrap">{money(it.amount, inv.currency)}</td>
+                  <td className="px-3 py-3 text-right text-muted whitespace-nowrap align-top">{it.quantity}</td>
+                  <td className="px-3 py-3 text-right text-muted whitespace-nowrap align-top">{money(it.unit_rate, inv.currency)}</td>
+                  <td className="px-5 py-3 text-right text-content font-medium whitespace-nowrap align-top">{money(it.amount, inv.currency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -594,7 +614,13 @@ export default function PublicInvoicePage() {
             <p className="text-sm text-muted mt-3">{inv.signer_name} · {fmtDateTime(inv.signed_at)}</p>
           </div>
         ) : (
-          <SignSection token={token} invoice={inv} onSigned={setInvoice} />
+          <SignForm
+            mode={signMode} setMode={setSignMode}
+            name={signName} setName={setSignName}
+            setDrawn={setSignDrawn}
+            agree={signAgree} setAgree={setSignAgree}
+            invoice={inv} error={signError}
+          />
         )}
 
         {/* Payment — pay-by-card when the business has Connect enabled */}
@@ -605,6 +631,29 @@ export default function PublicInvoicePage() {
           <p className="text-xs text-muted mt-2">Powered by Stream</p>
         </div>
       </div>
+
+      {/* Sticky sign bar: full-width, pinned to the bottom of the viewport so the
+          Accept & Sign action is always visible/tappable without scrolling through the
+          whole contract. Shown only until signed; the same name + signature + agree
+          gate applies (onStickySign signs when complete, else scrolls to the form). */}
+      {!isSigned && (
+        <div className="sticky bottom-0 z-30 bg-surface border-t border-divider shadow-[0_-4px_16px_rgba(0,0,0,0.18)]">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3 sm:gap-4">
+            <div className="shrink-0">
+              <p className="text-[10px] font-semibold text-muted uppercase tracking-wide leading-none">Balance Due</p>
+              <p className="text-lg font-extrabold text-content leading-tight mt-0.5">{money(inv.total, inv.currency)}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onStickySign}
+              disabled={signing}
+              className="flex-1 py-3.5 rounded-xl text-base font-bold text-content bg-brand hover:bg-brand/90 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+            >
+              {signing ? 'Recording…' : 'Accept Terms and Sign Invoice'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
