@@ -570,9 +570,12 @@ router.post('/manual', requireAuth, (req, res) => {
     const accessNotes = str(b.accessNotes);
     const scheduledTime = str(b.scheduledTime); // "HH:mm" delivery time (optional)
 
-    // Quote / payment
-    const priceNum = b.price === '' || b.price == null ? null : Number(b.price);
-    const hasPrice = priceNum != null && !Number.isNaN(priceNum);
+    // Quote / payment. When the owner leaves the price blank we fall back to the
+    // configured pricing model (resolver) below, so a booked job still gets a computed
+    // amount — the same resolver the client prefill and auto-book use. An explicit
+    // price always wins (owner-overridable).
+    let priceNum = b.price === '' || b.price == null ? null : Number(b.price);
+    let hasPrice = priceNum != null && !Number.isNaN(priceNum);
     // "Mark Paid" is the book-without-link override: the owner collected payment
     // outside Stream (cash/card in person). It books immediately AND records the
     // payment — no link is emailed — and is treated the same as an explicit paid
@@ -612,6 +615,24 @@ router.post('/manual', requireAuth, (req, res) => {
     if (Number.isFinite(customerIdRaw)) {
       const cust = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(customerIdRaw, businessId);
       if (cust) linkedCustomerId = cust.id;
+    }
+
+    // No explicit price but we have a size → compute the suggested amount from the
+    // pricing model (base rental for the duration + any flat delivery fee), applying
+    // the linked customer's discount/override. Best-effort; leaves blank if unpriceable.
+    if (!hasPrice && dumpsterSize) {
+      try {
+        const ps = require('../services/pricingService');
+        const custRow = linkedCustomerId
+          ? db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(linkedCustomerId, businessId)
+          : null;
+        const q = ps.resolvePrice(businessId, { size: dumpsterSize, days: rentalDurationDays >= 1 ? rentalDurationDays : 1, customer: custRow });
+        if (q.priceable && q.total != null) {
+          const delivery = ps.getDeliveryFee(businessId);
+          priceNum = ps.round2(q.total + (delivery ? delivery.amount : 0));
+          hasPrice = true;
+        }
+      } catch (e) { console.error('[leads/manual] price resolve error:', e.message); }
     }
 
     const pickupDate = calcPickupFromDuration(deliveryDate, rentalDurationDays);

@@ -1,6 +1,9 @@
 const crypto = require('crypto');
 const db = require('../db/database');
-const { resolveEffectivePricing } = require('./pricingService');
+const {
+  resolveEffectivePricing, resolvePrice, rentalDaysFromLead, sizeFromLead,
+  getDeliveryFee, getSurchargeItems,
+} = require('./pricingService');
 const { displayNameOf } = require('./customerService');
 const { GENERIC_TERMS, businessTypeKey, resolveDefaultContract } = require('./contractTemplates');
 
@@ -239,34 +242,54 @@ function leadRevenueGuess(lead, vd) {
   return 0;
 }
 
-// Suggest starter line items for a job, generically. If a linked lead names a
-// dumpster size, match it to the customer's effective price list; otherwise fall
-// back to a single line from the quoted price / estimated revenue. Never
-// dumpster-only — any vertical gets the generic fallback.
-function suggestItemsFromLead(lead, pricingItems) {
+// Suggest starter line items for a job. For a dumpster job (a linked lead naming a
+// size) the base rental is priced by the CONFIGURED pricing model (tier/flat for the
+// rental duration, with the customer's discount/override applied), extra days beyond
+// the matched tier become their own line, and an enabled flat delivery fee is added —
+// so the invoice reflects real computed charges, not a guessed number. Falls back to a
+// single line from the quoted price / estimated revenue for a non-priceable size or a
+// non-dumpster vertical, so every vertical still gets a sensible prefill.
+function suggestItemsFromLead(businessId, lead, customer, pricingItems) {
   if (!lead) return [];
   let vd = {};
   try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
 
-  const findRate = (needle) => {
-    if (!needle) return null;
-    const n = String(needle).toLowerCase();
-    return pricingItems.find(
-      (p) => (p.service_key && p.service_key.toLowerCase() === n) ||
-             (p.label && p.label.toLowerCase().includes(n))
-    ) || null;
-  };
-
-  const size = vd.dumpsterSize || null;
+  const size = sizeFromLead(lead);
   if (size) {
-    const m = findRate(size);
+    const q = resolvePrice(businessId, { size, days: rentalDaysFromLead(lead), customer });
+    if (q.priceable && q.base != null) {
+      const items = [{
+        description: `${size} Dumpster Rental${q.tier_label ? ` — ${q.tier_label}` : ''}${q.discount_source === 'group' && q.discount_percent ? ` (${q.discount_percent}% off)` : ''}`,
+        service_key: q.size_key,
+        line_type: 'service',
+        quantity: 1,
+        unit: null,
+        unit_rate: q.base,
+      }];
+      if (q.extra_days > 0 && q.extra_day_charge > 0) {
+        items.push({
+          description: `Extra rental days (${q.extra_days} × $${q.extra_day_rate})`,
+          service_key: null,
+          line_type: 'service',
+          quantity: q.extra_days,
+          unit: 'day',
+          unit_rate: q.extra_day_rate,
+        });
+      }
+      const delivery = getDeliveryFee(businessId);
+      if (delivery) {
+        items.push({ description: delivery.label, service_key: null, line_type: 'fee', quantity: 1, unit: null, unit_rate: delivery.amount });
+      }
+      return items;
+    }
+    // Size not priceable via config — fall back to the quoted/estimated number.
     return [{
       description: `${size} Dumpster Rental`,
-      service_key: m ? m.service_key : null,
+      service_key: q.size_key || null,
       line_type: 'service',
       quantity: 1,
-      unit: m ? m.unit : null,
-      unit_rate: m && m.effective_price != null ? m.effective_price : leadRevenueGuess(lead, vd),
+      unit: null,
+      unit_rate: leadRevenueGuess(lead, vd),
     }];
   }
 
@@ -291,6 +314,16 @@ function prefill(businessId, customerId, leadId) {
     lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId);
   }
 
+  // Add-able presets beyond the size rate list: an enabled flat delivery fee and any
+  // surcharge special items (mattress, etc.). Mileage is intentionally excluded (no
+  // distance math), so it never appears as an add-able fee.
+  const delivery = getDeliveryFee(businessId);
+  const availableFees = delivery
+    ? [{ label: delivery.label, amount: delivery.amount, line_type: 'fee', fee_type: 'delivery' }]
+    : [];
+  const availableSpecialItems = getSurchargeItems(businessId)
+    .map((s) => ({ name: s.name, amount: s.charge_amount, line_type: 'fee' }));
+
   const issue = today();
   return {
     customer_id: customer.id,
@@ -305,8 +338,10 @@ function prefill(businessId, customerId, leadId) {
     bill_to_email: customer.email || '',
     bill_to_phone: customer.phone || '',
     bill_to_address: customer.address || '',
-    suggested_items: suggestItemsFromLead(lead, pricing.items || []),
+    suggested_items: suggestItemsFromLead(businessId, lead, customer, pricing.items || []),
     available_rates: pricing.items || [],
+    available_fees: availableFees,
+    available_special_items: availableSpecialItems,
   };
 }
 

@@ -934,10 +934,11 @@ function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], overageNeedsRate
       if (res.overage && res.overage.overTons > 0) {
         parts.push(res.overage.amount != null
           ? `Overage: ${res.overage.overTons}t ($${res.overage.amount})`
-          : `Overage: ${res.overage.overTons}t — set a per-ton rate to bill it`);
+          : `Overage: ${res.overage.overTons}t — set overage pricing for this size on the Pricing page to bill it`);
       }
+      if (res.overageInvoiceId) parts.push('Invoice emailed to the customer.');
       if (res.advancedTo === 'completed') parts.push('Job completed.');
-      else if (res.advancedTo === 'awaiting_final_payment') parts.push('Awaiting final payment.');
+      else if (res.advancedTo === 'awaiting_final_payment') parts.push('Awaiting final charges.');
       else parts.push(`${res.unitsOut} unit(s) still out.`);
       setMsg(parts.join(' '));
       setWeight(''); setSwap(false); setOpen(false);
@@ -968,6 +969,7 @@ function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], overageNeedsRate
                 <span>
                   {t.weightTons != null ? `${t.weightTons} tons` : 'weight not entered'}
                   {t.swap ? ' · swap-out' : ''}
+                  {t.swapCharge != null ? ` · swap $${t.swapCharge}` : ''}
                   {t.overageTons > 0 ? (t.overageAmount != null ? ` · overage $${t.overageAmount}` : ' · overage (rate needed)') : ''}
                 </span>
               </li>
@@ -976,7 +978,7 @@ function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], overageNeedsRate
         )}
         {overageNeedsRate && (
           <p className="text-xs text-warning bg-warning/10 px-2 py-1.5 rounded-lg">
-            Overage recorded but not priced — set a per-ton overage rate in Settings to bill it.
+            Overage recorded but not priced — set this size's weight allowance and per-ton overage rate on the Pricing page to bill it.
           </p>
         )}
         {!open ? (

@@ -211,6 +211,37 @@ async function sendInvoiceEmail({ to, businessName, customerName, invoiceNumber,
   });
 }
 
+// Email a customer a link to review + pay one invoice — the same Resend path the
+// payment-link + owner "Send invoice" flows use. Resolves the business name from
+// settings and builds the tokenized /invoice/:token link off the customer-facing app
+// origin (PUBLIC_APP_URL, else joinstream.app). Used by the weight/overage flow to
+// deliver an auto-generated overage/swap bill. Best-effort: returns {sent, reason};
+// never throws into the caller. Never touches the call/recording/voice path.
+async function sendInvoiceLinkEmail(invoice) {
+  const to = invoice && invoice.bill_to_email ? String(invoice.bill_to_email).trim() : null;
+  if (!to) return { sent: false, reason: 'no_email' };
+  if (!process.env.RESEND_API_KEY) return { sent: false, reason: 'no_email_provider' };
+  const businessName = getDbSetting('businessName', invoice.business_id) || 'our team';
+  const origin = (process.env.PUBLIC_APP_URL || 'https://joinstream.app').replace(/\/+$/, '');
+  const link = `${origin}/invoice/${invoice.public_token}`;
+  try {
+    await sendInvoiceEmail({
+      to,
+      businessName,
+      customerName: invoice.bill_to_name || null,
+      invoiceNumber: invoice.invoice_number,
+      total: invoice.total,
+      link,
+    });
+    if (invoice.lead_id) logActivity(invoice.lead_id, 'invoice_sent', `Invoice ${invoice.invoice_number} emailed to ${to}`);
+    console.log(`[email] Invoice ${invoice.invoice_number} emailed to ${to}`);
+    return { sent: true, to, link };
+  } catch (err) {
+    console.error(`[email] Failed to email invoice ${invoice.id}:`, err.message);
+    return { sent: false, reason: 'send_error', error: err.message };
+  }
+}
+
 // Read a per-business setting value (mirrors smsService.getDbSetting) for the
 // business name shown in the payment email.
 function getDbSetting(key, businessId) {
@@ -393,4 +424,4 @@ async function sendContactConfirmation({ name, email }) {
   });
 }
 
-module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail, sendInvoiceEmail, buildInvoiceEmailHtml, sendPaymentLinkEmail, buildPaymentLinkEmailHtml };
+module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail, sendInvoiceEmail, sendInvoiceLinkEmail, buildInvoiceEmailHtml, sendPaymentLinkEmail, buildPaymentLinkEmailHtml };

@@ -455,6 +455,22 @@ async function processRecording(payload) {
         db.prepare("UPDATE leads SET job_status = 'pending_payment', updated_at = ? WHERE id = ?")
           .run(new Date().toISOString(), lead.id);
         lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+        // Suggested booking amount now comes from the configured pricing model
+        // (size + duration + any delivery fee), not the model's estimate. Prefill it
+        // (owner-overridable afterward) so the payment link + /pay page show the
+        // computed price. Additive + best-effort: leaves the existing estimate when the
+        // size isn't priceable. Does NOT change auto-book's trigger threshold or routing.
+        try {
+          const suggested = require('../services/pricingService').suggestedBookingRevenue(lead.business_id, lead);
+          if (suggested != null) {
+            let avd = {};
+            try { avd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { avd = {}; }
+            avd.quotedPrice = `$${suggested}`;
+            db.prepare('UPDATE leads SET estimated_revenue = ?, vertical_data = ?, updated_at = ? WHERE id = ?')
+              .run(suggested, JSON.stringify(avd), new Date().toISOString(), lead.id);
+            lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+          }
+        } catch (e) { console.error('[webhook] auto-book price prefill error:', e.message); }
         logActivity(lead.id, 'status_change', 'Auto-booked — payment link emailed (payment reserves the dumpster)');
         sendPaymentLinkEmail(lead).then((result) => {
           if (result.sent) {

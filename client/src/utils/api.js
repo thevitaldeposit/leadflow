@@ -148,6 +148,15 @@ export const api = {
 
   // Pricing config — the business default price list + discount groups
   getPricing: () => request('/pricing'),
+  // Compute a suggested price for a size + rental duration (+ optional customer) from
+  // the configured pricing model. Used to PREFILL an editable booking price. Returns
+  // the breakdown + `suggested_total` (base + extra days + delivery fee).
+  getPriceQuote: (body) =>
+    request('/pricing/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    }),
   createPriceItem: (body) =>
     request('/pricing/items', {
       method: 'POST',

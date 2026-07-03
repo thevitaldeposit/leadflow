@@ -4,6 +4,7 @@ const db = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 const {
   getPriceList, getDiscountGroups, getPricingFees, getSpecialItems, sanitizePricingConfig,
+  resolvePrice, getDeliveryFee,
 } = require('../services/pricingService');
 const { normalizeSizeKey } = require('../services/sizeKey');
 
@@ -34,6 +35,37 @@ router.get('/', (req, res) => {
   } catch (err) {
     console.error('GET /pricing error:', err);
     res.status(500).json({ error: 'Failed to retrieve pricing' });
+  }
+});
+
+// POST /api/pricing/quote — compute a suggested price for a size + rental duration,
+// with the full breakdown, so the booking flow can PREFILL an editable price. Applies
+// per-customer effective pricing when a customerId is given, and includes an enabled
+// flat delivery fee in the suggested total. Never persists anything.
+router.post('/quote', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const b = req.body || {};
+    const size = (b.size || b.dumpsterSize || '').toString().trim();
+    if (!size) return res.status(400).json({ error: 'size is required' });
+    const days = b.days === '' || b.days == null ? 1 : Number(b.days);
+
+    let customer = null;
+    const customerId = b.customerId == null ? null : Number(b.customerId);
+    if (Number.isFinite(customerId)) {
+      customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId) || null;
+    }
+
+    const quote = resolvePrice(businessId, { size, days, customer });
+    const delivery = getDeliveryFee(businessId);
+    const suggestedTotal = quote.priceable
+      ? Math.round(((quote.total || 0) + (delivery ? delivery.amount : 0)) * 100) / 100
+      : null;
+
+    res.json({ ...quote, delivery_fee: delivery, suggested_total: suggestedTotal });
+  } catch (err) {
+    console.error('POST /pricing/quote error:', err);
+    res.status(500).json({ error: 'Failed to compute quote' });
   }
 });
 

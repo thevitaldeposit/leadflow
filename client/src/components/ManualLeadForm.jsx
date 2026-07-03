@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   User, Wrench, DollarSign, ClipboardList, ArrowRight, ArrowLeft,
@@ -126,6 +126,11 @@ export default function ManualLeadForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [confirmPaid, setConfirmPaid] = useState(false);
+  // Computed-price prefill: the resolver's suggested amount for the chosen size +
+  // duration, and whether the owner has manually edited the price (once they do, we
+  // stop auto-syncing so their number is never overwritten).
+  const [quote, setQuote] = useState(null);
+  const [priceEdited, setPriceEdited] = useState(false);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -133,6 +138,37 @@ export default function ManualLeadForm() {
     () => calcPickup(form.deliveryDate, form.rentalDuration),
     [form.deliveryDate, form.rentalDuration]
   );
+
+  // Fetch a suggested price from the configured pricing model whenever the size or
+  // duration changes, and PREFILL the (still editable) price field until the owner
+  // overrides it. Size + a ≥1-day duration are required to price a rental.
+  useEffect(() => {
+    const size = form.dumpsterSize;
+    const days = Number(form.rentalDuration);
+    if (!size || !(days >= 1)) { setQuote(null); return; }
+    let active = true;
+    api.getPriceQuote({ size, days, ...(customerId ? { customerId } : {}) })
+      .then((q) => {
+        if (!active) return;
+        setQuote(q);
+        if (!priceEdited && q && q.priceable && q.suggested_total != null) {
+          setForm((f) => ({ ...f, price: String(q.suggested_total) }));
+        }
+      })
+      .catch(() => { if (active) setQuote(null); });
+    return () => { active = false; };
+    // priceEdited intentionally omitted: we don't want re-running to clobber an edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.dumpsterSize, form.rentalDuration, customerId]);
+
+  // Owner typing in the price field takes over (stop auto-syncing the suggestion).
+  const onPriceChange = (e) => { setPriceEdited(true); setForm((f) => ({ ...f, price: e.target.value })); };
+  const useSuggested = () => {
+    if (quote && quote.suggested_total != null) {
+      setPriceEdited(false);
+      setForm((f) => ({ ...f, price: String(quote.suggested_total) }));
+    }
+  };
 
   // Job details are ALL optional — only minimal contact (name + phone) is required.
   // A customer can be saved with every job field blank; it lands as an inquiry whose
@@ -349,8 +385,24 @@ export default function ManualLeadForm() {
         <Field label="Price">
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">$</span>
-            <input className={`${inputCls} pl-6`} type="number" min="0" step="1" value={form.price} onChange={set('price')} placeholder="0" />
+            <input className={`${inputCls} pl-6`} type="number" min="0" step="1" value={form.price} onChange={onPriceChange} placeholder="0" />
           </div>
+          {quote && quote.priceable && quote.suggested_total != null && (
+            <p className="text-[11px] text-muted mt-1 leading-snug">
+              Suggested <span className="font-semibold text-content">${quote.suggested_total}</span>
+              {quote.tier_label ? ` · ${quote.tier_label}` : ''}
+              {quote.extra_day_charge > 0 ? ` + ${quote.extra_days} extra day${quote.extra_days === 1 ? '' : 's'}` : ''}
+              {quote.discount_source === 'group' && quote.discount_percent ? ` · ${quote.discount_percent}% group discount` : ''}
+              {quote.discount_source === 'custom' ? ' · custom rate' : ''}
+              {quote.delivery_fee ? ` + $${quote.delivery_fee.amount} delivery` : ''}
+              {priceEdited && String(form.price) !== String(quote.suggested_total) ? (
+                <> · <button type="button" onClick={useSuggested} className="text-accent hover:underline font-medium">use</button></>
+              ) : ''}
+            </p>
+          )}
+          {quote && !quote.priceable && form.dumpsterSize && (
+            <p className="text-[11px] text-muted mt-1 leading-snug">No configured rate for this size — enter a price or set one on the Pricing page.</p>
+          )}
         </Field>
         <Field label="Intent">
           <select className={inputCls} value={form.intent} onChange={set('intent')}>

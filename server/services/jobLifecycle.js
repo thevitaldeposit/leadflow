@@ -34,6 +34,20 @@ function localTodayStr() {
 function parseVd(lead) {
   try { return lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { return {}; }
 }
+// Days a swap replacement stays out: today (the swap date) → the job's pickup date,
+// min 1. Falls back to the configured rental duration when there's no pickup date.
+function swapWindowDays(lead) {
+  const pd = lead && lead.pickup_date;
+  if (pd) {
+    const a = new Date(`${localTodayStr()}T00:00:00Z`);
+    const b = new Date(`${String(pd).slice(0, 10)}T00:00:00Z`);
+    if (!Number.isNaN(a.getTime()) && !Number.isNaN(b.getTime())) {
+      const days = Math.round((b.getTime() - a.getTime()) / 86400000);
+      if (days >= 1) return days;
+    }
+  }
+  try { return require('./pricingService').rentalDaysFromLead(lead); } catch { return 1; }
+}
 function loadLead(businessId, leadOrId) {
   if (leadOrId && typeof leadOrId === 'object') return leadOrId;
   return db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(leadOrId, businessId);
@@ -196,26 +210,40 @@ function advanceDueDeliveries(businessId) {
   return advanced;
 }
 
-// ── Weight overage config (per-business settings; NOT hardcoded) ────────────────
-// The pricing model for weight overage is a later prompt. For now we read two
-// optional per-business settings; if either is missing we record the weight and flag
-// that the rate/allowance is needed rather than inventing a number.
-function getOverageConfig(businessId) {
-  const inc = Number(getSetting('overageIncludedTons', businessId));
-  const rate = Number(getSetting('overageRatePerTon', businessId));
-  return {
-    includedTons: Number.isFinite(inc) && inc >= 0 ? inc : null,
-    ratePerTon: Number.isFinite(rate) && rate > 0 ? rate : null,
-  };
+// ── Weight overage config — now READ from the size's pricing_config ─────────────
+// The allowance (weight_allowance_tons) + rate ($/ton over) live on the size's price
+// row (Prompt A → Prompt B). We read them via the pricing resolver for the ticket's
+// size, falling back to the legacy per-business settings only when the size has no
+// configured value (backward-compatible). If neither yields a number we record the
+// weight and flag that the rate/allowance is needed rather than inventing one.
+function getOverageConfig(businessId, size = null) {
+  let allowance = null, rate = null;
+  if (size) {
+    try {
+      const cfg = require('./pricingService').getSizeWeightConfig(businessId, size);
+      if (cfg.allowanceTons != null && cfg.allowanceTons >= 0) allowance = cfg.allowanceTons;
+      if (cfg.ratePerTon != null && cfg.ratePerTon > 0) rate = cfg.ratePerTon;
+    } catch { /* pricing unavailable — fall through to legacy settings */ }
+  }
+  if (allowance == null) {
+    const inc = Number(getSetting('overageIncludedTons', businessId));
+    if (Number.isFinite(inc) && inc >= 0) allowance = inc;
+  }
+  if (rate == null) {
+    const r = Number(getSetting('overageRatePerTon', businessId));
+    if (Number.isFinite(r) && r > 0) rate = r;
+  }
+  return { includedTons: allowance, ratePerTon: rate };
 }
 
-// Compute overage for a recorded weight against the configured allowance/rate.
+// Compute overage for a recorded weight against the size's configured allowance/rate.
 // Returns a descriptor; `needsRate`/`needsAllowance` flag missing config so the UI can
-// surface "overage needs a rate" instead of a wrong dollar amount.
-function computeOverage(businessId, weightTons) {
+// surface "set overage pricing" instead of a wrong dollar amount. `size` selects the
+// price row the allowance/rate come from.
+function computeOverage(businessId, weightTons, { size = null } = {}) {
   const w = Number(weightTons);
   if (!Number.isFinite(w) || w < 0) return { weightTons: null, overTons: 0, amount: null, needsRate: false, needsAllowance: false };
-  const { includedTons, ratePerTon } = getOverageConfig(businessId);
+  const { includedTons, ratePerTon } = getOverageConfig(businessId, size);
   if (includedTons == null) return { weightTons: w, includedTons: null, overTons: 0, amount: null, needsRate: false, needsAllowance: true };
   const overTons = round2(Math.max(0, w - includedTons));
   if (overTons <= 0) return { weightTons: w, includedTons, overTons: 0, amount: 0, needsRate: false, needsAllowance: false };
@@ -237,8 +265,10 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   if (!lead) return { error: 'not_found' };
   const at = nowIso();
   const vd = parseVd(lead);
+  const size = vd.dumpsterSize || null;
 
-  const overage = weightTons != null && weightTons !== '' ? computeOverage(businessId, weightTons) : null;
+  // Overage is priced against THIS unit's size (allowance + $/ton from pricing_config).
+  const overage = weightTons != null && weightTons !== '' ? computeOverage(businessId, weightTons, { size }) : null;
 
   // Swap-safe units-out accounting. Default: one dumpster comes back per ticket.
   const before = lead.units_out == null ? 1 : lead.units_out;
@@ -251,28 +281,73 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     after = Math.max(0, before - 1);                           // final pickup for this unit
   }
 
-  // Generate the overage invoice only when we can price it. When a rate isn't
-  // configured we still record the weight + flag it (do not hardcode any numbers).
-  let overageInvoiceId = null;
-  if (overage && overage.overTons > 0 && overage.amount != null && overage.amount > 0 && lead.customer_id) {
+  // ── Bill this ticket: overage on the returned unit + a swap replacement's rental ──
+  // Both are priced from the size's pricing_config and land as line items on ONE
+  // 'sent' invoice for the job (so they count as outstanding bills in the settled
+  // rollup and block completion until paid). The invoice needs a customer; a booked
+  // job is linked by reconcile-on-read, but resolve one defensively so a bill never
+  // silently vanishes. A swapped unit is a NEW rental → its own weight allowance.
+  const lineItems = [];
+  if (overage && overage.overTons > 0 && overage.amount != null && overage.amount > 0) {
+    lineItems.push({
+      description: `Weight overage — ${overage.overTons} ton(s) over ${overage.includedTons} included${size ? ` (${size})` : ''}`,
+      quantity: overage.overTons,
+      unit: 'ton',
+      unit_rate: overage.ratePerTon,
+      line_type: 'overage',
+    });
+  }
+  // Swap replacement rental, priced over the swap window (today → pickup) per the
+  // size's swap config (same_as_rate → normal resolver; custom → custom price; off → none).
+  let swapCharge = null;
+  if (swap && size) {
     try {
-      const invoiceService = require('./invoiceService');
-      const inv = invoiceService.createInvoice(businessId, {
-        customer_id: lead.customer_id,
-        lead_id: lead.id,
-        line_items: [{
-          description: `Weight overage — ${overage.overTons} ton(s) over ${overage.includedTons} included`,
-          quantity: overage.overTons,
-          unit: 'ton',
-          unit_rate: overage.ratePerTon,
-          line_type: 'overage',
-        }],
-      });
-      // 'sent' so it counts as an outstanding bill in the settled rollup (blocks completion).
-      invoiceService.markSent(businessId, inv.id);
-      overageInvoiceId = inv.id;
-      logActivity(lead.id, 'invoice_created', `Overage invoice ${inv.invoice_number} created ($${overage.amount})`);
-    } catch (e) { console.error('[jobLifecycle] overage invoice failed:', e.message); }
+      const pricingService = require('./pricingService');
+      const customerRow = lead.customer_id
+        ? db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(lead.customer_id, businessId)
+        : null;
+      const sw = pricingService.resolveSwapPrice(businessId, { size, days: swapWindowDays(lead), customer: customerRow });
+      if (sw && sw.mode !== 'off' && sw.amount != null && sw.amount > 0) {
+        swapCharge = sw.amount;
+        lineItems.push({
+          description: `Swap replacement — ${size} (${swapWindowDays(lead)} day${swapWindowDays(lead) === 1 ? '' : 's'})`,
+          quantity: 1,
+          unit: null,
+          unit_rate: sw.amount,
+          line_type: 'service',
+        });
+      }
+    } catch (e) { console.error('[jobLifecycle] swap pricing failed:', e.message); }
+  }
+
+  let overageInvoiceId = null;
+  if (lineItems.length) {
+    let customerId = lead.customer_id;
+    if (!customerId) {
+      try { customerId = require('./customerService').findOrCreateCustomerForLead(businessId, lead); } catch { customerId = null; }
+    }
+    if (customerId) {
+      try {
+        const invoiceService = require('./invoiceService');
+        const inv = invoiceService.createInvoice(businessId, {
+          customer_id: customerId,
+          lead_id: lead.id,
+          line_items: lineItems,
+        });
+        // 'sent' so it counts as an outstanding bill in the settled rollup (blocks completion).
+        invoiceService.markSent(businessId, inv.id);
+        overageInvoiceId = inv.id;
+        const bits = [
+          overage && overage.overTons > 0 && overage.amount ? `overage $${overage.amount}` : null,
+          swapCharge ? `swap $${swapCharge}` : null,
+        ].filter(Boolean).join(' + ');
+        logActivity(lead.id, 'invoice_created', `Invoice ${inv.invoice_number} created${bits ? ` (${bits})` : ''}`);
+        // Email the bill to the customer (same Resend path as the payment link).
+        require('./emailService').sendInvoiceLinkEmail({ ...inv, business_id: businessId })
+          .then((r) => { if (r && !r.sent) console.log(`[jobLifecycle] invoice email not sent (inv ${inv.id}): ${r.reason}`); })
+          .catch((e) => console.error('[jobLifecycle] invoice email error:', e.message));
+      } catch (e) { console.error('[jobLifecycle] ticket invoice failed:', e.message); }
+    }
   }
 
   const ticket = {
@@ -286,6 +361,7 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     overageNeedsRate: overage ? !!overage.needsRate : false,
     overageNeedsAllowance: overage ? !!overage.needsAllowance : false,
     swap: !!swap,
+    swapCharge: swapCharge != null ? swapCharge : null,
     unitsOutAfter: after,
     invoiceId: overageInvoiceId,
   };

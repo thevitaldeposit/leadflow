@@ -45,6 +45,8 @@ export default function InvoiceEditorPage() {
   const [saving, setSaving] = useState(false);
   const [rates, setRates] = useState([]); // effective pricing rows for "add from rates"
   const [showRates, setShowRates] = useState(false);
+  const [feeItems, setFeeItems] = useState([]); // delivery fee + surcharge items to add as lines
+  const [showFees, setShowFees] = useState(false);
   const [customerId, setCustomerId] = useState(null);
 
   const [form, setForm] = useState({
@@ -109,6 +111,20 @@ export default function InvoiceEditorPage() {
           }));
           setLines(suggested.length ? suggested : [emptyLine()]);
         }
+        // Business-wide add-able fee/surcharge lines: an enabled flat delivery fee +
+        // surcharge special items. Mileage is intentionally excluded (no distance math).
+        try {
+          const pr = await api.getPricing();
+          if (active) {
+            const fees = (pr.fees || [])
+              .filter((f) => f.enabled && f.fee_type === 'delivery' && f.amount != null && Number(f.amount) > 0)
+              .map((f) => ({ label: f.label || 'Delivery Fee', amount: Number(f.amount) }));
+            const specials = (pr.special_items || [])
+              .filter((s) => s.kind === 'surcharge' && s.charge_amount != null && Number(s.charge_amount) > 0)
+              .map((s) => ({ label: s.name, amount: Number(s.charge_amount) }));
+            setFeeItems([...fees, ...specials]);
+          }
+        } catch { /* non-fatal — fee menu just won't show */ }
       } catch (e) {
         if (active) setError(e.message || 'Failed to load');
       } finally {
@@ -129,6 +145,16 @@ export default function InvoiceEditorPage() {
       unit: rate.unit || '',
       unit_rate: rate.effective_price != null ? String(rate.effective_price) : '',
       service_key: rate.service_key || null,
+    }));
+  };
+
+  // Add a delivery fee or surcharge item as a 'fee' line.
+  const addFeeItem = (f) => {
+    setShowFees(false);
+    addLine(emptyLine({
+      description: f.label,
+      line_type: 'fee',
+      unit_rate: f.amount != null ? String(f.amount) : '',
     }));
   };
 
@@ -215,6 +241,23 @@ export default function InvoiceEditorPage() {
                       <button key={r.service_key} onClick={() => addFromRate(r)} className="w-full text-left px-3 py-2 text-sm hover:bg-surface-2 flex justify-between gap-2">
                         <span className="text-content truncate">{r.label}</span>
                         <span className="text-muted">{r.effective_price != null ? money(r.effective_price) : '—'}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {feeItems.length > 0 && (
+              <div className="relative">
+                <button onClick={() => setShowFees((v) => !v)} className="flex items-center gap-1 text-xs font-medium text-accent hover:text-accent/80">
+                  Add fee / item <ChevronDown size={13} />
+                </button>
+                {showFees && (
+                  <div className="absolute right-0 top-6 z-10 w-56 max-h-64 overflow-y-auto bg-surface border border-divider rounded-lg shadow-lg py-1">
+                    {feeItems.map((f, i) => (
+                      <button key={i} onClick={() => addFeeItem(f)} className="w-full text-left px-3 py-2 text-sm hover:bg-surface-2 flex justify-between gap-2">
+                        <span className="text-content truncate">{f.label}</span>
+                        <span className="text-muted">{f.amount != null ? money(f.amount) : '—'}</span>
                       </button>
                     ))}
                   </div>

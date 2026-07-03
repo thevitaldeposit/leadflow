@@ -129,6 +129,218 @@ function getCustomerPricing(businessId, customerId) {
 //   custom override  →  default minus the customer's group discount  →  default.
 // Returns one row per service_key (union of the default list and any
 // override-only keys), each tagged with where its price came from.
+// ── The pricing resolver (single source of truth for computing money) ───────────
+// Booking, invoicing, and weight-overage all share these so a business's configured
+// pricing_config (tiered/flat, weight allowance, overage rate, day rate, swap) + its
+// fees actually compute dollars. All pure math lives in computeBaseFromConfig (no I/O)
+// so it is unit-testable without a DB; the DB-reading wrappers below join a size to
+// its price row via the ONE canonical size key and layer per-customer pricing on top.
+
+// Whole rental days, min 1 (a same-day/1-day rental still bills the smallest tier).
+function normDays(days) {
+  const d = Math.round(Number(days));
+  return Number.isFinite(d) && d >= 1 ? d : 1;
+}
+
+// Pure: the LIST base rental price for a size's pricing_config over `days`.
+//   • flat  → the flat rate (or the row's flat unit_price fallback), duration-independent.
+//   • tiered→ round the duration UP to the nearest defined tier by day count
+//             (1 day → smallest tier; > largest tier → largest tier + extra-day charges).
+//   • extra days beyond the matched tier add (extra_days × day_rate.rate) ONLY when
+//     day_rate.enabled; otherwise the tier price stands.
+// Returns a breakdown; `priceable:false` when nothing yields a number (so callers can
+// leave a manual price untouched rather than charging $0). No I/O — safe to unit test.
+function computeBaseFromConfig(cfg, days, fallbackUnitPrice = null) {
+  const d = normDays(days);
+  const fb = fallbackUnitPrice != null && Number.isFinite(Number(fallbackUnitPrice)) ? round2(fallbackUnitPrice) : null;
+  const style = cfg && (cfg.pricing_style === 'flat' || cfg.pricing_style === 'tiered') ? cfg.pricing_style : null;
+  const blank = (s) => ({ priceable: false, style: s, listBase: null, tierLabel: null, tierDays: null, extraDays: 0, extraDayRate: null, extraDayCharge: 0 });
+
+  // Flat, or no explicit style but a flat_rate / unit_price is available.
+  if (style === 'flat' || !style) {
+    const flat = cfg && cfg.flat_rate != null ? round2(cfg.flat_rate) : fb;
+    if (flat == null) return blank(style || 'flat');
+    return { priceable: true, style: style || 'flat', listBase: flat, tierLabel: null, tierDays: null, extraDays: 0, extraDayRate: null, extraDayCharge: 0 };
+  }
+
+  // Tiered — sort the usable tiers ascending by day count and round the duration up.
+  const tiers = (Array.isArray(cfg.tiers) ? cfg.tiers : [])
+    .filter((t) => t && t.days != null && t.rate != null)
+    .map((t) => ({ label: t.label || null, days: Math.max(0, Math.round(Number(t.days))), rate: round2(t.rate) }))
+    .sort((a, b) => a.days - b.days);
+  if (!tiers.length) {
+    const flat = cfg.flat_rate != null ? round2(cfg.flat_rate) : fb;   // tiered but unconfigured → flat fallback, never $0
+    if (flat == null) return blank('tiered');
+    return { priceable: true, style: 'tiered', listBase: flat, tierLabel: null, tierDays: null, extraDays: 0, extraDayRate: null, extraDayCharge: 0 };
+  }
+
+  let matched = tiers.find((t) => d <= t.days);
+  let extraDays = 0;
+  if (!matched) { matched = tiers[tiers.length - 1]; extraDays = d - matched.days; }   // beyond the largest tier
+
+  const dr = cfg.day_rate && typeof cfg.day_rate === 'object' ? cfg.day_rate : {};
+  const extraDayRate = dr.enabled && dr.rate != null ? round2(dr.rate) : null;
+  const extraDayCharge = extraDays > 0 && extraDayRate != null ? round2(extraDays * extraDayRate) : 0;
+
+  return { priceable: true, style: 'tiered', listBase: matched.rate, tierLabel: matched.label, tierDays: matched.days, extraDays, extraDayRate, extraDayCharge };
+}
+
+// The per-customer pricing layer for one size: a custom override for this size beats a
+// group discount beats the plain list price (mirrors resolveEffectivePricing's order).
+// customer_pricing.service_key isn't force-canonicalized, so match by the canonical
+// size key too, not just an exact string.
+function resolveSizeDiscount(businessId, customer, serviceKey) {
+  const out = { percent: 0, customPrice: null, source: 'list' };
+  if (!customer || !serviceKey) return out;
+  const wantKey = normalizeSizeKey(serviceKey) || serviceKey;
+  try {
+    const rows = getCustomerPricing(businessId, customer.id);
+    const ovr = rows.find((r) => r.service_key === serviceKey || normalizeSizeKey(r.service_key) === wantKey);
+    if (ovr && ovr.custom_price != null) { out.customPrice = round2(ovr.custom_price); out.source = 'custom'; return out; }
+  } catch { /* customer_pricing absent — no override */ }
+  if (customer.discount_group_id) {
+    try {
+      const g = db.prepare('SELECT discount_percent FROM discount_groups WHERE id = ? AND business_id = ?')
+        .get(customer.discount_group_id, businessId);
+      if (g && Number(g.discount_percent) > 0) { out.percent = Number(g.discount_percent); out.source = 'group'; }
+    } catch { /* group missing — no discount */ }
+  }
+  return out;
+}
+
+// Resolve the price for a booked/quoted size over a rental duration, with the full
+// breakdown (list base, extra-day charge, applied discount, total). `customer` is
+// optional — pass it so a discount-group / override customer gets their rate.
+function resolvePrice(businessId, { size, days = 1, customer = null } = {}) {
+  const row = getPriceRowForSize(businessId, size);
+  const cfg = row ? row.pricing_config : null;
+  const fallbackUnit = row && row.unit_price != null ? Number(row.unit_price) : null;
+  const serviceKey = row ? row.service_key : (normalizeSizeKey(size) || null);
+
+  const b = computeBaseFromConfig(cfg, days, fallbackUnit);
+  const disc = resolveSizeDiscount(businessId, customer, serviceKey);
+
+  let base = b.listBase;
+  let appliedDiscount = 0;
+  let source = 'list';
+  if (b.priceable) {
+    if (disc.customPrice != null) {
+      base = disc.customPrice; source = 'custom';
+    } else if (disc.percent) {
+      base = round2(b.listBase * (1 - disc.percent / 100));
+      appliedDiscount = round2(b.listBase - base);
+      source = 'group';
+    }
+  }
+  const total = b.priceable ? round2((base || 0) + b.extraDayCharge) : null;
+
+  return {
+    size: size || null,
+    size_key: serviceKey,
+    days: normDays(days),
+    priceable: b.priceable,
+    style: b.style,
+    tier_label: b.tierLabel,
+    tier_days: b.tierDays,
+    list_base: b.listBase,
+    base,
+    extra_days: b.extraDays,
+    extra_day_rate: b.extraDayRate,
+    extra_day_charge: b.extraDayCharge,
+    discount_percent: disc.percent || 0,
+    applied_discount: appliedDiscount,
+    discount_source: source,
+    total,
+  };
+}
+
+// The per-size weight allowance + overage rate off the price row's pricing_config —
+// what the weight/overage flow bills against (replacing the old always-null settings).
+function getSizeWeightConfig(businessId, size) {
+  const row = getPriceRowForSize(businessId, size);
+  const cfg = row ? row.pricing_config : null;
+  return {
+    allowanceTons: cfg && cfg.weight_allowance_tons != null ? Number(cfg.weight_allowance_tons) : null,
+    ratePerTon: cfg && cfg.overage_rate_per_ton != null ? Number(cfg.overage_rate_per_ton) : null,
+  };
+}
+
+// The size's swap pricing for a replacement unit dropped over the swap window (days).
+// same_as_rate → the normal tier/flat resolver for that window; custom → the custom
+// price; off → no separate swap charge (null). Honors per-customer discounting for the
+// same_as_rate path. Returns { amount, mode } or null when there's nothing to charge.
+function resolveSwapPrice(businessId, { size, days = 1, customer = null } = {}) {
+  const row = getPriceRowForSize(businessId, size);
+  const cfg = row ? row.pricing_config : null;
+  const swap = cfg && cfg.swap && typeof cfg.swap === 'object' ? cfg.swap : { mode: 'same_as_rate', custom_price: null };
+  const mode = ['same_as_rate', 'custom', 'off'].includes(swap.mode) ? swap.mode : 'same_as_rate';
+  if (mode === 'off') return { amount: null, mode };
+  if (mode === 'custom') {
+    return { amount: swap.custom_price != null ? round2(swap.custom_price) : null, mode };
+  }
+  const q = resolvePrice(businessId, { size, days, customer });   // same_as_rate → normal resolver over the swap window
+  return { amount: q.priceable ? q.total : null, mode, breakdown: q };
+}
+
+// The single enabled flat DELIVERY fee (or null). Mileage/out-of-area fees are
+// deliberately excluded — distance math isn't built, so they never enter computation.
+function getDeliveryFee(businessId) {
+  try {
+    const f = getPricingFees(businessId).find(
+      (x) => x.enabled && x.fee_type === 'delivery' && x.amount != null && Number(x.amount) > 0
+    );
+    return f ? { label: f.label || 'Delivery Fee', amount: round2(f.amount), fee_type: 'delivery' } : null;
+  } catch { return null; }
+}
+
+// Enabled surcharge special items (kind='surcharge' with a charge), as add-able
+// invoice-line presets. Prohibited items carry no charge and are omitted here.
+function getSurchargeItems(businessId) {
+  try {
+    return getSpecialItems(businessId)
+      .filter((s) => s.kind === 'surcharge' && s.charge_amount != null && Number(s.charge_amount) > 0)
+      .map((s) => ({ id: s.id, name: s.name, charge_amount: round2(s.charge_amount) }));
+  } catch { return []; }
+}
+
+// Rental duration (whole days) for a lead: prefer the delivery→pickup span, else the
+// stored rentalDuration text ("7 days"), else 1. Shared by booking + invoice prefill.
+function rentalDaysFromLead(lead) {
+  let vd = {};
+  try { vd = lead && lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+  const dd = lead && (lead.delivery_date || vd.deliveryDate || vd.deliveryDateISO);
+  const pd = lead && (lead.pickup_date || vd.pickupDate);
+  if (dd && pd) {
+    const a = new Date(`${String(dd).slice(0, 10)}T00:00:00Z`);
+    const b = new Date(`${String(pd).slice(0, 10)}T00:00:00Z`);
+    if (!Number.isNaN(a.getTime()) && !Number.isNaN(b.getTime())) {
+      const days = Math.round((b.getTime() - a.getTime()) / 86400000);
+      if (days >= 1) return days;
+    }
+  }
+  if (vd.rentalDuration) { const m = String(vd.rentalDuration).match(/\d+/); if (m) return Math.max(1, parseInt(m[0], 10)); }
+  return 1;
+}
+
+function sizeFromLead(lead) {
+  let vd = {};
+  try { vd = lead && lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+  return vd.dumpsterSize || null;
+}
+
+// The suggested booking amount (base rental for the size+duration, + an enabled flat
+// delivery fee), used to PREFILL an editable price on manual booking and auto-book.
+// Returns null when the size isn't priceable, so callers keep the owner's/model's
+// number instead of overwriting it with $0.
+function suggestedBookingRevenue(businessId, lead, customer = null) {
+  const size = sizeFromLead(lead);
+  if (!size) return null;
+  const q = resolvePrice(businessId, { size, days: rentalDaysFromLead(lead), customer });
+  if (!q.priceable || q.total == null) return null;
+  const delivery = getDeliveryFee(businessId);
+  return round2(q.total + (delivery ? delivery.amount : 0));
+}
+
 function resolveEffectivePricing(businessId, customer) {
   const defaults = getPriceList(businessId);
   const overrides = getCustomerPricing(businessId, customer.id);
@@ -192,4 +404,15 @@ module.exports = {
   resolveEffectivePricing,
   sanitizePricingConfig,
   round2,
+  // Pricing resolver (shared by booking, invoicing, overage, swaps).
+  computeBaseFromConfig,
+  resolveSizeDiscount,
+  resolvePrice,
+  getSizeWeightConfig,
+  resolveSwapPrice,
+  getDeliveryFee,
+  getSurchargeItems,
+  rentalDaysFromLead,
+  sizeFromLead,
+  suggestedBookingRevenue,
 };
