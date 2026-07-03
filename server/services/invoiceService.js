@@ -798,6 +798,7 @@ module.exports = {
   getDefaults,
   setDefaults,
   prefill,
+  suggestItemsFromLead,
   describeLineItem,
   getInvoice,
   listInvoices,

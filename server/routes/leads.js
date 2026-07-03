@@ -370,6 +370,11 @@ router.put('/:id', (req, res) => {
     // 'awaiting_final_payment' instead. Forward transitions only; owner edits to
     // other fields and the reschedule-approval flow are untouched.
     let emailPaymentLink = false;
+    // Base-rental invoice flags, set in the booking reroute below: whether this write
+    // INITIATES booking (→ create the one base invoice) and whether it's paid at
+    // booking (cash / already-paid → settle that invoice so the rollup stays paid).
+    let initiateBaseInvoice = false;
+    let baseInvoiceMarkPaid = false;
     // Explicit owner override (Mark Paid / book-without-link): book the job now
     // WITHOUT emailing a payment link — payment was collected outside Stream, so the
     // booking reserves the dumpster immediately. Confirmed in the UI and never
@@ -384,9 +389,17 @@ router.put('/:id', (req, res) => {
         leadIds: [existing.id], customerId: existing.customer_id || null, leadPaidAt,
       });
       const isPaid = payNow === 'paid';
-      if ((target === JOB_STATUS.BOOKED || target === JOB_STATUS.PENDING_PAYMENT) && !isPaid && !bookWithoutPayment) {
-        updates.job_status = JOB_STATUS.PENDING_PAYMENT;
-        if (!existing.payment_link_emailed_at) emailPaymentLink = true;
+      if (target === JOB_STATUS.BOOKED || target === JOB_STATUS.PENDING_PAYMENT) {
+        // Booking is being initiated → materialize the base-rental invoice (below).
+        initiateBaseInvoice = true;
+        if (!isPaid && !bookWithoutPayment) {
+          updates.job_status = JOB_STATUS.PENDING_PAYMENT;
+          if (!existing.payment_link_emailed_at) emailPaymentLink = true;
+        } else {
+          // Already paid, or a cash book-without-payment override → 'booked' persists;
+          // settle the base invoice so the rollup reads paid (not just lead.paid_at).
+          baseInvoiceMarkPaid = true;
+        }
       } else if (target === JOB_STATUS.COMPLETED && !isPaid) {
         updates.job_status = JOB_STATUS.AWAITING_FINAL_PAYMENT;
       }
@@ -452,6 +465,18 @@ router.put('/:id', (req, res) => {
         jobLifecycle.advanceOnPayment(businessId, updated.id);
         updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
       } catch (e) { console.error('[leads] advanceOnPayment error:', e.message); }
+    }
+
+    // Booking initiated on this write → materialize the base-rental charge as a real
+    // 'sent' invoice (the SAME mechanism the weight overage uses) so it shows in the
+    // Invoices section and feeds the settled rollup that gates completion. One per job
+    // (deduped in the helper). A cash / already-paid booking settles it so the rollup
+    // reads paid. Re-read so the response reflects any advance (mark-paid → booked).
+    if (initiateBaseInvoice) {
+      try {
+        jobLifecycle.ensureBaseInvoice(businessId, updated, { markPaidNow: baseInvoiceMarkPaid, via: 'owner' });
+        updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+      } catch (e) { console.error('[leads] ensureBaseInvoice error:', e.message); }
     }
 
     // A call-driven attempt to change the booked schedule was diverted (not
@@ -704,6 +729,20 @@ router.post('/manual', requireAuth, (req, res) => {
       if (linkedCustomerId) recomputeCustomerStatus(linkedCustomerId);
       else reconcileCustomersForBusiness(businessId);
     } catch (e) { console.error('[leads/manual] reconcile error:', e.message); }
+
+    // Booking initiated (Send Payment Link / Book Job / Mark Paid) → materialize the
+    // base-rental charge as a real 'sent' invoice, the SAME mechanism the weight
+    // overage uses. It shows in the profile's Invoices section and feeds the settled
+    // rollup that gates completion. Cash "Mark Paid" (alreadyPaid) settles the base
+    // invoice so it counts as paid in the rollup — not just lead.paid_at. Deduped in
+    // the helper (exactly one base invoice per job). Re-read so customer_id (just
+    // reconciled) links the invoice to the right person.
+    if (wantsBooked) {
+      try {
+        const bookedLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+        jobLifecycle.ensureBaseInvoice(businessId, bookedLead, { markPaidNow: alreadyPaid, via: 'manual' });
+      } catch (e) { console.error('[leads/manual] base invoice error:', e.message); }
+    }
 
     // Booking initiated but unpaid → email the payment link (payment reserves the
     // dumpster). A booked+paid manual entry needs no link. Same email channel the

@@ -282,6 +282,7 @@ export function getInvoiceStatusLabel(value) {
 // model generalizes past dumpster rental (base service, add-ons, overages, fees).
 export const INVOICE_LINE_TYPES = [
   { value: 'service', label: 'Service' },
+  { value: 'rental', label: 'Rental' },
   { value: 'addon', label: 'Add-on' },
   { value: 'overage', label: 'Overage' },
   { value: 'fee', label: 'Fee' },

@@ -472,6 +472,14 @@ async function processRecording(payload) {
           }
         } catch (e) { console.error('[webhook] auto-book price prefill error:', e.message); }
         logActivity(lead.id, 'status_change', 'Auto-booked — payment link emailed (payment reserves the dumpster)');
+        // Materialize the base-rental charge as a real 'sent' invoice (the SAME
+        // mechanism the weight overage uses) so it shows in the Invoices section and
+        // feeds the settled rollup that gates completion. Base-invoice creation ONLY —
+        // no change to routing, recording, caller ID, or the auto-book threshold.
+        // emailLink:false so the legacy payment-link email below stays the sole notice.
+        try {
+          require('../services/jobLifecycle').ensureBaseInvoice(lead.business_id, lead, { emailLink: false, via: 'auto_book' });
+        } catch (e) { console.error('[webhook] base invoice error:', e.message); }
         sendPaymentLinkEmail(lead).then((result) => {
           if (result.sent) {
             lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);

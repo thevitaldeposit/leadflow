@@ -398,6 +398,110 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   return { lead, overage, advancedTo, unitsOut: after, overageInvoiceId };
 }
 
+// ── Base-rental invoice on booking (mirrors the overage path in recordDumpTicket) ──
+// When a job is booked/initiated (manual Create Job, the PUT "Book" transition, or
+// auto-book), materialize the SAME base-rental charge the booking amount already
+// shows as a real 'sent' invoice — so every charge is an invoice in the Invoices
+// section and the settled rollup gates completion on it, identical to how the weight
+// overage becomes an invoice. Reuses invoiceService end-to-end; builds NO new invoice
+// system, and never touches extraction / booking-signal / recording / caller ID /
+// Twilio VOICE.
+//
+// EXACTLY ONE base invoice per job: a base invoice is one carrying a 'rental'
+// line_type line tied to the lead. If one already exists (any non-void status) we
+// skip, so repeated booking / PUT / re-save calls never duplicate it. The overage
+// invoice (`overage` weight line + swap `service` line) is a DIFFERENT invoice and is
+// never mistaken for the base.
+function baseInvoiceExists(businessId, leadId) {
+  if (!leadId) return false;
+  try {
+    return !!db.prepare(`
+      SELECT 1 FROM invoices i
+      JOIN invoice_line_items li ON li.invoice_id = i.id
+      WHERE i.business_id = ? AND i.lead_id = ? AND i.status != 'void' AND li.line_type = 'rental'
+      LIMIT 1
+    `).get(businessId, leadId);
+  } catch { return false; /* invoices tables absent / not migrated */ }
+}
+
+// Create the one base-rental invoice for a job if it doesn't already have one.
+//   • Line items come from invoiceService.suggestItemsFromLead — the EXACT pricing the
+//     Create-Job amount + invoice prefill already use (base rental size×duration, any
+//     extra-day line, an enabled flat delivery fee); their total equals the shown
+//     booking amount. The primary rental line is re-tagged line_type 'rental' as the
+//     base-invoice marker (amounts untouched).
+//   • The invoice is created 'sent' so the job stays pending_payment until it's paid;
+//     paying it (Stripe on the invoice OR the invoice's Mark Paid) runs the existing
+//     advanceForInvoice → advanceOnPayment → booked, the SAME path the overage uses.
+//   • markPaidNow (cash / book-without-online-payment): settle the base invoice so it
+//     COUNTS as paid in the rollup — not just lead.paid_at — then advance the lifecycle.
+//   • emailLink defaults false: the three booking entry points still send the legacy
+//     payment-link email while the /pay page stays, so the invoice doesn't double-email.
+function ensureBaseInvoice(businessId, leadOrId, { emailLink = false, markPaidNow = false, via = 'owner' } = {}) {
+  const lead = loadLead(businessId, leadOrId);
+  if (!lead) return { error: 'not_found' };
+
+  // Base-rental invoices are a dumpster (home_services) concept — the pricing +
+  // overage model this mirrors is dumpster-only. Auto-dealer leads are left untouched.
+  if (lead.vertical && lead.vertical !== 'home_services') return { skipped: 'not_home_services' };
+
+  // Exactly one base invoice per job.
+  if (baseInvoiceExists(businessId, lead.id)) return { skipped: 'exists' };
+
+  // Resolve a customer (a booked job is normally linked by reconcile-on-read, but
+  // resolve one defensively so the bill never silently vanishes — same as the overage).
+  let customerId = lead.customer_id;
+  if (!customerId) {
+    try { customerId = require('./customerService').findOrCreateCustomerForLead(businessId, lead); } catch { customerId = null; }
+  }
+  if (!customerId) return { skipped: 'no_customer' };
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId);
+
+  // Same pricing the booking amount + invoice prefill use. Tag the primary rental line
+  // 'rental' (the base-invoice marker for the dedup above); amounts are unchanged.
+  const invoiceService = require('./invoiceService');
+  let items = [];
+  try { items = invoiceService.suggestItemsFromLead(businessId, lead, customer) || []; } catch { items = []; }
+  if (!items.length) return { skipped: 'no_line_items' };
+  items = items.map((it, i) => (i === 0 ? { ...it, line_type: 'rental' } : it));
+
+  try {
+    const inv = invoiceService.createInvoice(businessId, {
+      customer_id: customerId,
+      lead_id: lead.id,
+      line_items: items,
+    });
+    // 'sent' so it counts as an outstanding bill in the settled rollup (blocks
+    // completion until paid) — exactly like the overage invoice.
+    invoiceService.markSent(businessId, inv.id);
+    let invoice = inv;
+    logActivity(lead.id, 'invoice_created', `Base rental invoice ${inv.invoice_number} created ($${inv.total})`);
+
+    if (markPaidNow) {
+      // Cash / book-without-online-payment: settle the base invoice so the rollup reads
+      // paid (not just lead.paid_at), then advance the lifecycle the same way the
+      // invoice mark-paid route does.
+      try {
+        const r = invoiceService.markPaid(businessId, inv.id, { method: 'manual', reference: 'Booked — paid outside Stream' });
+        if (r && r.invoice) invoice = r.invoice;
+        logActivity(lead.id, 'invoice_paid', `Base rental invoice ${inv.invoice_number} marked paid`);
+        advanceForInvoice(businessId, invoice);
+      } catch (e) { console.error('[jobLifecycle] base invoice mark-paid failed:', e.message); }
+    } else if (emailLink) {
+      // Same Resend path as the overage bill + the payment link.
+      require('./emailService').sendInvoiceLinkEmail({ ...inv, business_id: businessId })
+        .then((r) => { if (r && !r.sent) console.log(`[jobLifecycle] base invoice email not sent (inv ${inv.id}): ${r.reason}`); })
+        .catch((e) => console.error('[jobLifecycle] base invoice email error:', e.message));
+    }
+
+    try { emitToBusiness(businessId, 'invoice_updated', { id: inv.id }); } catch { /* non-fatal */ }
+    return { invoice, created: true };
+  } catch (e) {
+    console.error('[jobLifecycle] base invoice creation failed:', e.message);
+    return { error: 'create_failed' };
+  }
+}
+
 // Advance whatever job(s) an invoice settlement affects. A lead-linked invoice
 // advances that job; a customer-level invoice (lead_id null) advances the customer's
 // open job(s) awaiting money (pending_payment → booked, awaiting_final_payment →
@@ -440,5 +544,6 @@ module.exports = {
   getOverageConfig,
   computeOverage,
   recordDumpTicket,
+  ensureBaseInvoice,
   canComplete,
 };
