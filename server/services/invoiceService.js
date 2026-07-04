@@ -2,8 +2,9 @@ const crypto = require('crypto');
 const db = require('../db/database');
 const {
   resolveEffectivePricing, resolvePrice, rentalDaysFromLead, sizeFromLead,
-  getDeliveryFee, getSurchargeItems,
+  getDeliveryFee, getSurchargeItems, getSizeWeightConfig,
 } = require('./pricingService');
+const { normalizeSizeKey } = require('./sizeKey');
 const { displayNameOf } = require('./customerService');
 const { GENERIC_TERMS, businessTypeKey, resolveDefaultContract } = require('./contractTemplates');
 
@@ -710,6 +711,46 @@ function requiresSignature(invoice) {
   return !!(getEffectiveContractText(invoice) || '').trim();
 }
 
+// The dumpster size this invoice is for, used to disclose the size-specific weight
+// allowance on the public page. Prefers a size-shaped service_key on the base rental
+// line (which carries the canonical key), then any size-shaped line item, then the
+// linked lead's requested size. Returns the size string/key or null (non-dumpster or
+// unlinked invoice — no size to disclose against).
+function invoiceDumpsterSize(invoice) {
+  const items = invoice.line_items || [];
+  const sized = (it) => it && it.service_key && normalizeSizeKey(it.service_key);
+  const rental = items.find((it) => it.line_type === 'rental' && sized(it));
+  if (rental) return rental.service_key;
+  const anySized = items.find(sized);
+  if (anySized) return anySized.service_key;
+  if (invoice.lead_id) {
+    try {
+      const lead = db.prepare('SELECT vertical_data FROM leads WHERE id = ? AND business_id = ?')
+        .get(invoice.lead_id, invoice.business_id);
+      const size = lead ? sizeFromLead(lead) : null;
+      if (size) return size;
+    } catch { /* leads unavailable — no size */ }
+  }
+  return null;
+}
+
+// The weight-allowance disclosure for this invoice's size, pulled LIVE from the
+// size's pricing_config — the SAME allowance + per-ton overage rate the Pricing page
+// edits and the weight-overage flow bills against, so it's correct per business and
+// updates when the business changes its fees. Returns null (note hidden) unless BOTH
+// the allowance and the rate are configured to a positive value — a business that
+// hasn't set overage pricing shows no note rather than a blank/$0 sentence.
+function weightAllowanceFor(invoice) {
+  const size = invoiceDumpsterSize(invoice);
+  if (!size) return null;
+  let cfg;
+  try { cfg = getSizeWeightConfig(invoice.business_id, size); } catch { return null; }
+  const allowance = Number(cfg && cfg.allowanceTons);
+  const rate = Number(cfg && cfg.ratePerTon);
+  if (!(allowance > 0) || !(rate > 0)) return null;
+  return { allowance_tons: allowance, rate_per_ton: rate };
+}
+
 // Shape an invoice for the PUBLIC page — strips internal evidence (IP/UA) and
 // scoping fields. `payment` is the business's online-payment state, resolved by
 // the caller from the Connect layer: { enabled, connectedAccountId, publishableKey }.
@@ -735,6 +776,10 @@ function toPublic(invoice, business, payment = {}) {
     bill_to_email: invoice.bill_to_email,
     bill_to_phone: invoice.bill_to_phone,
     bill_to_address: invoice.bill_to_address,
+    // Size-specific weight-allowance disclosure (allowance tons + per-ton overage
+    // rate) pulled live from this size's pricing_config, or null to hide the note
+    // when the business hasn't configured overage pricing for the size.
+    weight_allowance: weightAllowanceFor(invoice),
     line_items: (invoice.line_items || []).map((it) => {
       const d = describeLineItem(it);
       return {

@@ -22,6 +22,24 @@ function money(n, currency = 'USD') {
     return `$${v.toFixed(2)}`;
   }
 }
+// Currency without forced cents on whole amounts ("$140", but "$137.50") — for the
+// weight-allowance rate, which reads cleaner as a whole dollar amount when it is one.
+function moneyCompact(n, currency = 'USD') {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return null;
+  const digits = v % 1 === 0 ? 0 : 2;
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: 2 }).format(v);
+  } catch {
+    return `$${v % 1 === 0 ? v : v.toFixed(2)}`;
+  }
+}
+// "1 ton" vs "2 tons" / "1.5 tons" — singular only for exactly one.
+function tonsLabel(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return null;
+  return `${v} ${v === 1 ? 'ton' : 'tons'}`;
+}
 function fmtDate(d) {
   if (!d) return '—';
   const dt = new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T00:00:00` : d);
@@ -630,6 +648,16 @@ export default function PublicInvoicePage() {
               {inv.due_date && <p className="text-muted">Due <span className="text-content">{fmtDate(inv.due_date)}</span></p>}
             </div>
           </div>
+          {/* Weight-allowance disclosure — pulled from the business's pricing config
+              for this dumpster size; hidden entirely when overage pricing isn't set. */}
+          {inv.weight_allowance && (
+            <p className="text-xs text-muted leading-relaxed mt-4 pt-4 border-t border-divider">
+              This rental includes a weight allowance of{' '}
+              <span className="font-semibold text-content">{tonsLabel(inv.weight_allowance.allowance_tons)}</span>. If you
+              exceed the weight allowance, additional weight is billed at{' '}
+              <span className="font-semibold text-content">{moneyCompact(inv.weight_allowance.rate_per_ton, inv.currency)} per ton</span>.
+            </p>
+          )}
         </div>
 
         {/* Line items */}
