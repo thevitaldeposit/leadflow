@@ -91,6 +91,51 @@ router.post('/:token/sign', (req, res) => {
   }
 });
 
+// POST /api/public/invoices/:token/delivery-details — let the CUSTOMER verify and
+// correct their OWN delivery address (+ access notes) before signing/paying. The
+// token is the only credential (same model as /sign). The service STRICTLY whitelists
+// the fields (address + notes only — never size/dates/price/contact/status) and writes
+// the corrected address to the LEAD's vertical_data.deliveryAddress, so it goes live to
+// the schedule/dispatch immediately. Blocked once the invoice is signed/paid/void.
+router.post('/:token/delivery-details', (req, res) => {
+  try {
+    const b = req.body || {};
+    const payload = { deliveryAddress: b.deliveryAddress ?? b.delivery_address };
+    // Only touch access notes when the client actually sent the key.
+    const notesKeys = ['accessNotes', 'access_notes', 'deliveryNotes', 'delivery_notes'];
+    if (notesKeys.some((k) => k in b)) {
+      payload.accessNotes = b.accessNotes ?? b.access_notes ?? b.deliveryNotes ?? b.delivery_notes;
+    }
+
+    const result = invoiceService.updateDeliveryDetailsByToken(req.params.token, payload);
+
+    if (result.error === 'not_found') return res.status(404).json({ error: 'Invoice not found' });
+    if (result.error === 'no_lead') return res.status(409).json({ error: 'This invoice has no delivery details to update.' });
+    if (result.error === 'void') return res.status(409).json({ error: 'This invoice is no longer active.' });
+    if (result.error === 'locked') return res.status(409).json({ error: 'This invoice has been signed and can no longer be changed. Please contact the business to update your address.' });
+    if (result.error === 'address_required') return res.status(400).json({ error: 'Please enter your delivery address.' });
+    if (result.error === 'address_too_long') return res.status(400).json({ error: 'That address is too long.' });
+
+    // Notify the owner: a prominent flag (set on the lead by the service) plus a
+    // timeline entry on the linked job and a live dashboard refresh. Only an actual
+    // address change raises the flag/timeline; a notes-only tweak is logged quietly.
+    if (result.changed && result.lead) {
+      if (result.addressChanged) {
+        const from = result.prevAddress || 'not set';
+        logActivity(result.lead.id, 'address_corrected', `Customer corrected the delivery address: ${from} → ${result.nextAddress}`);
+      } else if (result.notesChanged) {
+        logActivity(result.lead.id, 'job_updated', 'Customer updated delivery access notes.');
+      }
+      emitToBusiness(result.lead.business_id, 'lead_updated', result.lead);
+    }
+
+    res.json(publicView(result.invoice));
+  } catch (err) {
+    console.error('POST /public/invoices/:token/delivery-details error:', err);
+    res.status(500).json({ error: 'Failed to update delivery details' });
+  }
+});
+
 // POST /api/public/invoices/:token/create-payment-intent — start a card payment.
 // Creates (or reuses) a PaymentIntent as a DIRECT CHARGE on the business's
 // connected account and returns the client_secret + connected account id so the

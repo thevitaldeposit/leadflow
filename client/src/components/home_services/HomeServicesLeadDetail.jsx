@@ -331,6 +331,7 @@ const ACTIVITY_ICONS = {
   sms_sent: '💬',
   status_change: '📋',
   job_updated: '✏️',
+  address_corrected: '📍',
   reschedule_requested: '🔄',
   note_added: '📋',
   voicemail: '🎙️',
@@ -471,8 +472,43 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
   const bookingSignals = vd.bookingSignalsDetected || [];
   const bookingConfidence = vd.bookingConfidence || null;
 
+  // Clear the "customer corrected address" flag once the owner has acknowledged it.
+  // Reuses the vertical_data partial-merge (server preserves every other key); nulled
+  // keys read as falsy so the banner hides. The corrected address itself is untouched.
+  const dismissAddressFlag = () =>
+    applyUpdate({ vertical_data: { addressCorrectedByCustomer: null, addressCorrectedAt: null, addressBeforeCorrection: null } });
+
   return (
     <div className="space-y-4">
+      {/* Prominent flag: the customer corrected their own delivery address from the
+          invoice page. The fix is already live on the schedule (dispatch reads the same
+          vertical_data.deliveryAddress field) — this banner just makes sure a busy owner
+          notices it happened. Dismissible once acknowledged. */}
+      {vd.addressCorrectedByCustomer && (
+        <div className="bg-warning/10 border border-warning/40 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle size={18} className="text-warning shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-warning">Customer corrected the delivery address</p>
+            {vd.addressBeforeCorrection && (
+              <p className="text-xs text-muted mt-1">
+                Was <span className="line-through">{vd.addressBeforeCorrection}</span>
+                {' · '}now <span className="text-content font-medium">{vd.deliveryAddress}</span>
+              </p>
+            )}
+            {vd.addressCorrectedAt && (
+              <p className="text-xs text-muted mt-0.5">Updated {formatActivityTime(vd.addressCorrectedAt)}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={dismissAddressFlag}
+            className="text-xs font-medium text-muted hover:text-content underline shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Booking signals (display-only; shared with the customer profile) */}
       <BookingSignalsPanel
         autoBooked={isAutoBooked}

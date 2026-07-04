@@ -670,6 +670,73 @@ function signInvoice(token, { signerName, signatureData, signatureType, ip, user
   return { invoice: getInvoiceByToken(token) };
 }
 
+// Let the CUSTOMER verify + correct their OWN delivery address (and access notes)
+// from the tokenized public page, BEFORE signing/paying. Authorized exactly like
+// signInvoice — the unguessable public_token resolves to one invoice, and that's the
+// only credential. STRICT WHITELIST: only the delivery address and access notes can
+// change here. Size, dates, price, contact, business, status — none are reachable.
+//
+// The corrected address is written to the LEAD's vertical_data.deliveryAddress (the
+// field the schedule/dispatch/driver views actually read), so the fix goes LIVE to
+// the business immediately — not just to the invoice's billing snapshot. The invoice's
+// bill_to_address is kept in step so no page/PDF shows a stale copy. A prominent
+// "customer corrected the address" flag is stamped on the lead for the owner; the
+// caller (route) logs the timeline entry + emits the live dashboard event.
+//
+// deliveryAddress feeds nothing computational (no geocode/mileage/zone pricing exists),
+// so this can never change what the customer owes or reserve/overbook a unit — which is
+// exactly why only these fields are editable and size/dates/price stay locked.
+function updateDeliveryDetailsByToken(token, { deliveryAddress, accessNotes } = {}) {
+  const inv = db.prepare('SELECT * FROM invoices WHERE public_token = ?').get(token);
+  if (!inv) return { error: 'not_found' };
+  if (inv.status === 'void') return { error: 'void' };
+  // Once signed or paid the invoice is locked (dispute evidence / booking committed).
+  if (inv.signed_at || inv.paid_at || LOCKED_STATUSES.has(inv.status)) return { error: 'locked' };
+  if (!inv.lead_id) return { error: 'no_lead' };
+
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(inv.lead_id, inv.business_id);
+  if (!lead) return { error: 'no_lead' };
+
+  const nextAddress = deliveryAddress != null ? String(deliveryAddress).trim() : '';
+  if (!nextAddress) return { error: 'address_required' };
+  if (nextAddress.length > 500) return { error: 'address_too_long' };
+  const hasNotes = accessNotes !== undefined;
+  const nextNotes = hasNotes ? String(accessNotes || '').trim().slice(0, 1000) : undefined;
+
+  let vd = {};
+  try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+  const prevAddress = vd.deliveryAddress || null;
+  const prevNotes = vd.accessNotes || null;
+  const addressChanged = (prevAddress || '') !== nextAddress;
+  const notesChanged = hasNotes && (prevNotes || '') !== (nextNotes || '');
+
+  // No-op save (customer confirmed without changing anything) — don't flag/log it.
+  if (!addressChanged && !notesChanged) {
+    return { invoice: getInvoiceByToken(token), lead, changed: false, addressChanged: false, notesChanged: false, prevAddress, nextAddress };
+  }
+
+  // Whitelisted partial merge: only deliveryAddress (+ optional accessNotes) and the
+  // correction flag change. Every other vertical_data key — size, dates, transcript,
+  // booking signals — is preserved untouched.
+  const merged = { ...vd, deliveryAddress: nextAddress };
+  if (hasNotes) merged.accessNotes = nextNotes || null;
+  if (addressChanged) {
+    merged.addressCorrectedByCustomer = true;
+    merged.addressCorrectedAt = nowIso();
+    if (prevAddress) merged.addressBeforeCorrection = prevAddress;
+  }
+
+  const at = nowIso();
+  db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ? AND business_id = ?')
+    .run(JSON.stringify(merged), at, lead.id, inv.business_id);
+  // Keep the invoice's billing snapshot consistent so no box/PDF shows the old address.
+  db.prepare('UPDATE invoices SET bill_to_address = ?, updated_at = ? WHERE id = ? AND business_id = ?')
+    .run(nextAddress, at, inv.id, inv.business_id);
+
+  const freshLead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(lead.id, inv.business_id);
+  return { invoice: getInvoiceByToken(token), lead: freshLead, changed: true, addressChanged, notesChanged, prevAddress, nextAddress };
+}
+
 // The normalized contract-type key for a business: its signup industry_type, or —
 // for an env-configured anchor business that predates the signup flow and has no
 // industry_type (e.g. Valley Binz) — the LEADFLOW default vertical env vars. A real
@@ -751,6 +818,38 @@ function weightAllowanceFor(invoice) {
   return { allowance_tons: allowance, rate_per_ton: rate };
 }
 
+// The booking's DELIVERY details for the public page's "verify your details" step.
+// Sourced from the LINKED LEAD — deliveryAddress is read straight off the lead's
+// vertical_data (the SAME field the schedule/dispatch/driver views read), NOT the
+// invoice's bill_to_address billing snapshot. delivery_date and size are display-only.
+// Returns null for an unlinked invoice or a lead with nothing to show. `editable`
+// mirrors the write endpoint's rule: correctable only before the invoice locks.
+function deliveryDetailsFor(invoice) {
+  if (!invoice || !invoice.lead_id) return null;
+  let lead;
+  try {
+    lead = db.prepare('SELECT delivery_date, vertical_data FROM leads WHERE id = ? AND business_id = ?')
+      .get(invoice.lead_id, invoice.business_id);
+  } catch { return null; }
+  if (!lead) return null;
+  let vd = {};
+  try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+  const address = vd.deliveryAddress || null;
+  const deliveryDate = lead.delivery_date || vd.deliveryDate || vd.deliveryDateISO || null;
+  const size = vd.dumpsterSize || null;
+  const notes = vd.accessNotes || null;
+  if (!address && !deliveryDate && !size && !notes) return null;
+  return {
+    address,
+    delivery_date: deliveryDate,
+    size,
+    notes,
+    // Editable only before the invoice locks (unsigned + unpaid + not void). The
+    // write endpoint enforces the same rule — this is for the UI, not the boundary.
+    editable: !invoice.signed_at && !invoice.paid_at && invoice.status !== 'void',
+  };
+}
+
 // Shape an invoice for the PUBLIC page — strips internal evidence (IP/UA) and
 // scoping fields. `payment` is the business's online-payment state, resolved by
 // the caller from the Connect layer: { enabled, connectedAccountId, publishableKey }.
@@ -780,6 +879,10 @@ function toPublic(invoice, business, payment = {}) {
     // rate) pulled live from this size's pricing_config, or null to hide the note
     // when the business hasn't configured overage pricing for the size.
     weight_allowance: weightAllowanceFor(invoice),
+    // The booking's delivery details (address/date/size/notes) read LIVE from the
+    // linked lead, so the customer can verify — and correct their address — before
+    // paying. null for an unlinked invoice. See deliveryDetailsFor.
+    delivery: deliveryDetailsFor(invoice),
     line_items: (invoice.line_items || []).map((it) => {
       const d = describeLineItem(it);
       return {
@@ -860,6 +963,7 @@ module.exports = {
   getInvoiceByToken,
   recordView,
   signInvoice,
+  updateDeliveryDetailsByToken,
   requiresSignature,
   toPublic,
   getBusinessBranding,

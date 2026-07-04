@@ -195,6 +195,94 @@ function SignForm({ mode, setMode, name, setName, setDrawn, agree, setAgree, inv
   );
 }
 
+// Step 1 of the Accept & Pay modal: "Verify your details". Shows the booking's
+// delivery details and lets the customer FIX their delivery address (and access
+// notes) before signing — the one place a wrong auto-booked address gets caught.
+// Address + notes are editable; delivery date, dumpster size, and price are read-only
+// (changing them would re-price or reserve a unit). Saving a change persists it to the
+// lead the schedule reads (via the token endpoint) and advances to signing. Only shown
+// while the invoice is still unsigned/unpaid.
+function VerifyStep({ token, invoice, onConfirmed, onSaved }) {
+  const d = invoice.delivery || {};
+  const [addr, setAddr] = useState(d.address || '');
+  const [notes, setNotes] = useState(d.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const origAddr = (d.address || '').trim();
+  const origNotes = (d.notes || '').trim();
+  const changed = addr.trim() !== origAddr || notes.trim() !== origNotes;
+
+  const proceed = async () => {
+    setError(null);
+    if (!addr.trim()) { setError('Please enter your delivery address.'); return; }
+    // Unchanged → the customer confirmed; skip the write and advance.
+    if (!changed) { onConfirmed(); return; }
+    setSaving(true);
+    try {
+      const updated = await api.updateInvoiceDelivery(token, { deliveryAddress: addr.trim(), accessNotes: notes.trim() });
+      if (updated) onSaved(updated);
+      onConfirmed();
+    } catch (e) {
+      setError(e.message || 'Could not save your changes. Please try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-surface rounded-2xl shadow-sm p-5 sm:p-6">
+      <h2 className="text-base font-bold text-content">Verify your details</h2>
+      <p className="text-sm text-muted mt-1 mb-4">
+        Please confirm where we&rsquo;re delivering. If your address is wrong, fix it here before you sign.
+      </p>
+
+      <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">Delivery address</label>
+      <input
+        value={addr}
+        onChange={(e) => setAddr(e.target.value)}
+        placeholder="Street address where the dumpster goes"
+        className="w-full text-sm border border-divider rounded-lg px-3 py-2.5 mb-4 focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+
+      <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
+        Access notes <span className="normal-case font-normal">(optional)</span>
+      </label>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={2}
+        placeholder="Gate code, where to place it, etc."
+        className="w-full text-sm border border-divider rounded-lg px-3 py-2.5 mb-4 focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+
+      {/* Read-only booking facts — changing size/date would re-price the invoice or
+          reserve a different unit, so they're locked here (call the business to change). */}
+      <div className="grid grid-cols-2 gap-4 border-t border-divider pt-4">
+        <div>
+          <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-0.5">Delivery date</p>
+          <p className="text-sm text-content">{d.delivery_date ? fmtDate(d.delivery_date) : '—'}</p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-0.5">Dumpster size</p>
+          <p className="text-sm text-content">{d.size || '—'}</p>
+        </div>
+      </div>
+      <p className="text-xs text-muted mt-3">Need to change the date or size? Please call the business.</p>
+
+      {error && <p className="text-sm text-danger mt-3">{error}</p>}
+
+      <button
+        type="button"
+        onClick={proceed}
+        disabled={saving}
+        className="mt-5 w-full py-3.5 rounded-xl text-base font-bold text-content bg-brand hover:bg-brand/90 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+      >
+        {saving ? 'Saving…' : (changed ? 'Save & Continue' : 'Confirm & Continue')}
+      </button>
+    </div>
+  );
+}
+
 // Stripe Elements appearance — dark theme matched to the app's design tokens.
 const PAY_APPEARANCE = { theme: 'night', variables: { colorPrimary: '#2575ed', colorBackground: '#1b2937', borderRadius: '10px' } };
 
@@ -413,16 +501,16 @@ function PaymentSection({ token, invoice, onPaid }) {
   );
 }
 
-// The Accept & Pay modal: a dark, dismissible sheet that hosts the two-step
-// sign-then-pay flow relocated off the page body. Step 1 (signature required, not
-// yet signed) shows the signature form; saving the signature flips the invoice to
-// signed, which reveals Step 2 — the existing PaymentSection pay control — in the
-// SAME modal (payment is no longer blocked by the requires-signature gate because
-// signed_at is now set). A returning (already-signed) or contract-less customer
-// opens straight to the pay step. Reuses the unchanged SignForm + PaymentSection;
-// this is purely a new presentation. Closable (backdrop, ✕, or Esc) so the customer
-// can go back and read the contract, then reopen it.
-function AcceptPayModal({ token, invoice, showSignStep, onClose, onPaid, signProps }) {
+// The Accept & Pay modal: a dark, dismissible sheet that hosts the verify → sign →
+// pay flow relocated off the page body. Step 0 (unsigned/unpaid with delivery details)
+// is "Verify your details" — the customer confirms/corrects their delivery address;
+// Step 1 (signature required, not yet signed) shows the signature form; saving the
+// signature flips the invoice to signed, which reveals Step 2 — the existing
+// PaymentSection pay control — in the SAME modal. A returning (already-signed) or
+// contract-less customer opens straight to the pay step. Which step renders is decided
+// by the parent (`step`). Closable (backdrop, ✕, or Esc) so the customer can go back
+// and read the contract, then reopen it.
+function AcceptPayModal({ token, invoice, step, onClose, onPaid, signProps, verifyProps }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -458,7 +546,9 @@ function AcceptPayModal({ token, invoice, showSignStep, onClose, onPaid, signPro
             No extra padding here — each step brings its own bg-surface card, which
             reads as one seamless surface inside the panel. */}
         <div className="overflow-y-auto">
-          {showSignStep ? (
+          {step === 'verify' ? (
+            <VerifyStep {...verifyProps} />
+          ) : step === 'sign' ? (
             <SignForm {...signProps} invoice={invoice} />
           ) : (
             <PaymentSection token={token} invoice={invoice} onPaid={onPaid} />
@@ -485,8 +575,11 @@ export default function PublicInvoicePage() {
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState(null);
 
-  // The Accept & Pay modal (sign, then pay) opened from the sticky bar.
+  // The Accept & Pay modal (verify, sign, then pay) opened from the sticky bar.
   const [modalOpen, setModalOpen] = useState(false);
+  // Whether the customer has passed the "Verify your details" step this session.
+  // Reset each time the modal opens so verify is always the first thing they see.
+  const [verifyConfirmed, setVerifyConfirmed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -563,9 +656,13 @@ export default function PublicInvoicePage() {
     }
   };
 
-  // Open the Accept & Pay modal from the sticky bar. No scrolling — the sign/pay
-  // steps live in the modal now.
-  const openModal = () => { setSignError(null); setModalOpen(true); };
+  // A customer-saved delivery correction returns the refreshed public invoice — swap
+  // it into state so the Delivery section (and the now-synced bill-to) update in place.
+  const handleDeliverySaved = (updated) => { if (updated) setInvoice(updated); };
+
+  // Open the Accept & Pay modal from the sticky bar. No scrolling — the verify/sign/pay
+  // steps live in the modal now. Reset the verify gate so it always leads.
+  const openModal = () => { setSignError(null); setVerifyConfirmed(false); setModalOpen(true); };
 
   // The modal's Sign button: when the form is complete it signs (which reveals the
   // pay step); otherwise it points out what's missing. It never bypasses the gate.
@@ -584,6 +681,13 @@ export default function PublicInvoicePage() {
   // contract-less invoice (signature_required=false) skips signing and pays
   // immediately — so gate on signature_required, not merely "not yet signed".
   const needsSignature = !!(inv.signature_required && !isSigned);
+
+  // Whether the modal should LEAD with "Verify your details": there's a linked booking
+  // to verify and it isn't locked yet. Once confirmed this session the modal advances
+  // to sign/pay. An already-signed/paid invoice has delivery.editable=false, so a
+  // returning customer skips verify and goes straight to pay, exactly as before.
+  const canVerify = !!(inv.delivery && inv.delivery.editable) && !isSigned && !isPaid;
+  const modalStep = (canVerify && !verifyConfirmed) ? 'verify' : (needsSignature ? 'sign' : 'pay');
 
   // Sticky bar: the single entry point into the Accept & Pay modal. Shown while
   // there's still something to do — sign, or pay (payable + unpaid).
@@ -638,7 +742,9 @@ export default function PublicInvoicePage() {
             <div>
               <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Billed to</p>
               <p className="font-medium text-content">{inv.bill_to_name || '—'}</p>
-              {inv.bill_to_address && <p className="text-muted">{inv.bill_to_address}</p>}
+              {/* When there's a Delivery section it owns the address — don't print a
+                  second (possibly stale) copy here. */}
+              {!inv.delivery && inv.bill_to_address && <p className="text-muted">{inv.bill_to_address}</p>}
               {inv.bill_to_email && <p className="text-muted">{inv.bill_to_email}</p>}
               {inv.bill_to_phone && <p className="text-muted">{inv.bill_to_phone}</p>}
             </div>
@@ -658,6 +764,48 @@ export default function PublicInvoicePage() {
             </p>
           )}
         </div>
+
+        {/* Delivery — read-only here; the customer verifies/corrects the address in the
+            Accept & Pay modal's first step. Address is sourced from the linked lead
+            (vertical_data.deliveryAddress), the same field dispatch reads. */}
+        {inv.delivery && (
+          <div className="bg-surface rounded-2xl shadow-sm p-5 sm:p-6">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide">Delivery</p>
+              {inv.delivery.editable && !isSigned && !isPaid && (
+                <button type="button" onClick={openModal} className="text-xs font-semibold text-brand hover:underline">
+                  Verify / edit
+                </button>
+              )}
+            </div>
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="text-xs text-muted mb-0.5">Delivery address</p>
+                <p className="text-content font-medium">
+                  {inv.delivery.address || <span className="text-muted italic">Not provided — please add it</span>}
+                </p>
+              </div>
+              {(inv.delivery.delivery_date || inv.delivery.size) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {inv.delivery.delivery_date && (
+                    <div><p className="text-xs text-muted mb-0.5">Delivery date</p><p className="text-content">{fmtDate(inv.delivery.delivery_date)}</p></div>
+                  )}
+                  {inv.delivery.size && (
+                    <div><p className="text-xs text-muted mb-0.5">Dumpster size</p><p className="text-content">{inv.delivery.size}</p></div>
+                  )}
+                </div>
+              )}
+              {inv.delivery.notes && (
+                <div><p className="text-xs text-muted mb-0.5">Access notes</p><p className="text-content whitespace-pre-wrap">{inv.delivery.notes}</p></div>
+              )}
+            </div>
+            {inv.delivery.editable && !isSigned && !isPaid && (
+              <p className="text-xs text-muted mt-3 pt-3 border-t border-divider">
+                Please make sure your delivery address is correct — you can update it before you sign.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Line items */}
         <div className="bg-surface rounded-2xl shadow-sm overflow-hidden">
@@ -777,9 +925,15 @@ export default function PublicInvoicePage() {
         <AcceptPayModal
           token={token}
           invoice={inv}
-          showSignStep={needsSignature}
+          step={modalStep}
           onClose={() => setModalOpen(false)}
           onPaid={handlePaid}
+          verifyProps={{
+            token,
+            invoice: inv,
+            onConfirmed: () => setVerifyConfirmed(true),
+            onSaved: handleDeliverySaved,
+          }}
           signProps={{
             mode: signMode, setMode: setSignMode,
             name: signName, setName: setSignName,

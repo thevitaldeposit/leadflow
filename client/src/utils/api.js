@@ -290,6 +290,16 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paymentIntentId }),
     }),
+  // Customer self-serve: verify/correct the booking's delivery address (+ access
+  // notes) from the public invoice page before signing. Server whitelists the fields
+  // and writes the corrected address to the lead the schedule reads. Returns the
+  // refreshed public invoice.
+  updateInvoiceDelivery: (token, body) =>
+    request(`/public/invoices/${token}/delivery-details`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
 
   // Extraction
   extractTranscript: (transcript) =>
