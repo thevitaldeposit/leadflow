@@ -126,13 +126,17 @@ router.post('/', (req, res) => {
     const now = new Date().toISOString();
     const status = CUSTOMER_STATUSES.includes(b.status) ? b.status : 'lead';
     const overridden = CUSTOMER_STATUSES.includes(b.status) ? 1 : 0;
+    // An address typed on manual create is the owner's chosen address → pin it, so a
+    // later job's address never replaces it. A pipeline-created customer (no address
+    // here) stays on Auto and follows its jobs.
+    const addressOverridden = address ? 1 : 0;
     const info = db.prepare(`
       INSERT INTO customers
-        (business_id, first_name, last_name, display_name, company, phone, normalized_phone, email, address, status, status_overridden, notes, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (business_id, first_name, last_name, display_name, company, phone, normalized_phone, email, address, address_overridden, status, status_overridden, notes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       businessId, firstName || null, lastName || null, displayName || null, company || null,
-      phone || null, np, email || null, address || null, status, overridden, str(b.notes) || null, now, now
+      phone || null, np, email || null, address || null, addressOverridden, status, overridden, str(b.notes) || null, now, now
     );
 
     const created = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(info.lastInsertRowid));
@@ -158,7 +162,7 @@ router.put('/:id', (req, res) => {
       first_name: 'first_name', firstName: 'first_name',
       last_name: 'last_name', lastName: 'last_name',
       display_name: 'display_name', displayName: 'display_name',
-      company: 'company', email: 'email', address: 'address',
+      company: 'company', email: 'email',
       notes: 'notes', contract_terms: 'contract_terms', contractTerms: 'contract_terms',
     };
     for (const [key, col] of Object.entries(map)) {
@@ -170,6 +174,36 @@ router.put('/:id', (req, res) => {
       const phone = b.phone === '' ? null : String(b.phone).trim();
       updates.phone = phone;
       updates.normalized_phone = normalizePhone(phone);
+    }
+
+    // Address + pin. The top-of-profile address is Auto (follows the active job) by
+    // default; setting a fixed address here PINS it (address_overridden = 1) so jobs
+    // never change it. Pin only when the value actually CHANGES, so re-saving the
+    // profile form (which always submits the prefilled address) never silently pins an
+    // Auto customer on an unrelated edit. Clearing the address releases it to Auto.
+    if (b.address !== undefined) {
+      const norm = (s) => (s == null || String(s).trim() === '' ? null : String(s).trim());
+      const next = norm(b.address);
+      if (next !== norm(existing.address)) {
+        updates.address = next;
+        updates.address_overridden = next ? 1 : 0;
+      }
+    }
+
+    // Address mode toggle — the Auto / Pinned selector (mirrors the status selector's
+    // 'auto' release). 'auto' releases the pin (the stored address stays as a fallback);
+    // 'pinned' freezes the stored default. Pinning needs an address to pin (the UI only
+    // offers Pinned when one exists), so with nothing to pin this is a safe no-op.
+    const mode = b.address_mode !== undefined ? b.address_mode : b.addressMode;
+    if (mode !== undefined) {
+      if (mode === 'auto') {
+        updates.address_overridden = 0;
+      } else if (mode === 'pinned') {
+        const pinTarget = updates.address !== undefined ? updates.address : existing.address;
+        if (pinTarget) updates.address_overridden = 1;
+      } else {
+        return res.status(400).json({ error: 'Invalid address mode' });
+      }
     }
 
     // Discount group: validate it belongs to this business, or clear it.

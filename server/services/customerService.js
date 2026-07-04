@@ -698,6 +698,26 @@ function getCustomerDetail(businessId, customerId) {
   if (customer.address) addrSet.add(customer.address.trim());
   for (const a of agg.addresses) addrSet.add(a);
 
+  // Top-of-profile address resolution — a COMPUTED display only. Never written back
+  // to customers.address (a job's address must never clobber the stored default) and
+  // never persisted. Mirrors the status / status_overridden pattern:
+  //   • address_overridden = 1 → owner PINNED: show the stored customers.address,
+  //     which jobs never change (a stable billing/contact address for a contractor).
+  //   • else → AUTO: follow the ACTIVE (open) engagement's reconciled address so the
+  //     top reflects the current job + any customer delivery-address correction; then
+  //     fall back to the most recent job's address; then the stored default.
+  // engagements is newest-first, so .find() yields the most recent match.
+  const activeEng = engagements.find((e) => e.is_active) || null;
+  const recentJobEng = engagements.find(
+    (e) => e.status === ENGAGEMENT_STATUS.BOOKED || e.status === ENGAGEMENT_STATUS.COMPLETED
+  ) || null;
+  const displayAddress = customer.address_overridden
+    ? (customer.address || null)
+    : ((activeEng && activeEng.address)
+      || (recentJobEng && recentJobEng.address)
+      || customer.address
+      || null);
+
   // Activity across every linked lead (calls/SMS/notes), newest first.
   let activity = [];
   const allIds = leadRows.map((l) => l.id);
@@ -746,7 +766,9 @@ function getCustomerDetail(businessId, customerId) {
     company: customer.company,
     phone: customer.phone,
     email: customer.email,
-    address: customer.address,
+    address: customer.address,                          // stored default / pinnable value
+    address_overridden: !!customer.address_overridden,  // true → owner pinned (jobs never change it)
+    display_address: displayAddress,                    // resolved top address (Auto follows the active job)
     status: customer.status || 'lead',
     status_overridden: !!customer.status_overridden,
     discount_group_id: customer.discount_group_id || null,

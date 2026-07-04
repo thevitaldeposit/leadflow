@@ -123,7 +123,11 @@ function ProfileForm({ customer, onSave, onCancel }) {
         <div><label className={labelCls}>Company</label><input className={inputCls} value={form.company} onChange={e => set('company', e.target.value)} /></div>
         <div><label className={labelCls}>Phone</label><input className={inputCls} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
         <div><label className={labelCls}>Email</label><input className={inputCls} value={form.email} onChange={e => set('email', e.target.value)} /></div>
-        <div><label className={labelCls}>Primary Address</label><input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} /></div>
+        <div>
+          <label className={labelCls}>Primary Address</label>
+          <input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} />
+          <p className="text-[11px] text-muted mt-1">Pins this address so jobs never change it. Leave blank to follow the active job.</p>
+        </div>
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-3 py-2 rounded-lg"><X size={14} /> Cancel</button>
@@ -413,6 +417,13 @@ export default function CustomerDetailPage() {
     await patch({ status: value }); // 'auto' releases the manual override
   };
 
+  // Address mode: 'auto' follows the active job (computed server-side), 'pinned'
+  // freezes the stored default. Mirrors handleStatusChange — the server resolves the
+  // displayed address; this only flips address_overridden.
+  const handleAddressModeChange = async (value) => {
+    await patch({ address_mode: value === 'pinned' ? 'pinned' : 'auto' });
+  };
+
   const handleGroupChange = async (value) => {
     await patch({ discount_group_id: value === '' ? null : Number(value) });
   };
@@ -569,7 +580,13 @@ export default function CustomerDetailPage() {
   const c = customer;
   const statusStyle = CUSTOMER_STATUS_STYLES[c.status] || CUSTOMER_STATUS_STYLES.lead;
   const pricing = c.pricing || { items: [], group: null };
-  const primaryAddress = c.address || (c.addresses && c.addresses[0]) || null;
+  // Top address: the server-resolved display address — Auto follows the active job
+  // (reflecting customer corrections + the current rental); a pin freezes the stored
+  // default. Fall back to the stored address only if an older payload omits it.
+  const primaryAddress = c.display_address || c.address || (c.addresses && c.addresses[0]) || null;
+  // The Pinned option (and the 'pinned' value) only make sense when a stored address
+  // exists to pin — otherwise the selector shows Auto only.
+  const addressPinned = !!c.address_overridden && !!c.address;
 
   // Engagements: one ongoing piece of business (inquiry → job → completed).
   //  • activeEngagement — the single OPEN engagement: an Active Inquiry, or a
@@ -658,7 +675,26 @@ export default function CustomerDetailPage() {
                     <div className="mt-3 space-y-2.5 text-sm text-muted">
                       <ContactLine icon={Phone} value={c.phone} />
                       <ContactLine icon={Mail} value={c.email} />
-                      <ContactLine icon={MapPin} value={primaryAddress} />
+                      {/* Address line + Auto/Pinned selector (mirrors the status
+                          selector). Auto follows the active job; Pinned freezes the
+                          stored default. Hidden only when there's no address at all. */}
+                      {(primaryAddress || c.address) && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="flex items-center gap-2 min-w-0">
+                            <MapPin size={14} className="text-brand flex-shrink-0" />
+                            <span className="text-content truncate">{primaryAddress || <span className="text-muted italic">No address</span>}</span>
+                          </span>
+                          <select
+                            value={addressPinned ? 'pinned' : '__auto__'}
+                            onChange={e => handleAddressModeChange(e.target.value === 'pinned' ? 'pinned' : 'auto')}
+                            title={addressPinned ? 'Pinned manually — jobs never change it' : 'Auto — follows the active job'}
+                            className="text-[11px] border border-divider bg-surface rounded-md px-1.5 py-1 text-muted focus:outline-none focus:ring-2 focus:ring-brand"
+                          >
+                            <option value="__auto__">Auto (from jobs)</option>
+                            {c.address && <option value="pinned">Pinned: {c.address}</option>}
+                          </select>
+                        </div>
+                      )}
                       {c.company && <ContactLine icon={Briefcase} value={c.company} />}
                       {!c.phone && !c.email && !primaryAddress && !c.company && <p className="text-muted">No contact info</p>}
                     </div>
@@ -1054,6 +1090,11 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
           rental_duration: e.rental_duration,
           dumpster_size: e.dumpster_size,
           debris_type: e.debris_type,
+          // The engagement's authoritative per-job delivery address (server-reconciled
+          // as e.address — customer corrections + the booked job win over a later
+          // follow-up call's raw vd.deliveryAddress). Threaded like the size/date
+          // overrides above so the Job Details grid shows where THIS job went.
+          address: e.address,
         }}
       />
       {earlier.length > 0 && (
@@ -1403,10 +1444,20 @@ function JobHistoryRow({ engagement: e, onPaymentChange, forceOpen = false }) {
         </td>
         <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">{fmtDate(e.delivery_date || e.created_at)}</td>
         <td className="px-4 py-3 text-content">
-          <span className="inline-flex items-center gap-1.5">
-            {serviceType}
-            {e.auto_booked && <Zap size={12} className="text-success" title="Auto-booked from the call" />}
-          </span>
+          <div className="flex flex-col gap-0.5">
+            <span className="inline-flex items-center gap-1.5">
+              {serviceType}
+              {e.auto_booked && <Zap size={12} className="text-success" title="Auto-booked from the call" />}
+            </span>
+            {/* Which address this job went to (server-reconciled e.address) — so a
+                repeat customer's history shows each job's delivery location. */}
+            {e.address && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted">
+                <MapPin size={11} className="flex-shrink-0" />
+                <span className="truncate max-w-[14rem]" title={e.address}>{e.address}</span>
+              </span>
+            )}
+          </div>
         </td>
         <td className="px-4 py-3 text-muted whitespace-nowrap">{e.dumpster_size || '—'}</td>
         <td className="px-4 py-3">

@@ -625,6 +625,10 @@ function runMigrations() {
       address TEXT,
       status TEXT DEFAULT 'lead',
       status_overridden INTEGER DEFAULT 0,
+      -- The top-of-profile address follows the active job by default (Auto, computed
+      -- at read time — never written back). address_overridden = 1 freezes it to the
+      -- owner-pinned customers.address instead, exactly like status_overridden.
+      address_overridden INTEGER DEFAULT 0,
       discount_group_id INTEGER,
       contract_terms TEXT,
       notes TEXT,
@@ -634,6 +638,17 @@ function runMigrations() {
   `);
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_business_phone ON customers(business_id, normalized_phone)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_customers_business ON customers(business_id)');
+
+  // Existing customers tables predate address_overridden — add it idempotently
+  // (attempt-and-swallow-duplicate, same pattern as NEW_COLUMNS). Defaulting to 0
+  // means every existing customer is on Auto: their top address now follows the
+  // active job instead of the write-once stored default. An owner can re-pin in one
+  // click (the stored customers.address is preserved as the pinnable value).
+  try {
+    db.exec('ALTER TABLE customers ADD COLUMN address_overridden INTEGER DEFAULT 0');
+  } catch (e) {
+    if (!e.message.includes('duplicate column name')) throw e;
+  }
 
   // Per-client pricing layer (all business_id-scoped, ready for quotes/invoices
   // to consume later — invoicing itself is out of scope here):

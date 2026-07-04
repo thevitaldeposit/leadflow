@@ -26,11 +26,11 @@ function fmtDateTime(iso) {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-function ROField({ label, value }) {
+function ROField({ label, value, className = '' }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className={`flex flex-col gap-0.5 ${className}`}>
       <span className="text-xs font-medium text-muted uppercase tracking-wide">{label}</span>
-      <span className="text-sm text-content">{value || <span className="text-muted italic">—</span>}</span>
+      <span className="text-sm text-content break-words">{value || <span className="text-muted italic">—</span>}</span>
     </div>
   );
 }
@@ -87,6 +87,10 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
   const schedDelivery = schedule?.delivery_date ?? lead.delivery_date;
   const schedPickup = schedule?.pickup_date ?? lead.pickup_date;
   const schedTime = schedule?.scheduled_time ?? lead.scheduled_time;
+  // Delivery address for THIS job: prefer the engagement's server-reconciled address
+  // (schedule.address — booked job + customer corrections win), falling back to this
+  // call's own stored address / delivery / property address. Read-only display.
+  const schedAddress = schedule?.address ?? (lead.address || vd.deliveryAddress || vd.propertyAddress);
 
   // Compact mode (earlier calls in an engagement): show ONLY the AI summary, the
   // recording player, and the small Raw transcript link. The structured fields,
@@ -132,6 +136,9 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
         <ROField label={t.startDate} value={fmtDate(schedDelivery)} />
         <ROField label={t.endDate} value={fmtDate(schedPickup)} />
         <ROField label={t.startTime} value={formatTime12(schedTime)} />
+        {(isDumpster || schedAddress) && (
+          <ROField label={t.addressLabel || 'Delivery Address'} value={schedAddress} className="col-span-2 sm:col-span-3" />
+        )}
         {showInquiryFields && <ROField label="Intent" value={intent} />}
         {showInquiryFields && <ROField label="Urgency" value={vd.urgency} />}
         {showInquiryFields && <ROField label="Follow-Up" value={fmtDateTime(vd.followUpDate)} />}
