@@ -10,7 +10,6 @@ const { transcribe } = require('../services/transcriptionService');
 const { emitToBusiness } = require('../socket');
 const { resolveDeliveryDate, parseRentalDays, addDaysToISO, resolvePickupPhrase, enforceAutoBookAvailability } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
-const { sendPaymentLinkEmail } = require('../services/emailService');
 const { logActivity, formatDuration } = require('../services/activityLog');
 const { getTimezone } = require('../services/settingsService');
 const { getBusinessIdByTwilioNumber, getDefaultBusinessId } = require('../services/businesses');
@@ -476,19 +475,13 @@ async function processRecording(payload) {
         // mechanism the weight overage uses) so it shows in the Invoices section and
         // feeds the settled rollup that gates completion. Base-invoice creation ONLY —
         // no change to routing, recording, caller ID, or the auto-book threshold.
-        // emailLink:false so the legacy payment-link email below stays the sole notice.
+        // emailLink:true so the customer gets the modern /invoice link (contract +
+        // e-signature + card) as the sole booking notice — the same link the overage
+        // bill sends. ensureBaseInvoice sends it fire-and-forget; just announce the lead.
         try {
-          require('../services/jobLifecycle').ensureBaseInvoice(lead.business_id, lead, { emailLink: false, via: 'auto_book' });
+          require('../services/jobLifecycle').ensureBaseInvoice(lead.business_id, lead, { emailLink: true, via: 'auto_book' });
         } catch (e) { console.error('[webhook] base invoice error:', e.message); }
-        sendPaymentLinkEmail(lead).then((result) => {
-          if (result.sent) {
-            lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
-          }
-          emitToBusiness(lead.business_id, 'new_lead', lead);
-        }).catch((err) => {
-          console.error('[webhook] payment email error:', err);
-          emitToBusiness(lead.business_id, 'new_lead', lead);
-        });
+        emitToBusiness(lead.business_id, 'new_lead', lead);
       } else {
         emitToBusiness(lead.business_id, 'new_lead', lead);
       }

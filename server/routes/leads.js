@@ -443,19 +443,6 @@ router.put('/:id', (req, res) => {
       logActivity(updated.id, 'job_updated', editSummary.slice(0, 500));
     }
 
-    // Booking initiation EMAILS the payment link (SMS retired for this while A2P
-    // approval is pending — sendPaymentSms is left intact but unused here). The send
-    // stamps payment_link_emailed_at and is fire-and-forget so it never blocks the PUT.
-    if (emailPaymentLink) {
-      sendPaymentLinkEmail(updated).then((result) => {
-        if (result.sent) {
-          emitToBusiness(updated.business_id, 'payment_link_emailed', {
-            leadId: updated.id, to: result.to, customerName: result.customerName,
-          });
-        }
-      }).catch((err) => console.error('[leads] payment email error:', err));
-    }
-
     // Owner recorded payment (Mark Paid sets paid_at) → recompute the payment axis
     // and auto-advance the lifecycle (pending_payment → booked and reserve+schedule,
     // or awaiting_final_payment → completed when fully paid). Re-read so the response
@@ -471,10 +458,12 @@ router.put('/:id', (req, res) => {
     // 'sent' invoice (the SAME mechanism the weight overage uses) so it shows in the
     // Invoices section and feeds the settled rollup that gates completion. One per job
     // (deduped in the helper). A cash / already-paid booking settles it so the rollup
-    // reads paid. Re-read so the response reflects any advance (mark-paid → booked).
+    // reads paid. On an unpaid booking (emailPaymentLink) it EMAILS the modern /invoice
+    // link (contract + e-signature + card) — the sole booking notice, replacing the
+    // legacy /pay email. Re-read so the response reflects any advance (mark-paid → booked).
     if (initiateBaseInvoice) {
       try {
-        jobLifecycle.ensureBaseInvoice(businessId, updated, { markPaidNow: baseInvoiceMarkPaid, via: 'owner' });
+        jobLifecycle.ensureBaseInvoice(businessId, updated, { emailLink: emailPaymentLink, markPaidNow: baseInvoiceMarkPaid, via: 'owner' });
         updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
       } catch (e) { console.error('[leads] ensureBaseInvoice error:', e.message); }
     }
@@ -788,21 +777,11 @@ router.post('/manual', requireAuth, (req, res) => {
     if (wantsBooked) {
       try {
         const bookedLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
-        jobLifecycle.ensureBaseInvoice(businessId, bookedLead, { markPaidNow: alreadyPaid, via: 'manual' });
+        // emailLink:true → an unpaid booking EMAILS the modern /invoice link (contract +
+        // e-signature + card); a booked+paid entry (markPaidNow: alreadyPaid) settles it
+        // and sends nothing. Replaces the legacy /pay payment-link email.
+        jobLifecycle.ensureBaseInvoice(businessId, bookedLead, { emailLink: true, markPaidNow: alreadyPaid, via: 'manual' });
       } catch (e) { console.error('[leads/manual] base invoice error:', e.message); }
-    }
-
-    // Booking initiated but unpaid → email the payment link (payment reserves the
-    // dumpster). A booked+paid manual entry needs no link. Same email channel the
-    // PUT booking transition + auto-book use.
-    if (isPendingPayment) {
-      sendPaymentLinkEmail(lead).then((r) => {
-        if (r.sent) {
-          emitToBusiness(lead.business_id, 'payment_link_emailed', {
-            leadId: lead.id, to: r.to, customerName: r.customerName,
-          });
-        }
-      }).catch((err) => console.error('[leads/manual] payment email error:', err));
     }
 
     emitToBusiness(lead.business_id, 'new_lead', lead);
