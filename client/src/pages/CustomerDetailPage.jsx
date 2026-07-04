@@ -15,7 +15,6 @@ import {
   ENGAGEMENT_STATUS,
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
-import PaymentLinkSection from '../components/home_services/PaymentLinkSection';
 import VoicemailBadge from '../components/home_services/VoicemailBadge';
 import { CreateJobModal, EditJobDetailsModal } from '../components/home_services/HomeServicesStickyHeader';
 import { buildBookingUpdates } from '../utils/booking';
@@ -508,10 +507,9 @@ export default function CustomerDetailPage() {
     setDetailRefresh(n => n + 1);
   };
 
-  // Mark Paid / Mark Unpaid or a payment-SMS send happened on the Open Job card's
-  // Payment Link (PaymentLinkSection already called the lead endpoint). Just reload
-  // so the engagement re-derives: a paid + past-pickup job flips to Completed, and
-  // the paid/SMS state re-renders. No extraction, booking, or Stripe logic here.
+  // A dump-ticket / weight entry was saved on the Open Job card (onDone). Just reload
+  // so the engagement re-derives: a paid + past-pickup job flips to Completed and the
+  // paid state re-renders. No extraction, booking, or Stripe logic here.
   const handlePaymentChange = async () => {
     await load();
   };
@@ -1089,22 +1087,9 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
         </div>
       )}
 
-      {/* Payment Link + Mark Paid — booked/completed jobs only, operating on the
-          engagement's booked lead (not the newest call). Reuses the same component
-          and api methods (api.updateLead paid_at, api.resendPaymentSms) as the lead
-          detail page; onUpdate reloads the profile so completion / paid state sync. */}
+      {/* Dump-ticket / weight entry for a booked (or pending-payment) job. */}
       {(e.booked_lead_id || e.job_stage === 'pending_payment') && (
         <div className="px-5 pb-5 pt-1 space-y-3">
-          <PaymentLinkSection
-            lead={{
-              id: e.booked_lead_id || e.representative_lead_id,
-              paid_at: e.booked_paid_at,
-              payment_link_emailed_at: e.booked_payment_link_emailed_at,
-              payment_sms_sent_at: e.booked_payment_sms_sent_at,
-            }}
-            paymentStatus={e.payment_status}
-            onUpdate={() => onPaymentChange?.()}
-          />
           {/* Dump-ticket / weight entry appears once a dumpster is out for the job
               (units_out > 0 after delivery). The manual trigger the OCR feature reuses. */}
           {e.units_out != null && e.units_out > 0 && (

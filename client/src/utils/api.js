@@ -91,10 +91,6 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: !!confirm }),
     }),
-  // (Re)send the payment link by email — the approved channel while SMS/A2P pends.
-  emailPaymentLink: (id) =>
-    request(`/leads/${id}/email-payment-link`, { method: 'POST' }),
-
   // Customers — the unified person-level record (consolidates leads/opportunities)
   getCustomers: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

@@ -7,10 +7,6 @@ const { logActivity } = require('./activityLog');
 // reset email fails, and it fails clearly, until the key is configured.
 const FROM_ADDRESS = 'Stream <noreply@joinstream.app>';
 
-// Same hardcoded production host the SMS payment link uses (smsService.js). The
-// /pay/:leadId page renders the deposit/pay options for a lead.
-const PAYMENT_BASE_URL = 'https://leadflow-production-9c02.up.railway.app';
-
 // Shared font stack + Stream brand blues (blue-600 primary, blue-500 accent —
 // pulled from the landing-page CTAs and the AudioLines logo mark).
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
@@ -252,121 +248,6 @@ function getDbSetting(key, businessId) {
   } catch { return null; }
 }
 
-// Email a lead their payment link — the auto-book / booking-initiation notify channel
-// (SMS is retired for this while A2P approval is pending; smsService.sendPaymentSms is
-// left intact but unused by auto-book). Links to the same /pay/:leadId page the SMS
-// used. Makes explicit that PAYMENT is what reserves the dumpster (nothing is held
-// until they pay). Idempotent via payment_link_emailed_at unless `force`. Mirrors
-// sendPaymentSms's return contract. Never touches the call/recording/voice path.
-async function sendPaymentLinkEmail(lead, force = false) {
-  const to = lead && lead.email ? String(lead.email).trim() : null;
-  if (!to) return { sent: false, reason: 'no_email' };
-  if (!force && lead.payment_link_emailed_at) return { sent: false, reason: 'already_sent' };
-  if (!process.env.RESEND_API_KEY) return { sent: false, reason: 'no_email_provider' };
-
-  let vd = {};
-  try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
-  const businessName = getDbSetting('businessName', lead.business_id) || 'our team';
-  const customerName = vd.customerName
-    || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ')
-    || null;
-  const dumpsterSize = vd.dumpsterSize || null;
-  const total = (typeof lead.estimated_revenue === 'number' && !Number.isNaN(lead.estimated_revenue))
-    ? lead.estimated_revenue
-    : null;
-  const link = `${PAYMENT_BASE_URL}/pay/${lead.id}`;
-  const html = buildPaymentLinkEmailHtml({ businessName, customerName, dumpsterSize, deliveryDate: lead.delivery_date, total, link });
-  const safeBiz = escapeHtml(businessName);
-
-  try {
-    await getResend().emails.send({
-      from: FROM_ADDRESS,
-      to,
-      subject: `Reserve your ${dumpsterSize ? escapeHtml(dumpsterSize) + ' ' : ''}dumpster — pay to confirm`,
-      html,
-    });
-    const at = new Date().toISOString();
-    try {
-      db.prepare('UPDATE leads SET payment_link_emailed_at = ? WHERE id = ?').run(at, lead.id);
-      lead.payment_link_emailed_at = at;
-    } catch { /* column not migrated — non-fatal */ }
-    logActivity(lead.id, 'email_sent', 'Payment link emailed (payment reserves the dumpster)');
-    console.log(`[email] Payment link emailed to ${to} for lead ${lead.id} (${safeBiz})`);
-    return { sent: true, sentAt: at, to, customerName };
-  } catch (err) {
-    console.error(`[email] Failed to send payment link for lead ${lead.id}:`, err.message);
-    return { sent: false, reason: 'send_error', error: err.message };
-  }
-}
-
-// Branded HTML for the booking payment-link email. Reuses the invoice email's visual
-// language (Stream-blue header, prominent amount, single CTA) with a clear line that
-// paying is what reserves the dumpster. Pure (no I/O).
-function buildPaymentLinkEmailHtml({ businessName, customerName, dumpsterSize, deliveryDate, total, link }) {
-  const safeBiz = escapeHtml(businessName || 'Your service provider');
-  const safeLink = escapeHtml(link || '#');
-  const firstName = customerName ? escapeHtml(String(customerName).split(' ')[0]) : null;
-  const greeting = firstName ? `Hi ${firstName},` : 'Hi there,';
-  const sizeStr = dumpsterSize ? escapeHtml(String(dumpsterSize)) + ' dumpster' : 'dumpster';
-  const dateStr = deliveryDate
-    ? escapeHtml(new Date(deliveryDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric' }))
-    : null;
-  const totalStr = total != null
-    ? `$${Number(total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : null;
-
-  return `<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reserve your ${sizeStr}</title>
-</head>
-<body style="margin:0; padding:0; width:100%; background-color:#eef2f7;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef2f7;">
-    <tr><td align="center" style="padding:32px 12px;">
-      <table role="presentation" align="center" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:520px; margin:0 auto;">
-        <tr><td style="background-color:${STREAM_BLUE}; background-image:linear-gradient(135deg, ${STREAM_BLUE} 0%, ${STREAM_BLUE_LIGHT} 100%); border-radius:16px 16px 0 0; padding:36px 32px;">
-          <p style="margin:0 0 22px; font-family:${FONT}; font-size:15px; font-weight:700; letter-spacing:0.04em; color:#ffffff;">Stream</p>
-          <h1 style="margin:0; font-family:${FONT}; font-size:24px; line-height:1.25; font-weight:700; color:#ffffff;">Reserve your ${sizeStr}</h1>
-          ${dateStr ? `<p style="margin:8px 0 0; font-family:${FONT}; font-size:15px; color:#dbeafe;">Delivery on ${dateStr}</p>` : ''}
-        </td></tr>
-        <tr><td style="background-color:#ffffff; border-radius:0 0 16px 16px; padding:32px;">
-          <p style="margin:0 0 16px; font-family:${FONT}; font-size:15px; line-height:1.6; color:#374151;">${greeting}</p>
-          <p style="margin:0 0 20px; font-family:${FONT}; font-size:15px; line-height:1.6; color:#374151;">
-            Thanks for choosing <strong style="color:#111827;">${safeBiz}</strong>! To lock in your ${sizeStr}${dateStr ? ` for ${dateStr}` : ''}, complete your payment below.
-          </p>
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #fde68a; border-radius:12px; background-color:#fffbeb;">
-            <tr><td style="padding:16px 20px; font-family:${FONT}; font-size:14px; line-height:1.5; color:#92400e;">
-              <strong>Payment reserves your dumpster.</strong> Your delivery date is held only once payment is received — nothing is reserved until then.
-            </td></tr>
-          </table>
-          ${totalStr ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px; border-top:1px solid #e5e7eb;">
-            <tr>
-              <td style="padding-top:16px; font-family:${FONT}; font-size:12px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6b7280; vertical-align:bottom;">Amount</td>
-              <td align="right" style="padding-top:16px; font-family:${FONT}; font-size:30px; font-weight:700; letter-spacing:-0.02em; color:#111827;">${totalStr}</td>
-            </tr>
-          </table>` : ''}
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td align="center" style="padding:28px 0 4px;">
-              <a href="${safeLink}" style="display:inline-block; background-color:${STREAM_BLUE}; background-image:linear-gradient(135deg, ${STREAM_BLUE} 0%, ${STREAM_BLUE_LIGHT} 100%); color:#ffffff; text-decoration:none; font-family:${FONT}; font-size:16px; font-weight:600; line-height:1; padding:15px 44px; border-radius:10px;">Pay &amp; reserve</a>
-            </td>
-          </tr></table>
-          <p style="margin:20px 0 0; font-family:${FONT}; font-size:13px; line-height:1.6; color:#9ca3af;">
-            If the button doesn't work, copy and paste this link into your browser:<br />
-            <a href="${safeLink}" style="color:${STREAM_BLUE}; word-break:break-all;">${safeLink}</a>
-          </p>
-        </td></tr>
-        <tr><td align="center" style="padding:22px 32px 8px;">
-          <p style="margin:0; font-family:${FONT}; font-size:12px; color:#9ca3af;">Powered by <span style="font-weight:700; color:#6b7280;">Stream</span></p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
-}
-
 // Escape user-supplied text before interpolating it into the contact emails so a
 // submission can't inject markup into the HTML body.
 function escapeHtml(str) {
@@ -424,4 +305,4 @@ async function sendContactConfirmation({ name, email }) {
   });
 }
 
-module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail, sendInvoiceEmail, sendInvoiceLinkEmail, buildInvoiceEmailHtml, sendPaymentLinkEmail, buildPaymentLinkEmailHtml };
+module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail, sendInvoiceEmail, sendInvoiceLinkEmail, buildInvoiceEmailHtml };

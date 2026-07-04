@@ -121,39 +121,6 @@ function recomputeLeadPaymentStatus(businessId, leadOrId) {
   return status;
 }
 
-// ── Booking initiation: → pending_payment (or straight to booked if already paid) ─
-// The owner clicking "Book" or auto-book firing INITIATES booking. Nothing is
-// reserved/scheduled yet — a payment link is emailed, and only payment advances the
-// job to 'booked'. If the job is already paid (e.g. the owner collected cash and
-// marked it paid), it books immediately. `via` labels the trigger for logs.
-function initiateBooking(businessId, leadOrId, { via = 'owner', emailLink = true } = {}) {
-  const lead = loadLead(businessId, leadOrId);
-  if (!lead) return { error: 'not_found' };
-  const pay = recomputeLeadPaymentStatus(businessId, lead);
-  if (pay === PAYMENT_STATUS.PAID) {
-    setJobStatus(lead, JOB_STATUS.BOOKED);
-    logActivity(lead.id, 'status_change', 'Payment already received — job booked; dumpster reserved and scheduled');
-    bumpCustomer(lead);
-    emit(lead);
-    return { lead, status: JOB_STATUS.BOOKED, emailed: false };
-  }
-  setJobStatus(lead, JOB_STATUS.PENDING_PAYMENT);
-  logActivity(lead.id, 'status_change', 'Booking initiated — payment link emailed (payment reserves the dumpster)');
-  bumpCustomer(lead);
-  let emailed = false;
-  if (emailLink) emailed = true; // actual send is fire-and-forget below
-  emit(lead);
-  if (emailLink) {
-    // Fire-and-forget: don't block the transition on email delivery.
-    try {
-      require('./emailService').sendPaymentLinkEmail(lead)
-        .then((r) => { if (r && !r.sent) console.log(`[jobLifecycle] payment email not sent (lead ${lead.id}): ${r.reason}`); })
-        .catch((e) => console.error('[jobLifecycle] payment email error:', e.message));
-    } catch (e) { console.error('[jobLifecycle] payment email dispatch error:', e.message); }
-  }
-  return { lead, status: JOB_STATUS.PENDING_PAYMENT, emailed };
-}
-
 // ── On payment: advance pending_payment → booked, or awaiting_final_payment → completed ─
 // Call after any invoice for the job settles (manual mark-paid, Stripe, or a lead
 // paid_at write). Recomputes payment_status first, then advances if the gate is met.
@@ -537,7 +504,6 @@ function canComplete(businessId, leadOrId) {
 module.exports = {
   paymentStatusFromInvoices,
   recomputeLeadPaymentStatus,
-  initiateBooking,
   advanceOnPayment,
   advanceForInvoice,
   advanceDueDeliveries,

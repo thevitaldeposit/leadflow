@@ -11,7 +11,6 @@ import {
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import BookingSignalsPanel from './BookingSignalsPanel';
-import PaymentLinkSection from './PaymentLinkSection';
 import {
   HOME_SERVICES_STATUSES,
   HOME_SERVICES_OUTCOMES,
@@ -579,11 +578,6 @@ export default function HomeServicesLeadDetail({ lead: initialLead, onUpdate }) 
           ))}
         </div>
       </div>
-
-      {/* Payment Link — only shown for booked jobs */}
-      {(lead.job_status === JOB_STATUS.BOOKED || lead.payment_sms_sent_at || lead.paid_at) && (
-        <PaymentLinkSection lead={lead} onUpdate={(updated) => { setLead(updated); onUpdate?.(updated); }} />
-      )}
 
       {/* Notes */}
       <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">

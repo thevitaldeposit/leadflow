@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 const { sendPaymentSms } = require('../services/smsService');
-const { sendPaymentLinkEmail } = require('../services/emailService');
 const jobLifecycle = require('../services/jobLifecycle');
 const { initiateClickToCall } = require('../services/callService');
 const { logActivity, getActivityForLead } = require('../services/activityLog');
@@ -874,27 +873,6 @@ router.post('/:id/cancel', requireAuth, (req, res) => {
   } catch (err) {
     console.error('POST /leads/:id/cancel error:', err);
     res.status(500).json({ error: 'Failed to resolve cancellation' });
-  }
-});
-
-// POST /api/leads/:id/email-payment-link — (re)send the payment link by EMAIL (the
-// approved channel while SMS/A2P is pending). Used by the Open Job card's Payment
-// Link action. Forces a resend even if one was already emailed.
-router.post('/:id/email-payment-link', requireAuth, async (req, res) => {
-  try {
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    const result = await sendPaymentLinkEmail(lead, true);
-    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
-    if (result.sent) {
-      emitToBusiness(updated.business_id, 'payment_link_emailed', {
-        leadId: updated.id, to: result.to, customerName: result.customerName,
-      });
-    }
-    res.json({ ...result, lead: updated });
-  } catch (err) {
-    console.error('POST /leads/:id/email-payment-link error:', err);
-    res.status(500).json({ error: 'Failed to email payment link' });
   }
 });
 

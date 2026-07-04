@@ -23,7 +23,6 @@ const { router: voiceRouter } = require('./routes/voice');
 const dumpsterRouter = require('./routes/inventory');
 const scheduleRouter = require('./routes/schedule');
 const settingsRouter = require('./routes/settings');
-const paymentRouter = require('./routes/payment');
 const authRouter = require('./routes/auth');
 const signupsRouter = require('./routes/signups');
 const contactRouter = require('./routes/contact');
@@ -173,8 +172,6 @@ app.use('/api/connect', connectRouter);
 // connected account). Separate from /api/billing (platform subscription).
 app.use('/api/payments', paymentsRouter);
 app.use('/api/admin', adminRouter);
-// Public payment page — must be before the SPA catch-all
-app.use('/pay', paymentRouter);
 // Public per-customer SMS compliance pages (privacy + SMS terms) for A2P 10DLC
 // review — server-rendered HTML, must be before the SPA catch-all.
 app.use('/c', policyPagesRouter);
