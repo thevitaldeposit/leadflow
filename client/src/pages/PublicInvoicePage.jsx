@@ -6,11 +6,12 @@ import { getConnectedStripe } from '../utils/stripe';
 
 // ── PUBLIC, tokenized invoice page ─────────────────────────────────────────────
 // Opened by the customer from an email/SMS link with NO login. Renders the line
-// items, balance, and terms, captures an e-signature (drawn or typed) + full name,
-// then unlocks pay-by-card (Stripe Connect direct charge). Payment is GATED behind
-// signing: the Pay area stays disabled until the contract is signed, and the
-// server rejects a charge on an unsigned invoice. Self-contained: its own chrome,
-// no dashboard layout.
+// items, balance, and terms on the page; the accept-and-pay flow happens in a
+// MODAL: the customer signs (drawn or typed e-signature + full name), and saving
+// the signature reveals pay-by-card (Stripe Connect direct charge) in the SAME
+// modal. Payment is GATED behind signing — the pay control only appears once
+// signed, and the server also rejects a charge on an unsigned invoice.
+// Self-contained: its own chrome, no dashboard layout.
 
 function money(n, currency = 'USD') {
   const v = Number(n);
@@ -111,17 +112,18 @@ function DrawPad({ onChange }) {
   );
 }
 
-// Presentational signature form: the tabs, name, draw/type pad and agree checkbox.
-// State lives in PublicInvoicePage so the STICKY bottom bar can share it and act as
-// the submit button — the gate (name + signature + agree) is unchanged. No submit
-// button here; the sticky bar below is the single, always-reachable sign action.
-function SignForm({ mode, setMode, name, setName, setDrawn, agree, setAgree, invoice, error }) {
+// Presentational signature form rendered INSIDE the Accept & Pay modal: the tabs,
+// name, draw/type pad, agree checkbox, and the Sign button. State lives in
+// PublicInvoicePage (so the invoice can update on save and the modal can advance to
+// the pay step); the gate (name + signature + agree) is unchanged. Saving the
+// signature here reveals the pay control in the same modal.
+function SignForm({ mode, setMode, name, setName, setDrawn, agree, setAgree, invoice, error, onSign, signing }) {
   const typedSig = name.trim();
   const tabCls = (active) =>
     `flex-1 text-sm font-medium py-2 rounded-lg transition-colors ${active ? 'bg-well text-content' : 'bg-surface-2 text-muted hover:bg-surface-2'}`;
 
   return (
-    <div id="sign-section" className="bg-surface rounded-2xl shadow-sm p-5 sm:p-6">
+    <div className="bg-surface rounded-2xl shadow-sm p-5 sm:p-6">
       <h2 className="text-base font-bold text-content">Accept &amp; Sign</h2>
       <p className="text-sm text-muted mt-1 mb-4">
         By signing, you confirm the details above are correct and agree to the terms.
@@ -163,9 +165,14 @@ function SignForm({ mode, setMode, name, setName, setDrawn, agree, setAgree, inv
 
       {error && <p className="text-sm text-danger mt-3">{error}</p>}
 
-      <p className="text-xs text-muted mt-4">
-        Complete the fields above, then tap <span className="font-semibold text-content">Accept Terms and Sign Invoice</span> at the bottom of the screen.
-      </p>
+      <button
+        type="button"
+        onClick={onSign}
+        disabled={signing}
+        className="mt-5 w-full py-3.5 rounded-xl text-base font-bold text-content bg-brand hover:bg-brand/90 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+      >
+        {signing ? 'Recording…' : (invoice.payment_enabled ? 'Sign & Continue to Payment' : 'Accept & Sign Invoice')}
+      </button>
     </div>
   );
 }
@@ -388,21 +395,80 @@ function PaymentSection({ token, invoice, onPaid }) {
   );
 }
 
+// The Accept & Pay modal: a dark, dismissible sheet that hosts the two-step
+// sign-then-pay flow relocated off the page body. Step 1 (signature required, not
+// yet signed) shows the signature form; saving the signature flips the invoice to
+// signed, which reveals Step 2 — the existing PaymentSection pay control — in the
+// SAME modal (payment is no longer blocked by the requires-signature gate because
+// signed_at is now set). A returning (already-signed) or contract-less customer
+// opens straight to the pay step. Reuses the unchanged SignForm + PaymentSection;
+// this is purely a new presentation. Closable (backdrop, ✕, or Esc) so the customer
+// can go back and read the contract, then reopen it.
+function AcceptPayModal({ token, invoice, showSignStep, onClose, onPaid, signProps }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 sm:p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="bg-surface w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 sm:px-6 py-3.5 border-b border-divider shrink-0">
+          <p className="text-xs font-semibold text-muted uppercase tracking-wide">
+            Invoice {invoice.invoice_number} · {money(invoice.total, invoice.currency)}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 -mr-1.5 rounded-lg text-muted hover:text-content hover:bg-surface-2 flex items-center justify-center text-lg leading-none"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Body: the signature capture until signed, then the reused pay control.
+            No extra padding here — each step brings its own bg-surface card, which
+            reads as one seamless surface inside the panel. */}
+        <div className="overflow-y-auto">
+          {showSignStep ? (
+            <SignForm {...signProps} invoice={invoice} />
+          ) : (
+            <PaymentSection token={token} invoice={invoice} onPaid={onPaid} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PublicInvoicePage() {
   const { token } = useParams();
   const [invoice, setInvoice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Signature form state — lifted here (from the old SignSection) so the STICKY
-  // bottom bar can be the always-visible submit button while the form inputs stay in
-  // the page flow. The signing gate is unchanged: name + signature + agree required.
+  // Signature form state — lifted here so it survives across the modal's sign→pay
+  // steps and the invoice can update on save. Consumed by SignForm inside the
+  // Accept & Pay modal. The signing gate is unchanged: name + signature + agree.
   const [signMode, setSignMode] = useState('draw'); // 'draw' | 'type'
   const [signName, setSignName] = useState('');
   const [signDrawn, setSignDrawn] = useState(null);
   const [signAgree, setSignAgree] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState(null);
+
+  // The Accept & Pay modal (sign, then pay) opened from the sticky bar.
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -440,10 +506,16 @@ export default function PublicInvoicePage() {
   const biz = inv.business || {};
 
   // After a successful payment: use the updated invoice the confirm endpoint
-  // returns, or re-fetch if we only learned it was already paid.
+  // returns, or re-fetch if we only learned it was already paid. Once it reflects
+  // paid_at, close the Accept & Pay modal so the page shows the "Payment Complete"
+  // state (CardForm has already shown its own success screen in the meantime).
   const handlePaid = async (updated) => {
-    if (updated) { setInvoice(updated); return; }
-    try { setInvoice(await api.getPublicInvoice(token)); } catch { /* keep current */ }
+    let next = updated;
+    if (!next) { try { next = await api.getPublicInvoice(token); } catch { /* keep current */ } }
+    if (next) {
+      setInvoice(next);
+      if (next.paid_at) setModalOpen(false);
+    }
   };
 
   // Sign gate (unchanged from the old SignSection): full name + a signature (drawn or
@@ -462,25 +534,45 @@ export default function PublicInvoicePage() {
     try {
       const signed = await api.signPublicInvoice(token, { signerName: signName.trim(), signatureData, signatureType });
       setInvoice(signed);
+      // Signature saved. When the business can take card payments the modal stays
+      // open and auto-advances to the pay step (now that signed_at is set). When it
+      // can't, there's nothing to pay here, so close back to the page (which shows
+      // the signed banner and how to arrange payment).
+      if (!signed?.payment_enabled) setModalOpen(false);
     } catch (e) {
       setSignError(e.message || 'Could not record your signature. Please try again.');
       setSigning(false);
     }
   };
 
-  // The sticky bar is always tappable: when the form is complete it signs; otherwise
-  // it scrolls the signature form into view and points out what's missing (so the
-  // customer never has to hunt for it). It never bypasses the signature requirement.
-  const onStickySign = () => {
+  // Open the Accept & Pay modal from the sticky bar. No scrolling — the sign/pay
+  // steps live in the modal now.
+  const openModal = () => { setSignError(null); setModalOpen(true); };
+
+  // The modal's Sign button: when the form is complete it signs (which reveals the
+  // pay step); otherwise it points out what's missing. It never bypasses the gate.
+  const onModalSign = () => {
+    if (signing) return;
     if (canSign) { submitSign(); return; }
-    const el = document.getElementById('sign-section');
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    let msg = 'Complete the signature above to continue.';
-    if (!signName.trim()) msg = 'Enter your full name and sign above to continue.';
-    else if (signMode === 'draw' ? !signDrawn : !typedSig) msg = signMode === 'draw' ? 'Draw your signature above to continue.' : 'Type your signature above to continue.';
-    else if (!signAgree) msg = 'Check the box to agree to the terms, then continue.';
+    let msg = 'Complete the signature to continue.';
+    if (!signName.trim()) msg = 'Enter your full name and sign to continue.';
+    else if (signMode === 'draw' ? !signDrawn : !typedSig) msg = signMode === 'draw' ? 'Draw your signature to continue.' : 'Type your signature to continue.';
+    else if (!signAgree) msg = 'Check the box to agree to the terms to continue.';
     setSignError(msg);
   };
+
+  // Whether the modal must collect a signature before paying. Mirrors the server
+  // gate (requiresSignature): effectively always true today, but a hypothetical
+  // contract-less invoice (signature_required=false) skips signing and pays
+  // immediately — so gate on signature_required, not merely "not yet signed".
+  const needsSignature = !!(inv.signature_required && !isSigned);
+
+  // Sticky bar: the single entry point into the Accept & Pay modal. Shown while
+  // there's still something to do — sign, or pay (payable + unpaid).
+  const showStickyBar = !isPaid && (needsSignature || inv.payment_enabled);
+  const stickyLabel = needsSignature
+    ? (inv.payment_enabled ? 'Accept and Pay' : 'Accept Terms and Sign Invoice')
+    : 'Pay Invoice';
 
   return (
     // The global CSS locks html/body scroll (so the authed dashboard's <main> is
@@ -592,9 +684,9 @@ export default function PublicInvoicePage() {
         )}
 
         {/* Terms / contract — the full agreement flows naturally in the page so it
-            reads top-to-bottom and the Sign card below stays reachable by scrolling
-            the page (this page is its own scroll container). No inner scroll box:
-            on mobile a nested scroller is cramped for a multi-section contract. */}
+            reads top-to-bottom (this page is its own scroll container). No inner
+            scroll box: on mobile a nested scroller is cramped for a multi-section
+            contract. Signing happens in the Accept & Pay modal, not inline here. */}
         <div className="bg-surface rounded-2xl shadow-sm p-5 sm:p-6">
           <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Terms &amp; Conditions</p>
           <div className="text-[13px] text-content whitespace-pre-wrap leading-relaxed">
@@ -602,8 +694,9 @@ export default function PublicInvoicePage() {
           </div>
         </div>
 
-        {/* Sign or signed-signature display */}
-        {isSigned ? (
+        {/* Recorded signature (read-only). The signature CAPTURE now lives in the
+            Accept & Pay modal; the page shows only the signed result. */}
+        {isSigned && (
           <div className="bg-surface rounded-2xl shadow-sm p-5 sm:p-6">
             <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Signature</p>
             {inv.signature_type === 'drawn' && inv.signature_data?.startsWith('data:image') ? (
@@ -613,18 +706,16 @@ export default function PublicInvoicePage() {
             )}
             <p className="text-sm text-muted mt-3">{inv.signer_name} · {fmtDateTime(inv.signed_at)}</p>
           </div>
-        ) : (
-          <SignForm
-            mode={signMode} setMode={setSignMode}
-            name={signName} setName={setSignName}
-            setDrawn={setSignDrawn}
-            agree={signAgree} setAgree={setSignAgree}
-            invoice={inv} error={signError}
-          />
         )}
 
-        {/* Payment — pay-by-card when the business has Connect enabled */}
-        <PaymentSection token={token} invoice={inv} onPaid={handlePaid} />
+        {/* Payment — the interactive pay-by-card control lives in the Accept & Pay
+            modal. On the page we surface only terminal/informational states: the paid
+            (or refunded) receipt, and the "contact the business" note when card
+            payments aren't enabled. The live pay flow for an unpaid, payable invoice
+            is in the modal. */}
+        {(isPaid || !inv.payment_enabled) && (
+          <PaymentSection token={token} invoice={inv} onPaid={handlePaid} />
+        )}
 
         <div className="text-center pt-2">
           {biz.phone && <p className="text-sm text-muted">Questions? Call <a href={`tel:${biz.phone}`} className="text-brand">{biz.phone}</a></p>}
@@ -632,11 +723,11 @@ export default function PublicInvoicePage() {
         </div>
       </div>
 
-      {/* Sticky sign bar: full-width, pinned to the bottom of the viewport so the
-          Accept & Sign action is always visible/tappable without scrolling through the
-          whole contract. Shown only until signed; the same name + signature + agree
-          gate applies (onStickySign signs when complete, else scrolls to the form). */}
-      {!isSigned && (
+      {/* Sticky bar: full-width, pinned to the bottom of the viewport so the
+          Accept & Pay action is always visible/tappable without scrolling through the
+          whole contract. It opens the modal (no scrolling); the sign + pay steps live
+          inside the modal. */}
+      {showStickyBar && (
         <div className="sticky bottom-0 z-30 bg-surface border-t border-divider shadow-[0_-4px_16px_rgba(0,0,0,0.18)]">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3 sm:gap-4">
             <div className="shrink-0">
@@ -645,14 +736,33 @@ export default function PublicInvoicePage() {
             </div>
             <button
               type="button"
-              onClick={onStickySign}
-              disabled={signing}
-              className="flex-1 py-3.5 rounded-xl text-base font-bold text-content bg-brand hover:bg-brand/90 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+              onClick={openModal}
+              className="flex-1 py-3.5 rounded-xl text-base font-bold text-content bg-brand hover:bg-brand/90 transition-colors"
             >
-              {signing ? 'Recording…' : 'Accept Terms and Sign Invoice'}
+              {stickyLabel}
             </button>
           </div>
         </div>
+      )}
+
+      {/* Accept & Pay modal — sign, then pay, in the same dark sheet. */}
+      {modalOpen && (
+        <AcceptPayModal
+          token={token}
+          invoice={inv}
+          showSignStep={needsSignature}
+          onClose={() => setModalOpen(false)}
+          onPaid={handlePaid}
+          signProps={{
+            mode: signMode, setMode: setSignMode,
+            name: signName, setName: setSignName,
+            setDrawn: setSignDrawn,
+            agree: signAgree, setAgree: setSignAgree,
+            error: signError,
+            onSign: onModalSign,
+            signing,
+          }}
+        />
       )}
     </div>
   );
