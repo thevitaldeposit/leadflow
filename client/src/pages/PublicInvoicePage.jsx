@@ -652,10 +652,9 @@ export default function PublicInvoicePage() {
               for this dumpster size; hidden entirely when overage pricing isn't set. */}
           {inv.weight_allowance && (
             <p className="text-xs text-muted leading-relaxed mt-4 pt-4 border-t border-divider">
-              This rental includes a weight allowance of{' '}
-              <span className="font-semibold text-content">{tonsLabel(inv.weight_allowance.allowance_tons)}</span>. If you
+              This rental includes a weight allowance of {tonsLabel(inv.weight_allowance.allowance_tons)}. If you
               exceed the weight allowance, additional weight is billed at{' '}
-              <span className="font-semibold text-content">{moneyCompact(inv.weight_allowance.rate_per_ton, inv.currency)} per ton</span>.
+              {moneyCompact(inv.weight_allowance.rate_per_ton, inv.currency)} per ton.
             </p>
           )}
         </div>
