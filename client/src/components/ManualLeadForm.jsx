@@ -111,6 +111,7 @@ export default function ManualLeadForm() {
     lastName: navState.lastName || '',
     phone: navState.phone || '',
     email: navState.email || '',
+    contactAddress: '',
     dumpsterSize: '',
     debrisType: '',
     deliveryDate: '',
@@ -122,6 +123,11 @@ export default function ManualLeadForm() {
     intent: 'warm',
     notes: '',
   });
+  // Contact vs delivery address (billing/shipping style): most customers get the
+  // dumpster at their own address, so default to "same" — the delivery address is
+  // copied from the contact address and the owner doesn't type it twice. Unchecking
+  // reveals a separate, editable Delivery Address for a contractor or a different site.
+  const [deliverySameAsContact, setDeliverySameAsContact] = useState(true);
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -265,6 +271,10 @@ export default function ManualLeadForm() {
     try {
       const res = await api.createManualLead({
         ...form,
+        // "Same as contact address" checked → the owner never typed a separate delivery
+        // address, so the job's delivery address IS the contact address. The per-job
+        // delivery field saves exactly as before; only its value is sourced here.
+        deliveryAddress: deliverySameAsContact ? form.contactAddress.trim() : form.deliveryAddress,
         vertical,
         subVertical,
         customerId: linkCustomerId,
@@ -478,6 +488,20 @@ export default function ManualLeadForm() {
         <Field label="Email">
           <input className={inputCls} type="email" value={form.email} onChange={set('email')} placeholder="jane@example.com" />
         </Field>
+        <Field label="Contact Address" span2>
+          <input className={inputCls} value={form.contactAddress} onChange={set('contactAddress')} placeholder="123 Main St, City" />
+        </Field>
+        <div className="sm:col-span-2 -mt-1">
+          <label className="flex items-center gap-2 text-sm text-content cursor-pointer select-none w-fit">
+            <input
+              type="checkbox"
+              checked={deliverySameAsContact}
+              onChange={(e) => setDeliverySameAsContact(e.target.checked)}
+              className="rounded border-divider text-accent focus:ring-accent"
+            />
+            Delivery address is the same as this address
+          </label>
+        </div>
       </SectionCard>
 
       {/* Job details — all optional; blank fields still render + stay editable on the profile */}
@@ -509,7 +533,16 @@ export default function ManualLeadForm() {
           </div>
         </Field>
         <Field label={t.addressLabel} span2>
-          <input className={inputCls} value={form.deliveryAddress} onChange={set('deliveryAddress')} placeholder="123 Main St, City" />
+          {deliverySameAsContact ? (
+            <div className="text-sm px-3 py-2 bg-surface-2 border border-divider rounded-lg min-h-[38px] flex items-center gap-2">
+              {form.contactAddress
+                ? <span className="text-content">{form.contactAddress}</span>
+                : <span className="text-muted italic">Enter the contact address above</span>}
+              <span className="text-[11px] text-muted ml-auto whitespace-nowrap">same as contact address</span>
+            </div>
+          ) : (
+            <input className={inputCls} value={form.deliveryAddress} onChange={set('deliveryAddress')} placeholder="123 Main St, City" />
+          )}
         </Field>
         <Field label={t.accessLabel} span2>
           <textarea className={inputCls} rows={2} value={form.accessNotes} onChange={set('accessNotes')} placeholder="Gate code, where to place, etc." />

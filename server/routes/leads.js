@@ -580,6 +580,11 @@ router.post('/manual', requireAuth, (req, res) => {
     const rentalDurationDays = b.rentalDuration === '' || b.rentalDuration == null
       ? null : Number(b.rentalDuration);
     const deliveryAddress = str(b.deliveryAddress);
+    // Contact/primary address for the customer (billing-style), distinct from the
+    // per-job delivery address above. When the form's "same as delivery" box is checked
+    // the client sends the same value for both. Applied to the customer below (new
+    // customers only), never to the job's vertical_data.
+    const contactAddress = str(b.contactAddress);
     const accessNotes = str(b.accessNotes);
     const scheduledTime = str(b.scheduledTime); // "HH:mm" delivery time (optional)
 
@@ -625,9 +630,13 @@ router.post('/manual', requireAuth, (req, res) => {
     // business. Invalid/foreign ids are ignored (we fall back to phone reconcile),
     // never trusted, so this can't attach a job to another tenant's customer.
     let linkedCustomerId = null;
+    // Whether a customer already exists for this booking (explicit link or a phone
+    // match). Drives the contact-address no-clobber below: a brand-new customer gets the
+    // typed contact address; an existing customer's saved address is left untouched.
+    let customerPreexisted = false;
     if (Number.isFinite(customerIdRaw)) {
       const cust = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(customerIdRaw, businessId);
-      if (cust) linkedCustomerId = cust.id;
+      if (cust) { linkedCustomerId = cust.id; customerPreexisted = true; }
     }
 
     // ── Same-phone / different-name confirm gate ─────────────────────────────────
@@ -647,6 +656,7 @@ router.post('/manual', requireAuth, (req, res) => {
         ? db.prepare('SELECT * FROM customers WHERE business_id = ? AND normalized_phone = ?').get(businessId, np)
         : null;
       if (existingCustomer) {
+        customerPreexisted = true;
         // The customer's real name only (no phone/"Unknown" fallback): a nameless
         // existing customer isn't a "different name", so it never prompts.
         const existingName = (existingCustomer.display_name
@@ -765,6 +775,24 @@ router.post('/manual', requireAuth, (req, res) => {
       if (linkedCustomerId) recomputeCustomerStatus(linkedCustomerId);
       else reconcileCustomersForBusiness(businessId);
     } catch (e) { console.error('[leads/manual] reconcile error:', e.message); }
+
+    // Contact address → the customer's primary/contact address. No-clobber: only a
+    // customer this booking just CREATED gets it set; an existing customer's saved
+    // address is left untouched for now (the edit page will own updates to it). The
+    // per-job delivery address is unaffected — it lives in vertical_data.deliveryAddress
+    // and still drives the schedule/driver. Reconcile seeds a new customer's address
+    // from the delivery address; for a contractor (different contact vs delivery site)
+    // this makes the typed contact address authoritative instead.
+    if (contactAddress && !customerPreexisted) {
+      try {
+        const linkedRow = db.prepare('SELECT customer_id FROM leads WHERE id = ?').get(lead.id);
+        const newCustomerId = linkedRow && linkedRow.customer_id;
+        if (newCustomerId) {
+          db.prepare('UPDATE customers SET address = ?, updated_at = ? WHERE id = ? AND business_id = ?')
+            .run(contactAddress, new Date().toISOString(), newCustomerId, businessId);
+        }
+      } catch (e) { console.error('[leads/manual] contact address error:', e.message); }
+    }
 
     // Booking initiated (Send Payment Link / Book Job / Mark Paid) → materialize the
     // base-rental charge as a real 'sent' invoice, the SAME mechanism the weight
