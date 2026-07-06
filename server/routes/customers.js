@@ -177,15 +177,24 @@ router.put('/:id', (req, res) => {
     }
 
     // Address + pin. The top-of-profile address is Auto (follows the active job) by
-    // default. Pinning lives ONLY in the Edit Customer form's Primary Address field,
-    // which is blank in Auto mode and pre-filled only when already pinned, so:
-    //   • a value here PINS it (address_overridden = 1) → jobs never change it;
-    //   • clearing it (blank) releases the pin back to Auto.
-    // Act only when the value actually CHANGES, so re-saving a pinned customer's form
-    // unchanged never churns, and an unrelated edit on an Auto customer (blank field)
-    // never touches the address.
-    if (b.address !== undefined) {
-      const norm = (s) => (s == null || String(s).trim() === '' ? null : String(s).trim());
+    // default; the Edit Customer form's "Pin this address" checkbox is the explicit
+    // control and, when present, is authoritative:
+    //   • checked   → freeze the entered address (address_overridden = 1) so jobs never
+    //                 change it;
+    //   • unchecked → release to Auto (address_overridden = 0), keeping the stored
+    //                 address as a fallback (the resolver ignores it while unpinned).
+    // Legacy callers that send only `address` (no flag) keep the old value-diff pinning.
+    const norm = (s) => (s == null || String(s).trim() === '' ? null : String(s).trim());
+    const pinFlag = b.address_pinned !== undefined ? b.address_pinned : b.addressPinned;
+    if (pinFlag !== undefined) {
+      if (pinFlag) {
+        const pinned = norm(b.address);
+        if (pinned) updates.address = pinned;
+        updates.address_overridden = 1;
+      } else {
+        updates.address_overridden = 0;
+      }
+    } else if (b.address !== undefined) {
       const next = norm(b.address);
       if (next !== norm(existing.address)) {
         updates.address = next;

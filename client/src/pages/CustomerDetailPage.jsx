@@ -98,18 +98,29 @@ function Card({ id, title, icon: Icon, children, action, titleAccessory }) {
 }
 
 function ProfileForm({ customer, onSave, onCancel }) {
+  // The address the profile shows at the top: the pinned value when pinned, else the
+  // Auto-resolved delivery location (display_address). Used to pre-fill the field when
+  // the owner checks "Pin this address".
+  const currentTopAddress = customer.display_address || customer.address || '';
   const [form, setForm] = useState({
     firstName: customer.first_name || '', lastName: customer.last_name || '',
     company: customer.company || '', phone: customer.phone || '',
     email: customer.email || '',
-    // Pre-fill the address ONLY when it's actually pinned (address_overridden). In Auto
-    // mode the field stays blank so hitting Save never silently pins the stored/auto
-    // address — entering a value here is what pins it, and clearing it stays on Auto.
+    // Explicit pin control (the checkbox below). Unchecked = Auto (top address follows
+    // the active job); checked = pin the entered address so jobs never change it.
+    addressPinned: !!customer.address_overridden,
     address: (customer.address_overridden && customer.address) ? customer.address : '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Toggle the pin. On check, seed the editable field with the current top address so
+  // the owner pins what's actually showing; on uncheck we keep the text (field hides).
+  const togglePin = (checked) => setForm(f => ({
+    ...f, addressPinned: checked,
+    address: checked ? (f.address || currentTopAddress) : f.address,
+  }));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -127,11 +138,29 @@ function ProfileForm({ customer, onSave, onCancel }) {
         <div><label className={labelCls}>Company</label><input className={inputCls} value={form.company} onChange={e => set('company', e.target.value)} /></div>
         <div><label className={labelCls}>Phone</label><input className={inputCls} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
         <div><label className={labelCls}>Email</label><input className={inputCls} value={form.email} onChange={e => set('email', e.target.value)} /></div>
-        <div>
-          <label className={labelCls}>Primary Address</label>
-          <input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} />
-          <p className="text-[11px] text-muted mt-1">Pinned address — doesn't change from job to job. Leave blank to follow the active job.</p>
-        </div>
+      </div>
+      <div>
+        <label className="flex items-center gap-2 text-sm text-content cursor-pointer select-none w-fit">
+          <input
+            type="checkbox"
+            checked={form.addressPinned}
+            onChange={(e) => togglePin(e.target.checked)}
+            className="rounded border-divider text-accent focus:ring-accent"
+          />
+          Pin this address so it doesn't change from job to job
+        </label>
+        {form.addressPinned ? (
+          <div className="mt-2">
+            <label className={labelCls}>Primary Address</label>
+            <input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} />
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted mt-1.5">
+            {currentTopAddress
+              ? <><span className="text-content">{currentTopAddress}</span> — follows the delivery location.</>
+              : "Follows the active job's delivery location."}
+          </p>
+        )}
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-3 py-2 rounded-lg"><X size={14} /> Cancel</button>
