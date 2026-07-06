@@ -177,32 +177,19 @@ router.put('/:id', (req, res) => {
     }
 
     // Address + pin. The top-of-profile address is Auto (follows the active job) by
-    // default; setting a fixed address here PINS it (address_overridden = 1) so jobs
-    // never change it. Pin only when the value actually CHANGES, so re-saving the
-    // profile form (which always submits the prefilled address) never silently pins an
-    // Auto customer on an unrelated edit. Clearing the address releases it to Auto.
+    // default. Pinning lives ONLY in the Edit Customer form's Primary Address field,
+    // which is blank in Auto mode and pre-filled only when already pinned, so:
+    //   • a value here PINS it (address_overridden = 1) → jobs never change it;
+    //   • clearing it (blank) releases the pin back to Auto.
+    // Act only when the value actually CHANGES, so re-saving a pinned customer's form
+    // unchanged never churns, and an unrelated edit on an Auto customer (blank field)
+    // never touches the address.
     if (b.address !== undefined) {
       const norm = (s) => (s == null || String(s).trim() === '' ? null : String(s).trim());
       const next = norm(b.address);
       if (next !== norm(existing.address)) {
         updates.address = next;
         updates.address_overridden = next ? 1 : 0;
-      }
-    }
-
-    // Address mode toggle — the Auto / Pinned selector (mirrors the status selector's
-    // 'auto' release). 'auto' releases the pin (the stored address stays as a fallback);
-    // 'pinned' freezes the stored default. Pinning needs an address to pin (the UI only
-    // offers Pinned when one exists), so with nothing to pin this is a safe no-op.
-    const mode = b.address_mode !== undefined ? b.address_mode : b.addressMode;
-    if (mode !== undefined) {
-      if (mode === 'auto') {
-        updates.address_overridden = 0;
-      } else if (mode === 'pinned') {
-        const pinTarget = updates.address !== undefined ? updates.address : existing.address;
-        if (pinTarget) updates.address_overridden = 1;
-      } else {
-        return res.status(400).json({ error: 'Invalid address mode' });
       }
     }
 

@@ -101,7 +101,11 @@ function ProfileForm({ customer, onSave, onCancel }) {
   const [form, setForm] = useState({
     firstName: customer.first_name || '', lastName: customer.last_name || '',
     company: customer.company || '', phone: customer.phone || '',
-    email: customer.email || '', address: customer.address || '',
+    email: customer.email || '',
+    // Pre-fill the address ONLY when it's actually pinned (address_overridden). In Auto
+    // mode the field stays blank so hitting Save never silently pins the stored/auto
+    // address — entering a value here is what pins it, and clearing it stays on Auto.
+    address: (customer.address_overridden && customer.address) ? customer.address : '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -126,7 +130,7 @@ function ProfileForm({ customer, onSave, onCancel }) {
         <div>
           <label className={labelCls}>Primary Address</label>
           <input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} />
-          <p className="text-[11px] text-muted mt-1">Pins this address so jobs never change it. Leave blank to follow the active job.</p>
+          <p className="text-[11px] text-muted mt-1">Pinned address — doesn't change from job to job. Leave blank to follow the active job.</p>
         </div>
       </div>
       <div className="flex gap-2 justify-end">
@@ -417,13 +421,6 @@ export default function CustomerDetailPage() {
     await patch({ status: value }); // 'auto' releases the manual override
   };
 
-  // Address mode: 'auto' follows the active job (computed server-side), 'pinned'
-  // freezes the stored default. Mirrors handleStatusChange — the server resolves the
-  // displayed address; this only flips address_overridden.
-  const handleAddressModeChange = async (value) => {
-    await patch({ address_mode: value === 'pinned' ? 'pinned' : 'auto' });
-  };
-
   const handleGroupChange = async (value) => {
     await patch({ discount_group_id: value === '' ? null : Number(value) });
   };
@@ -584,9 +581,6 @@ export default function CustomerDetailPage() {
   // (reflecting customer corrections + the current rental); a pin freezes the stored
   // default. Fall back to the stored address only if an older payload omits it.
   const primaryAddress = c.display_address || c.address || (c.addresses && c.addresses[0]) || null;
-  // The Pinned option (and the 'pinned' value) only make sense when a stored address
-  // exists to pin — otherwise the selector shows Auto only.
-  const addressPinned = !!c.address_overridden && !!c.address;
 
   // Engagements: one ongoing piece of business (inquiry → job → completed).
   //  • activeEngagement — the single OPEN engagement: an Active Inquiry, or a
@@ -675,26 +669,9 @@ export default function CustomerDetailPage() {
                     <div className="mt-3 space-y-2.5 text-sm text-muted">
                       <ContactLine icon={Phone} value={c.phone} />
                       <ContactLine icon={Mail} value={c.email} />
-                      {/* Address line + Auto/Pinned selector (mirrors the status
-                          selector). Auto follows the active job; Pinned freezes the
-                          stored default. Hidden only when there's no address at all. */}
-                      {(primaryAddress || c.address) && (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="flex items-center gap-2 min-w-0">
-                            <MapPin size={14} className="text-brand flex-shrink-0" />
-                            <span className="text-content truncate">{primaryAddress || <span className="text-muted italic">No address</span>}</span>
-                          </span>
-                          <select
-                            value={addressPinned ? 'pinned' : '__auto__'}
-                            onChange={e => handleAddressModeChange(e.target.value === 'pinned' ? 'pinned' : 'auto')}
-                            title={addressPinned ? 'Pinned manually — jobs never change it' : 'Auto — follows the active job'}
-                            className="text-[11px] border border-divider bg-surface rounded-md px-1.5 py-1 text-muted focus:outline-none focus:ring-2 focus:ring-brand"
-                          >
-                            <option value="__auto__">Auto (from jobs)</option>
-                            {c.address && <option value="pinned">Pinned: {c.address}</option>}
-                          </select>
-                        </div>
-                      )}
+                      {/* Resolved top address — Auto follows the active job, or shows the
+                          pinned address when the owner has pinned one in Edit Customer. */}
+                      <ContactLine icon={MapPin} value={primaryAddress} />
                       {c.company && <ContactLine icon={Briefcase} value={c.company} />}
                       {!c.phone && !c.email && !primaryAddress && !c.company && <p className="text-muted">No contact info</p>}
                     </div>
