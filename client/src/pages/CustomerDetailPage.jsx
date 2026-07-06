@@ -151,11 +151,6 @@ function ProfileForm({ customer, onSave, onCancel }) {
             />
             Pin this address so it doesn't change from job to job
           </label>
-          <p className="text-[11px] text-muted mt-1.5">
-            {form.addressPinned
-              ? "Pinned — shown as the address regardless of jobs."
-              : "Follows the active job's delivery location; used as the fallback when there's no job address."}
-          </p>
         </div>
       </div>
       <div className="flex gap-2 justify-end">
