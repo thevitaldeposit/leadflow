@@ -139,11 +139,10 @@ function ProfileForm({ customer, onSave, onCancel }) {
         <div><label className={labelCls}>Company</label><input className={inputCls} value={form.company} onChange={e => set('company', e.target.value)} /></div>
         <div><label className={labelCls}>Phone</label><input className={inputCls} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
         <div><label className={labelCls}>Email</label><input className={inputCls} value={form.email} onChange={e => set('email', e.target.value)} /></div>
+        <div><label className={labelCls}>Primary Address</label><input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} /></div>
       </div>
       <div>
-        <label className={labelCls}>Primary Address</label>
-        <input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} />
-        <label className="flex items-center gap-2 text-sm text-content cursor-pointer select-none w-fit mt-2">
+        <label className="flex items-center gap-2 text-sm text-content cursor-pointer select-none w-fit">
           <input
             type="checkbox"
             checked={form.addressPinned}
