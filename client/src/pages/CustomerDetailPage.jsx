@@ -139,23 +139,24 @@ function ProfileForm({ customer, onSave, onCancel }) {
         <div><label className={labelCls}>Company</label><input className={inputCls} value={form.company} onChange={e => set('company', e.target.value)} /></div>
         <div><label className={labelCls}>Phone</label><input className={inputCls} value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
         <div><label className={labelCls}>Email</label><input className={inputCls} value={form.email} onChange={e => set('email', e.target.value)} /></div>
-        <div><label className={labelCls}>Primary Address</label><input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} /></div>
-      </div>
-      <div>
-        <label className="flex items-center gap-2 text-sm text-content cursor-pointer select-none w-fit">
-          <input
-            type="checkbox"
-            checked={form.addressPinned}
-            onChange={(e) => togglePin(e.target.checked)}
-            className="rounded border-divider text-accent focus:ring-accent"
-          />
-          Pin this address so it doesn't change from job to job
-        </label>
-        <p className="text-[11px] text-muted mt-1.5">
-          {form.addressPinned
-            ? "Pinned — shown as the address regardless of jobs."
-            : "Follows the active job's delivery location; used as the fallback when there's no job address."}
-        </p>
+        <div>
+          <label className={labelCls}>Primary Address</label>
+          <input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} />
+          <label className="flex items-center gap-2 text-sm text-content cursor-pointer select-none w-fit mt-2">
+            <input
+              type="checkbox"
+              checked={form.addressPinned}
+              onChange={(e) => togglePin(e.target.checked)}
+              className="rounded border-divider text-accent focus:ring-accent"
+            />
+            Pin this address so it doesn't change from job to job
+          </label>
+          <p className="text-[11px] text-muted mt-1.5">
+            {form.addressPinned
+              ? "Pinned — shown as the address regardless of jobs."
+              : "Follows the active job's delivery location; used as the fallback when there's no job address."}
+          </p>
+        </div>
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-3 py-2 rounded-lg"><X size={14} /> Cancel</button>
