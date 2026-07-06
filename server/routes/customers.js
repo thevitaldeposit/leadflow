@@ -176,30 +176,23 @@ router.put('/:id', (req, res) => {
       updates.normalized_phone = normalizePhone(phone);
     }
 
-    // Address + pin. The top-of-profile address is Auto (follows the active job) by
-    // default; the Edit Customer form's "Pin this address" checkbox is the explicit
-    // control and, when present, is authoritative:
-    //   • checked   → freeze the entered address (address_overridden = 1) so jobs never
-    //                 change it;
-    //   • unchecked → release to Auto (address_overridden = 0), keeping the stored
-    //                 address as a fallback (the resolver ignores it while unpinned).
-    // Legacy callers that send only `address` (no flag) keep the old value-diff pinning.
+    // Address + pin. The Edit Customer form has one always-editable address field
+    // (the stored customers.address) plus a "Pin this address" checkbox, handled as two
+    // independent signals:
+    //   • address        → the stored address; editing it updates customers.address in
+    //                       either mode (it's the Auto fallback when unpinned).
+    //   • address_pinned → checked freezes the top-of-profile address to this stored
+    //                      value (address_overridden = 1); unchecked lets the top follow
+    //                      the active job (Auto), with this stored address as fallback.
+    // Keeping them independent means an unrelated edit never flips the pin, and toggling
+    // the pin never rewrites the address.
     const norm = (s) => (s == null || String(s).trim() === '' ? null : String(s).trim());
+    if (b.address !== undefined) {
+      updates.address = norm(b.address);
+    }
     const pinFlag = b.address_pinned !== undefined ? b.address_pinned : b.addressPinned;
     if (pinFlag !== undefined) {
-      if (pinFlag) {
-        const pinned = norm(b.address);
-        if (pinned) updates.address = pinned;
-        updates.address_overridden = 1;
-      } else {
-        updates.address_overridden = 0;
-      }
-    } else if (b.address !== undefined) {
-      const next = norm(b.address);
-      if (next !== norm(existing.address)) {
-        updates.address = next;
-        updates.address_overridden = next ? 1 : 0;
-      }
+      updates.address_overridden = pinFlag ? 1 : 0;
     }
 
     // Discount group: validate it belongs to this business, or clear it.

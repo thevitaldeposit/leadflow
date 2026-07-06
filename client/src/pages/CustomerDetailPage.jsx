@@ -98,28 +98,29 @@ function Card({ id, title, icon: Icon, children, action, titleAccessory }) {
 }
 
 function ProfileForm({ customer, onSave, onCancel }) {
-  // The address the profile shows at the top: the pinned value when pinned, else the
-  // Auto-resolved delivery location (display_address). Used to pre-fill the field when
-  // the owner checks "Pin this address".
+  // The address currently shown at the top of the profile: the pinned value when
+  // pinned, else the Auto-resolved delivery location (display_address). Only used to
+  // seed an empty field when the owner checks "Pin this address".
   const currentTopAddress = customer.display_address || customer.address || '';
   const [form, setForm] = useState({
     firstName: customer.first_name || '', lastName: customer.last_name || '',
     company: customer.company || '', phone: customer.phone || '',
     email: customer.email || '',
-    // Explicit pin control (the checkbox below). Unchecked = Auto (top address follows
-    // the active job); checked = pin the entered address so jobs never change it.
+    // The always-editable stored address (customers.address). The checkbox below only
+    // decides whether it's pinned (shown fixed) or used as the Auto fallback — editing
+    // this field updates the stored address either way.
+    address: customer.address || '',
     addressPinned: !!customer.address_overridden,
-    address: (customer.address_overridden && customer.address) ? customer.address : '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  // Toggle the pin. On check, seed the editable field with the current top address so
-  // the owner pins what's actually showing; on uncheck we keep the text (field hides).
+  // Checking the box seeds an empty field with the current top address so pinning grabs
+  // what's showing; a field the owner already filled (or the stored value) is untouched.
   const togglePin = (checked) => setForm(f => ({
     ...f, addressPinned: checked,
-    address: checked ? (f.address || currentTopAddress) : f.address,
+    address: checked && !f.address ? currentTopAddress : f.address,
   }));
 
   const submit = async (e) => {
@@ -140,7 +141,9 @@ function ProfileForm({ customer, onSave, onCancel }) {
         <div><label className={labelCls}>Email</label><input className={inputCls} value={form.email} onChange={e => set('email', e.target.value)} /></div>
       </div>
       <div>
-        <label className="flex items-center gap-2 text-sm text-content cursor-pointer select-none w-fit">
+        <label className={labelCls}>Primary Address</label>
+        <input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} />
+        <label className="flex items-center gap-2 text-sm text-content cursor-pointer select-none w-fit mt-2">
           <input
             type="checkbox"
             checked={form.addressPinned}
@@ -149,18 +152,11 @@ function ProfileForm({ customer, onSave, onCancel }) {
           />
           Pin this address so it doesn't change from job to job
         </label>
-        {form.addressPinned ? (
-          <div className="mt-2">
-            <label className={labelCls}>Primary Address</label>
-            <input className={inputCls} value={form.address} onChange={e => set('address', e.target.value)} />
-          </div>
-        ) : (
-          <p className="text-[11px] text-muted mt-1.5">
-            {currentTopAddress
-              ? <><span className="text-content">{currentTopAddress}</span> — follows the delivery location.</>
-              : "Follows the active job's delivery location."}
-          </p>
-        )}
+        <p className="text-[11px] text-muted mt-1.5">
+          {form.addressPinned
+            ? "Pinned — shown as the address regardless of jobs."
+            : "Follows the active job's delivery location; used as the fallback when there's no job address."}
+        </p>
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-3 py-2 rounded-lg"><X size={14} /> Cancel</button>
