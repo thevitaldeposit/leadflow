@@ -62,12 +62,18 @@ final class APIService: ObservableObject {
         return try authDecoder().decode(AuthResponse.self, from: data)
     }
 
-    /// GET /api/auth/me — the current user + business for the stored token. A 401
-    /// here means the token is invalid/expired and flows through to a sign-out.
-    func fetchMe() async throws -> AuthResponse {
+    /// GET /api/auth/me — the current user + business for the stored token, plus a
+    /// freshly slid `token` the caller should persist. A 401 here means the token is
+    /// invalid/expired and (by default) flows through to a sign-out.
+    ///
+    /// `signalAuthFailure: false` opts out of that broadcast so AuthManager can use
+    /// this as a *re-verification* probe after some other call 401'd: the probe's own
+    /// 401 is thrown to the caller (which then decides to sign out) instead of firing
+    /// another .authUnauthorized notification and re-entering the same handler.
+    func fetchMe(signalAuthFailure: Bool = true) async throws -> AuthResponse {
         let request = try authorizedRequest("/api/auth/me")
         let (data, response) = try await URLSession.shared.data(for: request)
-        try validateResponse(response, data: data)
+        try validateResponse(response, data: data, signalAuthFailure: signalAuthFailure)
         return try authDecoder().decode(AuthResponse.self, from: data)
     }
 

@@ -18,7 +18,10 @@ function getSecret() {
 }
 
 const SALT_ROUNDS = 10;
-const TOKEN_TTL = '7d';
+// 30-day base lifetime. On top of this, GET /api/auth/me re-issues a fresh token
+// on every check (sliding refresh), so an actively-used session never reaches the
+// expiry wall; the long base is the cushion for stretches when the app is closed.
+const TOKEN_TTL = '30d';
 
 // Hash a plaintext password with bcrypt. Returns a promise.
 function hashPassword(password) {

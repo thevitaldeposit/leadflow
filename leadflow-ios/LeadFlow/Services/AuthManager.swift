@@ -89,13 +89,19 @@ final class AuthManager: ObservableObject {
     private let storage = LocalStorageService.shared
     private let keychain = KeychainService.shared
 
+    /// Guards against a burst of parallel 401s each kicking off its own re-verify.
+    /// Only the first probes /me; the rest are ignored while it's in flight.
+    private var isReverifying = false
+
     private init() {
-        // Any API call that returns 401 posts .authUnauthorized; treat that as a
-        // session expiry and sign out (clears the token + returns to login).
+        // Any API call that returns 401 posts .authUnauthorized. Rather than sign
+        // out on the first one (which would also de-register the Voice call client),
+        // handleUnauthorized re-verifies the session once and only signs out if that
+        // ALSO fails — so a transient/one-off 401 can't kill the session or calls.
         NotificationCenter.default.addObserver(
             forName: .authUnauthorized, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.handleUnauthorized() }
+            Task { @MainActor in await self?.handleUnauthorized() }
         }
     }
 
@@ -116,6 +122,7 @@ final class AuthManager: ObservableObject {
 
         do {
             let me = try await APIService.shared.fetchMe()
+            persistRefreshedToken(me.token)
             apply(user: me.user, business: me.business)
         } catch {
             // Non-401 errors (network, server hiccup): keep the optimistic session.
@@ -155,13 +162,36 @@ final class AuthManager: ObservableObject {
         applySignedOut()
     }
 
-    /// Reaction to a 401 from any API call: the stored token is invalid/expired, so
-    /// tear down the Twilio binding and sign out. Idempotent.
-    func handleUnauthorized() {
+    /// Reaction to a 401 from any API call. A single 401 is NOT trusted to mean the
+    /// session is dead — it may be a transient blip, and signing out here would also
+    /// de-register the Twilio Voice client and send calls to voicemail. So re-verify
+    /// once against /me (without re-broadcasting its own 401) and only tear down the
+    /// session if that probe ALSO fails with a genuine 401. Any other probe outcome
+    /// — success, network error, 5xx — keeps the session and the call registration.
+    func handleUnauthorized() async {
         guard state != .unauthenticated else { return }
-        NSLog("[auth] 401 received — clearing session and returning to login")
-        VoiceCallManager.shared.unregister()
-        applySignedOut()
+        // Collapse a burst of simultaneous 401s into a single re-verify.
+        guard !isReverifying else { return }
+        isReverifying = true
+        defer { isReverifying = false }
+
+        NSLog("[auth] 401 received — re-verifying session before signing out")
+        do {
+            let me = try await APIService.shared.fetchMe(signalAuthFailure: false)
+            // The 401 was transient: the token is still good. Slide it forward and
+            // refresh identity, but do NOT sign out or touch the Voice registration.
+            persistRefreshedToken(me.token)
+            apply(user: me.user, business: me.business)
+            NSLog("[auth] re-verify succeeded — session kept, calls stay registered")
+        } catch APIError.serverError(401, _) {
+            // Token is genuinely invalid/expired: sign out for real.
+            NSLog("[auth] re-verify returned 401 — clearing session and returning to login")
+            VoiceCallManager.shared.unregister()
+            applySignedOut()
+        } catch {
+            // Network/offline/5xx: treat as transient, keep the session and calls.
+            NSLog("[auth] re-verify failed (non-401), keeping session: \(error.localizedDescription)")
+        }
     }
 
     // MARK: Session plumbing
@@ -170,6 +200,15 @@ final class AuthManager: ObservableObject {
         self.user = user
         self.business = business
         cacheSession(user: user, business: business)
+    }
+
+    /// Persist a token the server slid forward on a /me response, replacing the
+    /// stored one so the sliding refresh actually takes effect and the Keychain
+    /// token keeps moving forward. No-op when the response carried no token (older
+    /// server) or an empty string, so we never wipe a good token.
+    private func persistRefreshedToken(_ token: String?) {
+        guard let token, !token.isEmpty else { return }
+        keychain.token = token
     }
 
     private func applySignedOut() {

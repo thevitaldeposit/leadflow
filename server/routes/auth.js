@@ -13,7 +13,7 @@ const { sendWelcomeEmail } = require('../services/emailService');
 // Mark the auth cookie Secure (HTTPS-only) in production; allow plain HTTP in dev.
 const isProd = process.env.NODE_ENV === 'production';
 const COOKIE_NAME = 'token';
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days — matches the JWT TTL
+const COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days — matches the JWT TTL
 
 function setAuthCookie(res, token) {
   res.cookie(COOKIE_NAME, token, {
@@ -203,8 +203,15 @@ router.post('/login', async (req, res) => {
 });
 
 // GET /api/auth/me — current user + business (requires a valid token).
+// Sliding refresh: requireAuth already verified the incoming token, so re-issue a
+// fresh one on every check and slide the expiry forward. The web client rides the
+// refreshed httpOnly cookie transparently; the iOS app reads the returned `token`
+// and re-stores it. This only extends an already-valid session — it can never
+// resurrect an expired/invalid token, since requireAuth would have 401'd first.
 router.get('/me', requireAuth, (req, res) => {
-  res.json({ user: publicUser(req.user), business: req.business });
+  const token = generateToken(req.user, req.business);
+  setAuthCookie(res, token);
+  res.json({ token, user: publicUser(req.user), business: req.business });
 });
 
 // POST /api/auth/change-password — replace the current user's password.
