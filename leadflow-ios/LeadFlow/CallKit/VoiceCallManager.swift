@@ -76,9 +76,11 @@ final class VoiceCallManager: NSObject, ObservableObject {
     private var lastRegisteredAt: Date? = nil
 
     // TURN/STUN relay servers from the last minted access token (Twilio NTS, via our
-    // backend). Cached so an INBOUND accept — which has no fresh token fetch of its
-    // own — can hand the same relay servers to the call. Nil when Voice/NTS isn't
-    // configured; the call then proceeds without a pre-provided relay, as before.
+    // backend). Kept as the FALLBACK for an inbound accept: performAnswer mints a fresh
+    // token (fresh relay creds) at accept time and only falls back to this
+    // registration-time copy if that fetch fails. Nil when Voice/NTS isn't configured
+    // (or before the first successful registration); the call then proceeds without a
+    // pre-provided relay, as before.
     private var cachedIceServers: [APIService.VoiceTokenResponse.ICEServer]? = nil
 
     // Set true right before we disconnect a call on the user's behalf so the
@@ -199,9 +201,15 @@ final class VoiceCallManager: NSObject, ObservableObject {
 
     /// Build Twilio `IceOptions` from the relay servers our backend fetched from NTS,
     /// or nil when none were provided (Voice/NTS not configured) — in which case the
-    /// call is built without `iceOptions`, exactly as before. `transportPolicy` stays
-    /// `.all` so the fast direct path is used when it works and the relay is only an
-    /// instant fallback (NOT `.relay`, which would force every call through TURN).
+    /// call is built without `iceOptions`, exactly as before.
+    ///
+    /// `transportPolicy` is `.relay`: the call gathers ONLY relay (TURN) candidates so
+    /// one is nominated immediately, instead of the SDK first probing the direct / STUN
+    /// path and waiting ~5-7s for it to time out on cellular before falling back. This
+    /// is safe precisely because this method only runs when the server list is
+    /// non-empty — it can never force `.relay` with no relay available (a nil return
+    /// leaves the call on the SDK's default `.all` behavior). The cost is a few ms of
+    /// extra latency routing through the pinned Ashburn TURN, negligible for voice.
     private func makeIceOptions(from servers: [APIService.VoiceTokenResponse.ICEServer]?) -> IceOptions? {
         guard let servers, !servers.isEmpty else { return nil }
         let iceServers: [IceServer] = servers.compactMap { server in
@@ -211,7 +219,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
         guard !iceServers.isEmpty else { return nil }
         return IceOptions { builder in
             builder.servers = iceServers
-            builder.transportPolicy = .all
+            builder.transportPolicy = .relay
         }
     }
 
@@ -244,11 +252,49 @@ final class VoiceCallManager: NSObject, ObservableObject {
             completion(false)
             return
         }
+        // Answer with FRESH relay creds. `cachedIceServers` was captured at
+        // registration and can be nil on a cold launch from a push, or stale if we
+        // registered over an hour ago — either way the answer drops onto the slow
+        // direct/STUN path. Mint a fresh Voice token (it carries current NTS relay
+        // servers) right before building AcceptOptions, and fall back to the cached
+        // servers — or none — on any failure so this never fails the call. The Twilio
+        // accept is deferred by one token fetch; the CallKit action is fulfilled by the
+        // provider right after this returns, so the ring UI is never held up.
+        Task { @MainActor in
+            var servers = self.cachedIceServers
+            do {
+                let voice = try await APIService.shared.fetchVoiceToken()
+                if let fresh = voice.iceServers, !fresh.isEmpty {
+                    servers = fresh
+                    self.cachedIceServers = fresh   // refresh the cache for later reuse
+                }
+            } catch {
+                NSLog("[voice] inbound ICE refresh failed; using cached relay servers: \(error.localizedDescription)")
+            }
+            // The caller may have hung up (or the user declined) while the token was in
+            // flight — only accept if this invite is still the pending one.
+            guard self.activeCallInvites[uuid.uuidString] != nil else {
+                NSLog("[voice] inbound answer aborted — invite no longer pending (cancelled/declined during ICE fetch)")
+                completion(false)
+                return
+            }
+            self.acceptInvite(invite, reportedUUID: uuid, iceServers: servers, completion: completion)
+        }
+    }
+
+    /// Accept a pending CallInvite with the given relay servers and mirror the answered
+    /// call into the in-app call-screen state. Split out of `performAnswer` so the
+    /// answer can first fetch fresh relay creds; the logic below is unchanged from the
+    /// prior inline accept. Runs on the main thread (via performAnswer's @MainActor Task).
+    private func acceptInvite(_ invite: CallInvite,
+                              reportedUUID uuid: UUID,
+                              iceServers: [APIService.VoiceTokenResponse.ICEServer]?,
+                              completion: @escaping (Bool) -> Void) {
         let acceptOptions = AcceptOptions(callInvite: invite) { builder in
             builder.uuid = invite.uuid
-            // Hand the answered call the relay servers cached at registration so
-            // cellular audio has an instant fallback path (skipped if none cached).
-            if let iceOptions = self.makeIceOptions(from: self.cachedIceServers) {
+            // Hand the answered call the relay servers so cellular audio comes up
+            // straight on the TURN relay path (skipped if none are available).
+            if let iceOptions = self.makeIceOptions(from: iceServers) {
                 builder.iceOptions = iceOptions
             }
         }
@@ -338,7 +384,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
             builder.params = ["To": pending.to]
             builder.uuid = uuid
             // Hand the call the relay servers fetched with this token so cellular
-            // audio has an instant fallback path (skipped if none were provided).
+            // audio comes up straight on the TURN relay path (skipped if none provided).
             if let iceOptions = self.makeIceOptions(from: pending.iceServers) {
                 builder.iceOptions = iceOptions
             }
