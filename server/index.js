@@ -228,14 +228,16 @@ async function startServer() {
         ? path.resolve(process.env.DATABASE_PATH)
         : path.join(__dirname, 'db/leadflow.db');
       const backupPath = path.join(path.dirname(resolvedDb), 'leadflow-backup.json');
-      const leads = db.prepare('SELECT * FROM leads').all();
+      // Exclude discarded rows so binned (soft-deleted-customer) leads don't get
+      // captured in this recoverable dump — consistent with every active view.
+      const leads = db.prepare('SELECT * FROM leads WHERE (discarded = 0 OR discarded IS NULL)').all();
       let inventory = [];
       try { inventory = db.prepare('SELECT * FROM inventory_pool').all(); } catch { /* table may not exist yet */ }
       fs.writeFileSync(
         backupPath,
-        JSON.stringify({ exportedAt: new Date().toISOString(), leadCount, leads, inventory }, null, 2)
+        JSON.stringify({ exportedAt: new Date().toISOString(), leadCount: leads.length, leads, inventory }, null, 2)
       );
-      console.log(`[startup] Backed up ${leadCount} leads → ${backupPath}`);
+      console.log(`[startup] Backed up ${leads.length} leads → ${backupPath}`);
     }
   } catch (backupErr) {
     console.error('[startup] Backup failed (non-fatal):', backupErr.message);
@@ -251,6 +253,10 @@ async function startServer() {
 
   // Schedule daily 2am deletion of Twilio recordings older than 30 days.
   require('./services/recordingCleanup').start();
+
+  // Schedule daily 3am purge of the customer Trash (soft-deleted customers/leads
+  // older than 30 days). Offset from the 2am recording job so they never collide.
+  require('./services/trashCleanup').start();
 
   server.listen(PORT, () => {
     console.log(`LeadFlow server running on http://localhost:${PORT}`);

@@ -274,6 +274,10 @@ function listInvoices(businessId, { customer_id, lead_id, status } = {}) {
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     WHERE i.business_id = ?
+      -- Don't surface a binned (soft-deleted) customer's invoices. Customer-less
+      -- invoices (customer_id NULL) and active-customer invoices still show; the
+      -- underlying Stripe/payment record is never altered — it's just not listed here.
+      AND (i.customer_id IS NULL OR c.deleted_at IS NULL)
   `;
   const params = [businessId];
   if (customer_id) { sql += ' AND i.customer_id = ?'; params.push(customer_id); }
@@ -574,6 +578,10 @@ function getInvoiceRefsByPaymentIntent(businessId) {
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     WHERE i.business_id = ? AND i.stripe_payment_intent_id IS NOT NULL
+      -- Drop refs for a binned customer's invoices so the Payments view stops
+      -- surfacing the binned customer's name/invoice link. The Stripe charge itself
+      -- is untouched and still lists — it just falls back to Stripe's billing name.
+      AND (i.customer_id IS NULL OR c.deleted_at IS NULL)
   `).all(businessId);
   const map = {};
   for (const r of rows) map[r.stripe_payment_intent_id] = r;

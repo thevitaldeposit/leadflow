@@ -62,6 +62,12 @@ const NEW_COLUMNS = [
   'ALTER TABLE leads ADD COLUMN internal_notes TEXT',
   // When a follow-up is due. Set to capture time for missed calls (immediate).
   'ALTER TABLE leads ADD COLUMN follow_up_date TEXT',
+  // Soft-delete "Trash" bin marker. Set when a lead is binned ALONGSIDE its
+  // customer (customer soft-delete): the lead is also flagged discarded=1, but
+  // trashed_at is what distinguishes "binned with this customer" (restorable) from
+  // an already junk-`discarded` lead. NULL = not in the bin. The 30-day purge ages
+  // a lead off this timestamp, and restore un-discards only trashed_at-stamped leads.
+  'ALTER TABLE leads ADD COLUMN trashed_at TEXT',
 ];
 
 // ── Multi-tenancy: per-business unique constraints ──────────────────────────
@@ -649,6 +655,20 @@ function runMigrations() {
   } catch (e) {
     if (!e.message.includes('duplicate column name')) throw e;
   }
+
+  // Soft-delete "Trash" bin marker (added 2026-07-06). NULL = active; a timestamp
+  // means the customer was deleted to the 30-day recoverable bin. It is the bin's
+  // exclusion filter across every read path AND the 30-day purge clock. Additive —
+  // same attempt-and-swallow-duplicate pattern; existing customers stay active (NULL).
+  try {
+    db.exec('ALTER TABLE customers ADD COLUMN deleted_at TEXT');
+  } catch (e) {
+    if (!e.message.includes('duplicate column name')) throw e;
+  }
+  // Index the bin markers — every read path now filters on them and the nightly
+  // purge scans them. IF NOT EXISTS keeps these idempotent across restarts.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_customers_deleted ON customers(deleted_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_leads_trashed ON leads(trashed_at)');
 
   // Per-client pricing layer (all business_id-scoped, ready for quotes/invoices
   // to consume later — invoicing itself is out of scope here):

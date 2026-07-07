@@ -13,6 +13,9 @@ const {
   leadIsCompleted,
   leadIsBooked,
   paidInvoiceContextForCustomer,
+  softDeleteCustomer,
+  restoreCustomer,
+  listDeletedCustomers,
 } = require('../services/customerService');
 const { resolveEffectivePricing } = require('../services/pricingService');
 const { logActivity } = require('../services/activityLog');
@@ -54,7 +57,9 @@ router.get('/lookup', (req, res) => {
     const businessId = req.business.id;
     const np = normalizePhone(req.query.phone);
     if (!np) return res.json({ needsConfirmation: false, customer: null });
-    const existing = db.prepare('SELECT * FROM customers WHERE business_id = ? AND normalized_phone = ?')
+    // A binned customer isn't an active customer — never prompt "belongs to X" for a
+    // trashed X (deleted_at IS NULL).
+    const existing = db.prepare('SELECT * FROM customers WHERE business_id = ? AND normalized_phone = ? AND deleted_at IS NULL')
       .get(businessId, np);
     if (!existing) return res.json({ needsConfirmation: false, customer: null });
     const existingName = (existing.display_name
@@ -73,6 +78,18 @@ router.get('/lookup', (req, res) => {
   } catch (err) {
     console.error('GET /customers/lookup error:', err);
     res.status(500).json({ error: 'Failed to look up customer' });
+  }
+});
+
+// GET /api/customers/trash — customers currently in the 30-day recoverable bin,
+// newest-deleted first. Backs the Trash section + Restore button (prompt 2). Must
+// be declared before '/:id' so "trash" isn't captured as an id.
+router.get('/trash', (req, res) => {
+  try {
+    res.json(listDeletedCustomers(req.business.id));
+  } catch (err) {
+    console.error('GET /customers/trash error:', err);
+    res.status(500).json({ error: 'Failed to retrieve trash' });
   }
 });
 
@@ -117,8 +134,15 @@ router.post('/', (req, res) => {
 
     const np = normalizePhone(phone);
     if (np) {
-      const existing = db.prepare('SELECT id FROM customers WHERE business_id = ? AND normalized_phone = ?').get(businessId, np);
+      const existing = db.prepare('SELECT id, deleted_at FROM customers WHERE business_id = ? AND normalized_phone = ?').get(businessId, np);
       if (existing) {
+        // A binned customer still holds the UNIQUE(business_id, normalized_phone)
+        // slot but is invisible to the app — don't hand back a dead id to navigate
+        // to (and don't let the create fall through into a UNIQUE collision). Point
+        // the owner at the Trash instead of creating a duplicate.
+        if (existing.deleted_at) {
+          return res.status(409).json({ error: 'This phone number belongs to a customer in the Trash. Restore them from the Trash instead.' });
+        }
         return res.status(409).json({ error: 'A customer with this phone already exists', existingId: existing.id });
       }
     }
@@ -153,7 +177,8 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const businessId = req.business.id;
-    const existing = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    // A binned customer can't be edited — it's in the Trash (restore it first).
+    const existing = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL').get(req.params.id, businessId);
     if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
     const b = req.body || {};
@@ -240,19 +265,35 @@ router.put('/:id', (req, res) => {
   }
 });
 
-// DELETE /api/customers/:id — remove the customer record. Its leads/calls are
-// preserved (leads.customer_id is set to NULL by the FK) and will re-link on the
-// next reconcile, so call history is never lost.
+// DELETE /api/customers/:id — SOFT delete to the 30-day recoverable Trash. The
+// customer and its active leads are binned (excluded everywhere immediately) but
+// physically preserved so they can be restored for 30 days, after which
+// services/trashCleanup.js purges them. Pricing/notes/invoices/Stripe records are
+// never touched. See softDeleteCustomer for the mechanics.
 router.delete('/:id', (req, res) => {
   try {
     const businessId = req.business.id;
-    const existing = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
-    if (!existing) return res.status(404).json({ error: 'Customer not found' });
-    db.prepare('DELETE FROM customers WHERE id = ? AND business_id = ?').run(req.params.id, businessId);
-    res.json({ success: true });
+    const result = softDeleteCustomer(businessId, req.params.id);
+    if (!result) return res.status(404).json({ error: 'Customer not found' });
+    res.json({ success: true, binnedLeads: result.binnedLeads });
   } catch (err) {
     console.error('DELETE /customers/:id error:', err);
     res.status(500).json({ error: 'Failed to delete customer' });
+  }
+});
+
+// POST /api/customers/:id/restore — recover a customer from the Trash: clears its
+// bin marker and un-bins the leads that were binned with it (already-junk leads
+// stay discarded). Invoices/activity return automatically; Stripe was never touched.
+router.post('/:id/restore', (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const result = restoreCustomer(businessId, req.params.id);
+    if (!result) return res.status(404).json({ error: 'Customer not found in Trash' });
+    res.json({ success: true, restoredLeads: result.restoredLeads });
+  } catch (err) {
+    console.error('POST /customers/:id/restore error:', err);
+    res.status(500).json({ error: 'Failed to restore customer' });
   }
 });
 
@@ -265,7 +306,7 @@ router.delete('/:id', (req, res) => {
 router.post('/:id/engagements/close', (req, res) => {
   try {
     const businessId = req.business.id;
-    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?')
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL')
       .get(req.params.id, businessId);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
@@ -314,7 +355,7 @@ router.post('/:id/engagements/close', (req, res) => {
 router.post('/:id/notes', (req, res) => {
   try {
     const businessId = req.business.id;
-    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?')
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL')
       .get(req.params.id, businessId);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
@@ -345,7 +386,7 @@ router.post('/:id/notes', (req, res) => {
 router.put('/:id/notes/:noteId', (req, res) => {
   try {
     const businessId = req.business.id;
-    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?')
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL')
       .get(req.params.id, businessId);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
@@ -378,7 +419,7 @@ router.put('/:id/notes/:noteId', (req, res) => {
 router.delete('/:id/notes/:noteId', (req, res) => {
   try {
     const businessId = req.business.id;
-    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?')
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL')
       .get(req.params.id, businessId);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
@@ -402,7 +443,7 @@ router.delete('/:id/notes/:noteId', (req, res) => {
 router.get('/:id/pricing', (req, res) => {
   try {
     const businessId = req.business.id;
-    const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL').get(req.params.id, businessId);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
     res.json(resolveEffectivePricing(businessId, customer));
   } catch (err) {
@@ -417,7 +458,7 @@ router.get('/:id/pricing', (req, res) => {
 router.put('/:id/pricing', (req, res) => {
   try {
     const businessId = req.business.id;
-    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL').get(req.params.id, businessId);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
     const b = req.body || {};

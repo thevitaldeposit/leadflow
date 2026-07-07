@@ -110,6 +110,12 @@ function findOrCreateCustomerForLead(businessId, lead) {
       'SELECT * FROM customers WHERE business_id = ? AND normalized_phone = ?'
     ).get(businessId, np);
     if (existing) {
+      // A binned (soft-deleted) customer must never be silently relinked or
+      // un-binned by a new call/lead — restoring it is an explicit owner action.
+      // Return null so the lead stays unlinked (reconcile skips a null result)
+      // instead of resurrecting the customer, AND without colliding with the
+      // UNIQUE(business_id, normalized_phone) row the binned customer still holds.
+      if (existing.deleted_at) return null;
       enrichCustomerFromLead(existing, ident);
       return existing.id;
     }
@@ -582,7 +588,9 @@ function displayNameOf(customer) {
 // List customers for a business with rollup aggregates, optionally filtered by
 // status and a free-text search over name/phone/email/company.
 function listCustomers(businessId, { status, search } = {}) {
-  const customers = db.prepare('SELECT * FROM customers WHERE business_id = ?').all(businessId);
+  // Binned (soft-deleted) customers live only in the Trash — excluded here and from
+  // every other active read path (see listDeletedCustomers for the Trash view).
+  const customers = db.prepare('SELECT * FROM customers WHERE business_id = ? AND deleted_at IS NULL').all(businessId);
   if (!customers.length) return [];
 
   // One query for all of the business's non-discarded leads, grouped in JS.
@@ -642,7 +650,9 @@ function listCustomers(businessId, { status, search } = {}) {
 // composed separately (pricingService) by the route. Returns null if the
 // customer doesn't exist for this business.
 function getCustomerDetail(businessId, customerId) {
-  const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId);
+  // A binned customer resolves to null here, so every route built on getCustomerDetail
+  // (profile, engagements/close) 404s for it — it exists only in the Trash.
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL').get(customerId, businessId);
   if (!customer) return null;
 
   // All linked leads (newest first) — includes discarded so history is complete.
@@ -795,6 +805,82 @@ function getCustomerDetail(businessId, customerId) {
   };
 }
 
+// ── Soft-delete: the 30-day recoverable Trash ─────────────────────────────────
+// "Delete" never destroys immediately. It BINS the customer and everything tied to
+// it so the whole app stops surfacing it at once, while keeping it recoverable for
+// 30 days (services/trashCleanup.js purges it after that). Money is never touched —
+// invoices hang off invoices, not the customer.
+
+// Bin a customer to the Trash. Returns { binnedLeads } or null if the customer
+// doesn't exist for this business or is already binned.
+function softDeleteCustomer(businessId, customerId) {
+  const customer = db.prepare(
+    'SELECT id FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NULL'
+  ).get(customerId, businessId);
+  if (!customer) return null;
+  const now = new Date().toISOString();
+  // 1) Mark the customer binned — deleted_at is both the exclusion filter across
+  //    every read path and the 30-day purge clock.
+  db.prepare('UPDATE customers SET deleted_at = ?, updated_at = ? WHERE id = ? AND business_id = ?')
+    .run(now, now, customerId, businessId);
+  // 2) Bin the customer's currently-active leads: discard them (so they fall out of
+  //    every view that already hides discarded — leads/jobs/schedule/dashboard/
+  //    inventory — and out of reconcile, which only relinks non-discarded leads) and
+  //    stamp trashed_at as the restore marker + purge clock. customer_id is KEPT
+  //    intact. Leads that were ALREADY discarded (junk) are left untouched and get NO
+  //    trashed_at, so restore never revives them. Payments/Stripe/invoices untouched.
+  const info = db.prepare(
+    'UPDATE leads SET discarded = 1, trashed_at = ? WHERE customer_id = ? AND business_id = ? AND (discarded = 0 OR discarded IS NULL)'
+  ).run(now, customerId, businessId);
+  return { binnedLeads: Number(info.changes) };
+}
+
+// Restore a binned customer from the Trash. Clears its bin marker and un-bins ONLY
+// the leads that were binned with it (trashed_at set); already-junk leads
+// (trashed_at NULL) stay discarded. Pricing/notes were never deleted; invoices +
+// activity come back automatically; Stripe/payments were never touched. Returns
+// { restoredLeads } or null if the customer isn't in the bin.
+function restoreCustomer(businessId, customerId) {
+  const customer = db.prepare(
+    'SELECT id FROM customers WHERE id = ? AND business_id = ? AND deleted_at IS NOT NULL'
+  ).get(customerId, businessId);
+  if (!customer) return null;
+  const now = new Date().toISOString();
+  db.prepare('UPDATE customers SET deleted_at = NULL, updated_at = ? WHERE id = ? AND business_id = ?')
+    .run(now, customerId, businessId);
+  const info = db.prepare(
+    'UPDATE leads SET discarded = 0, trashed_at = NULL WHERE customer_id = ? AND business_id = ? AND trashed_at IS NOT NULL'
+  ).run(customerId, businessId);
+  // Recompute the derived lifecycle status from the now-active leads.
+  recomputeCustomerStatus(customerId);
+  return { restoredLeads: Number(info.changes) };
+}
+
+// The Trash view: customers currently in the 30-day bin, newest-deleted first, each
+// with the count of leads binned with it and when it purges (deleted_at + 30 days).
+function listDeletedCustomers(businessId) {
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  const customers = db.prepare(
+    'SELECT * FROM customers WHERE business_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC'
+  ).all(businessId);
+  return customers.map((c) => {
+    const binned = db.prepare(
+      'SELECT COUNT(*) AS n FROM leads WHERE customer_id = ? AND business_id = ? AND trashed_at IS NOT NULL'
+    ).get(c.id, businessId).n;
+    const deletedMs = tsToMs(c.deleted_at);
+    return {
+      id: c.id,
+      display_name: displayNameOf(c),
+      phone: c.phone,
+      email: c.email,
+      status: c.status || 'lead',
+      deleted_at: c.deleted_at,
+      purge_at: deletedMs != null ? new Date(deletedMs + THIRTY_DAYS_MS).toISOString() : null,
+      binned_leads: binned,
+    };
+  });
+}
+
 module.exports = {
   CUSTOMER_STATUSES,
   normalizePhone,
@@ -806,6 +892,9 @@ module.exports = {
   recomputeCustomerStatus,
   listCustomers,
   getCustomerDetail,
+  softDeleteCustomer,
+  restoreCustomer,
+  listDeletedCustomers,
   engagementsForLeads,
   paidInvoiceContextForCustomer,
   leadIsCompleted,

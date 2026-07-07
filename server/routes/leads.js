@@ -211,10 +211,12 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET /api/leads/all — raw debug view: every lead for this business, no filtering
+// GET /api/leads/all — raw debug view: every lead for this business. Excludes
+// discarded rows so binned (soft-deleted-customer) leads don't leak here — every
+// other list already hides discarded, and this is the one raw path that didn't.
 router.get('/all', (req, res) => {
   try {
-    const leads = db.prepare('SELECT * FROM leads WHERE business_id = ? ORDER BY created_at DESC').all(req.business.id);
+    const leads = db.prepare('SELECT * FROM leads WHERE business_id = ? AND (discarded = 0 OR discarded IS NULL) ORDER BY created_at DESC').all(req.business.id);
     res.json(leads);
   } catch (err) {
     console.error('GET /leads/all error:', err);
@@ -265,7 +267,10 @@ router.get('/:id/customer', (req, res) => {
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
     const customerId = findOrCreateCustomerForLead(businessId, lead);
-    if (!customerId) return res.status(500).json({ error: 'Could not resolve customer' });
+    // findOrCreateCustomerForLead returns null when the lead's phone belongs to a
+    // BINNED (soft-deleted) customer — we never resurrect it here; restoring is an
+    // explicit owner action. Treat as not-found rather than resolving into the Trash.
+    if (!customerId) return res.status(404).json({ error: 'Customer not found' });
 
     // Persist the reconciliation so the lead stays linked and surfaces under the
     // right person on the next read (mirrors reconcileCustomersForBusiness's write).
@@ -652,8 +657,12 @@ router.post('/manual', requireAuth, (req, res) => {
     const confirmDifferentName = b.confirmDifferentName === true;
     if (!linkedCustomerId) {
       const np = normalizePhone(phone);
+      // A binned (soft-deleted) customer isn't an active customer: don't prompt
+      // "belongs to X" for a trashed X, and don't attach this booking to it. The new
+      // lead stays unlinked (reconcile's guard won't resurrect the binned customer)
+      // until that customer is restored — deleted_at IS NULL scopes to active only.
       const existingCustomer = np
-        ? db.prepare('SELECT * FROM customers WHERE business_id = ? AND normalized_phone = ?').get(businessId, np)
+        ? db.prepare('SELECT * FROM customers WHERE business_id = ? AND normalized_phone = ? AND deleted_at IS NULL').get(businessId, np)
         : null;
       if (existingCustomer) {
         customerPreexisted = true;
