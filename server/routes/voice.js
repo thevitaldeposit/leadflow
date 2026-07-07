@@ -6,9 +6,13 @@ const { getDefaultBusinessId } = require('../services/businesses');
 // The Twilio Node SDK is required lazily and defensively. If it is somehow not
 // installed (e.g. `npm install` hasn't run on a box), the rest of the app must
 // still boot — the token endpoint just degrades to a 503 instead of throwing.
+// `twilioLib` (the module itself) is also kept so a REST client can be built for
+// the Network Traversal Service (NTS) ICE-server lookup below.
+let twilioLib = null;
 let AccessToken = null;
 try {
-  AccessToken = require('twilio').jwt.AccessToken;
+  twilioLib = require('twilio');
+  AccessToken = twilioLib.jwt.AccessToken;
 } catch (err) {
   console.warn('[voice] twilio SDK not available — /api/voice/token will 503:', err.message);
 }
@@ -116,11 +120,50 @@ function xmlEscape(value) {
 // so the iOS app can mint a token today before per-user login ships.
 router.use(attachBusiness);
 
+// A Twilio REST client for the Network Traversal Service (NTS) ICE-server lookup.
+// Built lazily from the account SID + auth token the rest of the app already uses,
+// and cached. Returns null (never throws) when the SDK or those creds are absent so
+// the token handler can simply skip the relay fetch and still return a token.
+let ntsClient = null;
+function getNtsClient() {
+  if (ntsClient) return ntsClient;
+  if (!twilioLib) return null;
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) return null;
+  try {
+    ntsClient = twilioLib(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    return ntsClient;
+  } catch (err) {
+    console.warn('[voice] could not build Twilio REST client for NTS:', err.message);
+    return null;
+  }
+}
+
+// Fetch TURN/STUN relay credentials from Twilio NTS so the iOS client has a relay
+// ready at call time instead of discovering one mid-call — that discovery is the
+// cause of the several-second dead-audio window on cellular. Deliberately
+// best-effort: any missing config, failure, or slowness resolves to null and the
+// caller returns the access token exactly as before (just without `iceServers`).
+// Calls must never break because this relay-credential fetch hiccupped. The NTS
+// token TTL matches the 1h access-token lifetime — comfortably longer than a call.
+async function fetchIceServers() {
+  const client = getNtsClient();
+  if (!client) return null;
+  try {
+    const nts = await client.tokens.create({ ttl: TOKEN_TTL_SECONDS });
+    return Array.isArray(nts.iceServers) && nts.iceServers.length > 0 ? nts.iceServers : null;
+  } catch (err) {
+    console.warn('[voice] NTS ice-server fetch failed — returning token without relay:', err.message);
+    return null;
+  }
+}
+
 // POST /api/voice/token — mint a Twilio Voice access token for the logged-in
-// user's client identity. Returns { token, identity, ttl }. Never throws on
-// missing config: returns 503 "Voice not yet configured" so the rest of the
-// backend and the existing call pipeline keep working without these vars set.
-router.post('/token', (req, res) => {
+// user's client identity. Returns { token, identity, ttl } (plus `iceServers`
+// when NTS relay credentials could be fetched). Never throws on missing config:
+// returns 503 "Voice not yet configured" so the rest of the backend and the
+// existing call pipeline keep working without these vars set.
+router.post('/token', async (req, res) => {
   try {
     if (!AccessToken) {
       console.warn('[voice] token requested but twilio SDK is not installed');
@@ -154,7 +197,15 @@ router.post('/token', (req, res) => {
     );
     token.addGrant(voiceGrant);
 
-    res.json({ token: token.toJwt(), identity, ttl: TOKEN_TTL_SECONDS });
+    const body = { token: token.toJwt(), identity, ttl: TOKEN_TTL_SECONDS };
+
+    // Best-effort: hand the client TURN/STUN relay servers up front so cellular
+    // calls have an instant fallback path. Never fatal — on any failure the token
+    // is returned without `iceServers` and the call proceeds as it does today.
+    const iceServers = await fetchIceServers();
+    if (iceServers) body.iceServers = iceServers;
+
+    res.json(body);
   } catch (err) {
     console.error('[voice] POST /token error:', err);
     res.status(500).json({ error: 'Failed to mint voice token' });

@@ -300,6 +300,20 @@ final class APIService: ObservableObject {
         let token: String
         let identity: String
         let ttl: Int?
+        /// TURN/STUN relay servers from Twilio's Network Traversal Service, when the
+        /// backend could fetch them. Absent when Voice/NTS isn't configured — the call
+        /// then proceeds without a pre-provided relay, exactly as before.
+        let iceServers: [ICEServer]?
+
+        /// One STUN/TURN server as returned by Twilio NTS. `urls` is the address to
+        /// use (`url` is Twilio's deprecated alias for it); `credential` is the TURN
+        /// password. STUN entries carry no username/credential.
+        struct ICEServer: Decodable {
+            let url: String?
+            let urls: String?
+            let username: String?
+            let credential: String?
+        }
     }
 
     /// Mints a short-lived Twilio Voice access token for this user from the

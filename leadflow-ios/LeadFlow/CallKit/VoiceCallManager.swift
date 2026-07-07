@@ -64,6 +64,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
         let to: String
         let displayName: String?
         let accessToken: String
+        let iceServers: [APIService.VoiceTokenResponse.ICEServer]?
     }
     private var pendingOutgoing: [String: PendingOutgoing] = [:]
     private var outgoingCallUUIDs: Set<String> = []
@@ -74,6 +75,12 @@ final class VoiceCallManager: NSObject, ObservableObject {
     private var cachedAccessToken: String? = nil
     private var lastRegisteredAt: Date? = nil
 
+    // TURN/STUN relay servers from the last minted access token (Twilio NTS, via our
+    // backend). Cached so an INBOUND accept — which has no fresh token fetch of its
+    // own — can hand the same relay servers to the call. Nil when Voice/NTS isn't
+    // configured; the call then proceeds without a pre-provided relay, as before.
+    private var cachedIceServers: [APIService.VoiceTokenResponse.ICEServer]? = nil
+
     // Set true right before we disconnect a call on the user's behalf so the
     // disconnect callback doesn't redundantly re-report the end to CallKit.
     private var userInitiatedDisconnect = false
@@ -82,6 +89,12 @@ final class VoiceCallManager: NSObject, ObservableObject {
     private override init() {
         super.init()
         TwilioVoiceSDK.audioDevice = audioDevice
+        // Pin the media edge to a nearby Twilio region so the audio anchor is close
+        // and the SDK doesn't burn the first seconds of a cellular call discovering
+        // one. Global and set once here — the SDK requires the edge be set before any
+        // handleNotification / register / connect. Ashburn = US East, closest to the
+        // Illinois service area.
+        TwilioVoiceSDK.edge = "ashburn"
     }
 
     // MARK: - Registration lifecycle
@@ -135,6 +148,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
         }
 
         cachedAccessToken = voice.token
+        cachedIceServers = voice.iceServers
         identity = voice.identity
         LocalStorageService.shared.voiceIdentity = voice.identity
         NSLog("[voice] access token minted — identity=\(voice.identity) ttl=\(voice.ttl ?? -1)s; calling TwilioVoiceSDK.register…")
@@ -174,10 +188,31 @@ final class VoiceCallManager: NSObject, ObservableObject {
         }
         voipToken = nil
         cachedAccessToken = nil
+        cachedIceServers = nil
         identity = nil
         lastRegisteredAt = nil
         LocalStorageService.shared.voipToken = nil
         LocalStorageService.shared.voiceIdentity = nil
+    }
+
+    // MARK: - ICE (relay) options
+
+    /// Build Twilio `IceOptions` from the relay servers our backend fetched from NTS,
+    /// or nil when none were provided (Voice/NTS not configured) — in which case the
+    /// call is built without `iceOptions`, exactly as before. `transportPolicy` stays
+    /// `.all` so the fast direct path is used when it works and the relay is only an
+    /// instant fallback (NOT `.relay`, which would force every call through TURN).
+    private func makeIceOptions(from servers: [APIService.VoiceTokenResponse.ICEServer]?) -> IceOptions? {
+        guard let servers, !servers.isEmpty else { return nil }
+        let iceServers: [IceServer] = servers.compactMap { server in
+            guard let urlString = server.urls ?? server.url, !urlString.isEmpty else { return nil }
+            return IceServer(urlString: urlString, username: server.username, password: server.credential)
+        }
+        guard !iceServers.isEmpty else { return nil }
+        return IceOptions { builder in
+            builder.servers = iceServers
+            builder.transportPolicy = .all
+        }
     }
 
     // MARK: - Incoming push
@@ -211,6 +246,11 @@ final class VoiceCallManager: NSObject, ObservableObject {
         }
         let acceptOptions = AcceptOptions(callInvite: invite) { builder in
             builder.uuid = invite.uuid
+            // Hand the answered call the relay servers cached at registration so
+            // cellular audio has an instant fallback path (skipped if none cached).
+            if let iceOptions = self.makeIceOptions(from: self.cachedIceServers) {
+                builder.iceOptions = iceOptions
+            }
         }
         answerCompletion = completion
         let call = invite.accept(options: acceptOptions, delegate: self)
@@ -274,7 +314,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
             }
 
             let uuid = UUID()
-            pendingOutgoing[uuid.uuidString] = PendingOutgoing(to: to, displayName: displayName, accessToken: voice.token)
+            pendingOutgoing[uuid.uuidString] = PendingOutgoing(to: to, displayName: displayName, accessToken: voice.token, iceServers: voice.iceServers)
             identity = voice.identity
             NSLog("[voice] startOutgoingCall → \(to) as \(voice.identity) (uuid \(uuid.uuidString))")
             CallKitProvider.shared.startOutgoingCall(uuid: uuid, handle: to, displayName: displayName)
@@ -297,6 +337,11 @@ final class VoiceCallManager: NSObject, ObservableObject {
             // <Dial>s it presenting the business's verified caller ID.
             builder.params = ["To": pending.to]
             builder.uuid = uuid
+            // Hand the call the relay servers fetched with this token so cellular
+            // audio has an instant fallback path (skipped if none were provided).
+            if let iceOptions = self.makeIceOptions(from: pending.iceServers) {
+                builder.iceOptions = iceOptions
+            }
         }
         let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)
         activeCalls[uuid.uuidString] = call
