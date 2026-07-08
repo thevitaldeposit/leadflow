@@ -76,12 +76,20 @@ final class VoiceCallManager: NSObject, ObservableObject {
     private var lastRegisteredAt: Date? = nil
 
     // TURN/STUN relay servers from the last minted access token (Twilio NTS, via our
-    // backend). Kept as the FALLBACK for an inbound accept: performAnswer mints a fresh
-    // token (fresh relay creds) at accept time and only falls back to this
-    // registration-time copy if that fetch fails. Nil when Voice/NTS isn't configured
-    // (or before the first successful registration); the call then proceeds without a
-    // pre-provided relay, as before.
+    // backend). Used as a FALLBACK for an inbound accept: fresh relay creds are now
+    // prefetched during the ring window (see callInviteReceived) and preferred at accept
+    // time; this registration-time copy is used only if that prefetch hasn't landed yet.
+    // Nil when Voice/NTS isn't configured (or before the first successful registration);
+    // the call then proceeds without a pre-provided relay, as before.
     private var cachedIceServers: [APIService.VoiceTokenResponse.ICEServer]? = nil
+
+    // Fresh relay servers prefetched during the ring window, keyed by the reported
+    // CallKit UUID string. Populated by a best-effort background fetch in
+    // callInviteReceived (spending the several-second ring as "free" time) and preferred
+    // over cachedIceServers when the user answers, so performAnswer never blocks the
+    // accept on a network round-trip. Cleared when the invite is accepted, declined,
+    // cancelled, or on provider reset.
+    private var ringFetchedIceServers: [String: [APIService.VoiceTokenResponse.ICEServer]] = [:]
 
     // Set true right before we disconnect a call on the user's behalf so the
     // disconnect callback doesn't redundantly re-report the end to CallKit.
@@ -252,40 +260,21 @@ final class VoiceCallManager: NSObject, ObservableObject {
             completion(false)
             return
         }
-        // Answer with FRESH relay creds. `cachedIceServers` was captured at
-        // registration and can be nil on a cold launch from a push, or stale if we
-        // registered over an hour ago — either way the answer drops onto the slow
-        // direct/STUN path. Mint a fresh Voice token (it carries current NTS relay
-        // servers) right before building AcceptOptions, and fall back to the cached
-        // servers — or none — on any failure so this never fails the call. The Twilio
-        // accept is deferred by one token fetch; the CallKit action is fulfilled by the
-        // provider right after this returns, so the ring UI is never held up.
-        Task { @MainActor in
-            var servers = self.cachedIceServers
-            do {
-                let voice = try await APIService.shared.fetchVoiceToken()
-                if let fresh = voice.iceServers, !fresh.isEmpty {
-                    servers = fresh
-                    self.cachedIceServers = fresh   // refresh the cache for later reuse
-                }
-            } catch {
-                NSLog("[voice] inbound ICE refresh failed; using cached relay servers: \(error.localizedDescription)")
-            }
-            // The caller may have hung up (or the user declined) while the token was in
-            // flight — only accept if this invite is still the pending one.
-            guard self.activeCallInvites[uuid.uuidString] != nil else {
-                NSLog("[voice] inbound answer aborted — invite no longer pending (cancelled/declined during ICE fetch)")
-                completion(false)
-                return
-            }
-            self.acceptInvite(invite, reportedUUID: uuid, iceServers: servers, completion: completion)
-        }
+        // Accept IMMEDIATELY — never block the accept on a network fetch. Use the best
+        // relay creds available at this instant: the fresh servers prefetched during the
+        // ring window (callInviteReceived) if they've landed → else the registration-time
+        // cachedIceServers → else none (SDK default). This keeps inbound answer instant
+        // and preserves Twilio's accept-then-fulfill order — the provider fulfills the
+        // CallKit action right after this returns. The guard above already ensures a
+        // call declined/cancelled mid-ring is never accepted (no async gap to reopen it).
+        let servers = ringFetchedIceServers[uuid.uuidString] ?? cachedIceServers
+        acceptInvite(invite, reportedUUID: uuid, iceServers: servers, completion: completion)
     }
 
     /// Accept a pending CallInvite with the given relay servers and mirror the answered
-    /// call into the in-app call-screen state. Split out of `performAnswer` so the
-    /// answer can first fetch fresh relay creds; the logic below is unchanged from the
-    /// prior inline accept. Runs on the main thread (via performAnswer's @MainActor Task).
+    /// call into the in-app call-screen state. Split out of `performAnswer` so the accept
+    /// stays a single synchronous step; the relay servers are chosen by the caller (the
+    /// ring-time prefetch or the cached fallback). Runs on the main thread.
     private func acceptInvite(_ invite: CallInvite,
                               reportedUUID uuid: UUID,
                               iceServers: [APIService.VoiceTokenResponse.ICEServer]?,
@@ -309,6 +298,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
         isMuted = false
         isSpeakerOn = false
         activeCallInvites.removeValue(forKey: uuid.uuidString)
+        ringFetchedIceServers.removeValue(forKey: uuid.uuidString)
         incomingCallerNumber = nil
         incomingCallUUID = nil
         hasActiveCall = true
@@ -320,6 +310,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
             // voicemail greeting (handled entirely server-side; not touched here).
             invite.reject()
             activeCallInvites.removeValue(forKey: uuid.uuidString)
+            ringFetchedIceServers.removeValue(forKey: uuid.uuidString)
         } else if let call = activeCalls[uuid.uuidString] {
             userInitiatedDisconnect = true
             call.disconnect()
@@ -470,6 +461,7 @@ final class VoiceCallManager: NSObject, ObservableObject {
         audioDevice.isEnabled = false
         activeCalls.removeAll()
         activeCallInvites.removeAll()
+        ringFetchedIceServers.removeAll()
         pendingOutgoing.removeAll()
         outgoingCallUUIDs.removeAll()
         incomingCallerNumber = nil
@@ -515,10 +507,31 @@ extension VoiceCallManager: NotificationDelegate {
         NSLog("[voice] ✓ callInviteReceived from=\(from) callSid=\(callInvite.callSid) — reporting to CallKit")
         incomingCallerNumber = from
         incomingCallUUID = callInvite.uuid
-        activeCallInvites[callInvite.uuid.uuidString] = callInvite
+        let key = callInvite.uuid.uuidString
+        activeCallInvites[key] = callInvite
 
         // Report to CallKit immediately (we're still inside the push handler).
         CallKitProvider.shared.reportIncomingCall(uuid: callInvite.uuid, handle: from)
+
+        // Warm fresh relay creds during the ring window. The phone rings for several
+        // seconds; minting a fresh Voice token here (for its current NTS relay servers)
+        // spends that "free" time so performAnswer can accept instantly on the relay path
+        // instead of blocking the accept on a network round-trip. Best-effort and
+        // non-blocking: on failure — or if the user answers before it lands — the answer
+        // falls back to cachedIceServers (or none). Only stashed if this invite is still
+        // pending when the fetch returns (the user may have answered/declined by then).
+        Task { @MainActor in
+            do {
+                let voice = try await APIService.shared.fetchVoiceToken()
+                guard let fresh = voice.iceServers, !fresh.isEmpty else { return }
+                self.cachedIceServers = fresh   // refresh the shared cache for reuse
+                guard self.activeCallInvites[key] != nil else { return }
+                self.ringFetchedIceServers[key] = fresh
+                NSLog("[voice] ring-time relay creds ready for \(VoIPPushManager.short(key)) — answer will start on TURN")
+            } catch {
+                NSLog("[voice] ring-time ICE prefetch failed; answer will use cached/none: \(error.localizedDescription)")
+            }
+        }
     }
 
     func cancelledCallInviteReceived(cancelledCallInvite: CancelledCallInvite, error: Error) {
@@ -527,6 +540,7 @@ extension VoiceCallManager: NotificationDelegate {
         guard let invite = activeCallInvites.values.first(where: { $0.callSid == cancelledCallInvite.callSid }) else { return }
         CallKitProvider.shared.reportCallEnded(uuid: invite.uuid, reason: .remoteEnded)
         activeCallInvites.removeValue(forKey: invite.uuid.uuidString)
+        ringFetchedIceServers.removeValue(forKey: invite.uuid.uuidString)
         if incomingCallUUID == invite.uuid {
             incomingCallerNumber = nil
             incomingCallUUID = nil
