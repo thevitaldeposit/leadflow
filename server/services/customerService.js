@@ -490,10 +490,29 @@ function shapeEngagement(eng) {
   const isEmpty = (v) => v == null || v === '';
   // Prefer the job lead's non-empty value for a flat column / a vertical_data field
   // (delivery/pickup/time, dumpsterSize/debrisType/rentalDuration); fall back to the
-  // representative. A no-op for inquiries (jobLead null) and for a single-call job
-  // (jobLead === rep), so existing inquiries and jobs are unchanged.
+  // representative. A no-op for inquiries (jobLead null — they use the newest-non-empty
+  // walk-back below instead) and for a single-call job (jobLead === rep), so existing
+  // jobs are unchanged.
   const jobCol = (col) => (jobLead && !isEmpty(jobLead[col])) ? jobLead[col] : rep[col];
   const jobVdField = (key) => (jobLead && !isEmpty(jobVd[key])) ? jobVd[key] : vd[key];
+  // ACTIVE-inquiry field sourcing (jobLead null). An open inquiry has no single
+  // defining call, so reading only the newest call blanks every field that call was
+  // silent on: a customer who calls back to confirm a date would lose the size and
+  // address given on the first call. Instead walk the engagement's calls newest →
+  // oldest and take the first non-empty value per field, so an earlier call's value
+  // survives a later call that omitted it. The newest call still wins any field it
+  // actually filled. In-memory only (rows already loaded, vertical_data parsed once);
+  // gated to inquiries — booked/completed jobs keep jobCol/jobVdField above.
+  const vdAsc = leadsAsc.map((l) => {
+    try { return l.vertical_data ? JSON.parse(l.vertical_data) : {}; } catch { return {}; }
+  });
+  const recentValue = (pick) => {
+    for (let i = leadsAsc.length - 1; i >= 0; i--) {
+      const v = pick(leadsAsc[i], vdAsc[i]);
+      if (!isEmpty(v)) return v;
+    }
+    return null;
+  };
   // The lead representing the job for non-schedule display too (service summary,
   // address, revenue, paid_at, auto_booked) so an absorbed follow-up never blanks
   // them or drops the job's revenue from totals. rep for an inquiry.
@@ -526,10 +545,12 @@ function shapeEngagement(eng) {
     // (the generic terminal state) for older closes that predate this field.
     close_reason: status === ENGAGEMENT_STATUS.LOST ? (vd.closeReason || 'lost') : null,
     service: leadServiceSummary(detailLead),
-    address: detailLead.address || detailVd.deliveryAddress || detailVd.propertyAddress || null,
-    delivery_date: jobCol('delivery_date') || null,
-    pickup_date: jobCol('pickup_date') || null,
-    scheduled_time: jobCol('scheduled_time') || null,
+    address: (jobLead
+      ? (detailLead.address || detailVd.deliveryAddress || detailVd.propertyAddress)
+      : recentValue((l, lvd) => l.address || lvd.deliveryAddress || lvd.propertyAddress)) || null,
+    delivery_date: (jobLead ? jobCol('delivery_date') : recentValue((l) => l.delivery_date)) || null,
+    pickup_date: (jobLead ? jobCol('pickup_date') : recentValue((l) => l.pickup_date)) || null,
+    scheduled_time: (jobLead ? jobCol('scheduled_time') : recentValue((l) => l.scheduled_time)) || null,
     estimated_revenue: leadRevenue(detailLead),
     paid_at: detailLead.paid_at || null,
     auto_booked: detailLead.auto_booked === 1,
@@ -549,11 +570,12 @@ function shapeEngagement(eng) {
     urgency: vd.urgency || null,
     follow_up_date: vd.followUpDate || rep.follow_up_date || null,
     // Industry-relevant fields (display stored values; not recomputed). Size /
-    // debris / duration are job-sourced (jobVdField) so a booked or completed job
-    // shows the booked lead's values, not a later empty follow-up call's.
-    dumpster_size: jobVdField('dumpsterSize') || null,
-    debris_type: jobVdField('debrisType') || null,
-    rental_duration: jobVdField('rentalDuration') || null,
+    // debris / duration are job-sourced (jobVdField) for a booked or completed job
+    // — the booked lead's values, not a later empty follow-up call's — and for an
+    // open inquiry come from the newest call that carried each (recentValue).
+    dumpster_size: (jobLead ? jobVdField('dumpsterSize') : recentValue((l, lvd) => lvd.dumpsterSize)) || null,
+    debris_type: (jobLead ? jobVdField('debrisType') : recentValue((l, lvd) => lvd.debrisType)) || null,
+    rental_duration: (jobLead ? jobVdField('rentalDuration') : recentValue((l, lvd) => lvd.rentalDuration)) || null,
     vertical: rep.vertical || null,
     sub_vertical: rep.sub_vertical || null,
     calls: leadsAsc.slice().reverse().map(toJob),   // newest-first call list
