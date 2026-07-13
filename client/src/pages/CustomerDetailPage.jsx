@@ -529,8 +529,14 @@ export default function CustomerDetailPage() {
   // as ONE "Job details updated — …" activity event. Reload + bump the refresh
   // key so both the engagement summary and the call-intelligence grid update now.
   // No extraction, booking-signal, or auto-book logic runs here.
+  //
+  // Target the BOOKED lead when the engagement has one — that's the row the Job
+  // Details card reads its schedule from. Writing to the newest call instead
+  // (representative_lead_id) saves + logs but never shows, because a later
+  // follow-up call is a different row than the booked lead. An open inquiry has no
+  // booked lead, so the representative (newest) call is the correct target.
   const handleEditEngagement = async (engagement, body) => {
-    await api.updateLead(engagement.representative_lead_id, body);
+    await api.updateLead(engagement.booked_lead_id || engagement.representative_lead_id, body);
     await load();
     setDetailRefresh(n => n + 1);
   };
@@ -1223,13 +1229,16 @@ function ActiveEngagement({ id, engagement: e, onClose, onSendPaymentLink, onMar
     }
   };
 
-  // Lazy-load the representative (newest) call so the Edit Job Details modal
-  // prefills from the real lead (size/date/duration/time/follow-up), mirroring
-  // the booking flow above. The modal builds the update + change summary itself.
+  // Lazy-load the job's defining call so the Edit Job Details modal prefills from
+  // the real lead (size/date/duration/time/follow-up). Prefer the BOOKED lead when
+  // the engagement has one — it carries the live schedule the Job Details card
+  // shows, so the modal's "old → new" summary reads correctly. A later follow-up
+  // call (the representative) has no dates of its own and would mislabel every
+  // change as "not set". Falls back to the representative for an open inquiry.
   const openEdit = async () => {
     setLoadingEdit(true);
     try {
-      const lead = await api.getLead(e.representative_lead_id);
+      const lead = await api.getLead(e.booked_lead_id || e.representative_lead_id);
       setEditLead(lead);
     } catch (err) {
       console.error('Failed to load job for editing:', err);
