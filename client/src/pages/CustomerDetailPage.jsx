@@ -1057,8 +1057,9 @@ function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], overageNeedsRate
 }
 
 // The body shared by the active engagement and an expanded history row: the
-// newest call's full intelligence (booking signals, dates, industry fields, AI
-// summary, recording) plus any earlier calls in the same engagement, expandable.
+// engagement's structured job details (booking signals, dates, industry fields)
+// always visible, plus a single collapsed Calls list where EVERY call — newest
+// included — expands in place to its call summary + recording.
 // For a booked/completed job it also surfaces the Payment Link + Mark Paid block,
 // targeting the engagement's BOOKED lead (see booked_lead_id) — the same actions
 // the lead-detail page exposes. onPaymentChange refreshes the profile so a Mark
@@ -1070,13 +1071,17 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
     if (next.has(cid)) next.delete(cid); else next.add(cid);
     return next;
   });
-  const earlier = (e.calls || []).slice(1); // calls[0] is the representative (newest)
+  const calls = e.calls || []; // newest-first; calls[0] is the representative
 
   return (
     <>
+      {/* Structured job details only (booking signals + the fields/dates grid) —
+          always visible. The per-call summary + recording live in the collapsed
+          Calls list below (structuredOnly hides them here to avoid duplication). */}
       <CustomerCallIntelligence
         jobId={e.representative_lead_id}
         refreshKey={refreshKey}
+        structuredOnly
         // Intent / Urgency / Follow-up are inquiry-only — show them only while this is
         // an Active Inquiry; a booked/operational Open Job hides them.
         showInquiryFields={e.status === ENGAGEMENT_STATUS.INQUIRY}
@@ -1094,13 +1099,15 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
           address: e.address,
         }}
       />
-      {earlier.length > 0 && (
+      {/* Calls — ALL calls in this engagement, uniformly collapsed by default. Each
+          row expands in place to that call's summary + compact recording. */}
+      {calls.length > 0 && (
         <div className="px-5 pb-4">
           <p className="text-[11px] font-semibold text-muted uppercase tracking-wide mb-1.5">
-            Earlier calls in this engagement ({earlier.length})
+            Calls ({calls.length})
           </p>
           <div className="border border-divider rounded-lg divide-y divide-divider overflow-hidden">
-            {earlier.map(call => {
+            {calls.map(call => {
               const open = openCalls.has(call.id);
               return (
                 <Fragment key={call.id}>

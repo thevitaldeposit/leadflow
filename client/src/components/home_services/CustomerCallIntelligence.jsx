@@ -39,13 +39,13 @@ function ROField({ label, value, className = '' }) {
 // History (one instance per call/lead). It lazy-loads the full lead — the
 // customer payload intentionally omits the heavy recording + transcript — and
 // renders the SAME blocks the lead detail shows: booking signals, the resolved
-// delivery/pickup dates + scheduled time / intent / urgency / follow-up, the AI
+// delivery/pickup dates + scheduled time / intent / urgency / follow-up, the call
 // summary, and the recording + transcript. Strictly read-only.
 //
 // AUTO-BOOK SAFETY: this only GETs the lead (api.getLead). It never writes and
 // never re-runs extraction or booking, so mounting it cannot trigger or change
 // auto-booking. Editing still happens on the full lead detail via the link below.
-export default function CustomerCallIntelligence({ jobId, compact = false, refreshKey = 0, schedule = null, showInquiryFields = true }) {
+export default function CustomerCallIntelligence({ jobId, compact = false, refreshKey = 0, schedule = null, showInquiryFields = true, structuredOnly = false }) {
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -92,10 +92,10 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
   // call's own stored address / delivery / property address. Read-only display.
   const schedAddress = schedule?.address ?? (lead.address || vd.deliveryAddress || vd.propertyAddress);
 
-  // Compact mode (earlier calls in an engagement): show ONLY the AI summary, the
-  // recording player, and the small Raw transcript link. The structured fields,
+  // Compact mode (one call inside the engagement's collapsed Calls list): show ONLY
+  // the call summary and the compact recording player. The structured fields,
   // booking signals, and key dates already live in the authoritative Active
-  // Inquiry section up top, so we don't repeat them per earlier call.
+  // Inquiry section up top, so we don't repeat them per call.
   if (compact) {
     return (
       <div className="px-5 py-4 space-y-4 bg-surface-2/60">
@@ -103,14 +103,14 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
           <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
               <Sparkles size={15} className="text-muted" />
-              <h3 className="text-sm font-semibold text-content">AI Summary</h3>
+              <h3 className="text-sm font-semibold text-content">Call Summary</h3>
             </div>
             <div className="p-4">
               <p className="text-sm text-content leading-relaxed bg-brand/10 px-3 py-2 rounded-lg">{lead.call_summary}</p>
             </div>
           </div>
         )}
-        <AudioSection lead={lead} />
+        <AudioSection lead={lead} collapsible />
       </div>
     );
   }
@@ -144,12 +144,14 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
         {showInquiryFields && <ROField label="Follow-Up" value={fmtDateTime(vd.followUpDate)} />}
       </div>
 
-      {/* AI Summary */}
-      {lead.call_summary && (
+      {/* Call Summary — the per-call artifact. Hidden in structuredOnly mode (the
+          engagement's always-visible job-details summary); it instead renders per
+          call inside the collapsed Calls list via compact mode above. */}
+      {!structuredOnly && lead.call_summary && (
         <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
             <Sparkles size={15} className="text-muted" />
-            <h3 className="text-sm font-semibold text-content">AI Summary</h3>
+            <h3 className="text-sm font-semibold text-content">Call Summary</h3>
           </div>
           <div className="p-4">
             <p className="text-sm text-content leading-relaxed bg-brand/10 px-3 py-2 rounded-lg">{lead.call_summary}</p>
@@ -157,12 +159,9 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
         </div>
       )}
 
-      {/* Recording + transcript (shared with the lead detail). This profile view
-          already inlines the booking signals, resolved dates, AI summary, and the
-          recording + transcript for the call, so the old "Open full call detail →"
-          link to the retired /leads/:id page was redundant and has been removed.
-          Editing the job is still available via the engagement's Edit action. */}
-      <AudioSection lead={lead} />
+      {/* Recording + transcript (shared with the lead detail). Also a per-call
+          artifact, so it's likewise omitted in structuredOnly mode. */}
+      {!structuredOnly && <AudioSection lead={lead} collapsible />}
     </div>
   );
 }
