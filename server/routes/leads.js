@@ -138,6 +138,77 @@ function notifyRescheduleApproval(lead) {
   }
 }
 
+// Sibling of notifyRescheduleApproval for a call-driven cancellation cue — the owner
+// confirms or disregards it from the Action Queue (confirm-first; never auto-cancels).
+function notifyCancelApproval(lead) {
+  try {
+    const tokens = getBusinessDeviceTokens(lead.business_id);
+    const name = getLeadDisplayName(lead) || 'A customer';
+    sendToAll(tokens, 'Cancellation request', `${name} may want to cancel a booked job — tap to review`, {
+      type: 'cancel_approval', leadId: lead.id,
+    }).catch(err => console.error('[leads] cancel push failed:', err.message));
+  } catch (err) {
+    console.error('[leads] cancel notify error:', err.message);
+  }
+}
+
+// ── Shared owner-approval producers ─────────────────────────────────────────────
+// Record a call-driven schedule change or cancellation as a PENDING request on the
+// BOOKED lead's vertical_data (the booked schedule itself is never touched), then run
+// the standard trio: timeline log + socket refresh + owner push. The dashboard's
+// Action Queue already renders these (rescheduleRequest → Approve/Reject, cancelRequest
+// → Confirm/Disregard) with no client change. Both the PUT /:id handler (owner edit
+// diverted by guardBookedSchedule) and the webhook (call-intent classifier) call these,
+// so the shape and side-effects live in exactly one place. parse→set→stringify→UPDATE
+// follows the existing cancel handler's idiom.
+
+// changes: [{ field: 'delivery_date'|'pickup_date'|'scheduled_time'|'rentalDuration', from, to }]
+// — the exact shape guardBookedSchedule returns. Only the fields that actually changed.
+// rescheduleRequest carries the snake_case schedule columns + camelCase rentalDuration
+// that handleRescheduleDecision reads back on Approve; extra keys (requestedAt) are ignored.
+function recordRescheduleRequest(bookedLead, changes) {
+  if (!bookedLead || !Array.isArray(changes) || !changes.length) return bookedLead || null;
+  let vd = {};
+  try { vd = bookedLead.vertical_data ? JSON.parse(bookedLead.vertical_data) : {}; } catch { vd = {}; }
+  const rescheduleRequest = { requestedAt: new Date().toISOString() };
+  for (const c of changes) rescheduleRequest[c.field] = c.to;
+  vd.rescheduleRequest = rescheduleRequest;
+
+  const now = new Date().toISOString();
+  db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(vd), now, bookedLead.id);
+  const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(bookedLead.id);
+
+  logActivity(updated.id, 'reschedule_requested', describeReschedule(changes));
+  emitToBusiness(updated.business_id, 'lead_updated', updated);
+  notifyRescheduleApproval(updated);
+  return updated;
+}
+
+// Sets cancelRequest (any truthy value — no sub-fields are read by the client) and
+// clears any prior cancelDismissedAt so a fresh cancellation cue re-surfaces. Never
+// sets a sibling dismissal marker (the client gates on !vd.cancelDismissedAt).
+function recordCancelRequest(bookedLead, { reason } = {}) {
+  if (!bookedLead) return null;
+  let vd = {};
+  try { vd = bookedLead.vertical_data ? JSON.parse(bookedLead.vertical_data) : {}; } catch { vd = {}; }
+  vd.cancelRequest = { reason: reason || null, requestedAt: new Date().toISOString() };
+  delete vd.cancelDismissedAt;
+
+  const now = new Date().toISOString();
+  db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(vd), now, bookedLead.id);
+  const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(bookedLead.id);
+
+  const line = reason
+    ? `Customer expressed intent to cancel — ${reason}`.slice(0, 500)
+    : 'Customer expressed intent to cancel a booked job';
+  logActivity(updated.id, 'cancel_requested', line);
+  emitToBusiness(updated.business_id, 'lead_updated', updated);
+  notifyCancelApproval(updated);
+  return updated;
+}
+
 // GET /api/leads
 router.get('/', (req, res) => {
   try {
@@ -338,24 +409,17 @@ router.put('/:id', (req, res) => {
     // `updates` / `vdPatch` in place; returns the diverted call-driven changes.
     const divertedReschedule = guardBookedSchedule({ existing, updates, vdPatch, currentVd, req });
 
-    // A diverted reschedule is recorded as a PENDING request on vertical_data —
-    // the booked schedule itself stays unchanged — so the owner can approve it from
-    // the Action Queue. Approving re-issues these values as an owner edit.
-    let pendingReschedule = null;
-    if (divertedReschedule.length) {
-      pendingReschedule = { requestedAt: new Date().toISOString() };
-      for (const d of divertedReschedule) pendingReschedule[d.field] = d.to;
-    }
-
-    const effectiveVdPatch = pendingReschedule
-      ? { ...(vdPatch || {}), rescheduleRequest: pendingReschedule }
-      : vdPatch;
-    const needsVdMerge = effectiveVdPatch !== null
+    // A diverted call-driven reschedule (guardBookedSchedule held it back) is NOT
+    // written into this update — it's recorded as a PENDING request on the booked
+    // lead's vertical_data below via the shared recordRescheduleRequest producer, so
+    // the request shape + side-effects live in one place (also used by the webhook
+    // call-intent path). The booked schedule itself stays unchanged either way.
+    const needsVdMerge = vdPatch !== null
       || updates.delivery_date !== undefined
       || updates.pickup_date !== undefined;
 
     if (needsVdMerge) {
-      const merged = { ...currentVd, ...(effectiveVdPatch || {}) };
+      const merged = { ...currentVd, ...(vdPatch || {}) };
       if (updates.delivery_date !== undefined) {
         merged.deliveryDate = updates.delivery_date;
         merged.deliveryDateISO = updates.delivery_date;
@@ -409,18 +473,25 @@ router.put('/:id', (req, res) => {
       }
     }
 
-    if (Object.keys(updates).length === 0) {
+    // A pure call-driven reschedule can arrive with NO other field updates (the guard
+    // dropped the schedule change); still fall through to record it below. Only run the
+    // main UPDATE when there's actually something to write.
+    const hasUpdates = Object.keys(updates).length > 0;
+    if (!hasUpdates && !divertedReschedule.length) {
       return res.json(existing);
     }
 
-    updates.updated_at = new Date().toISOString();
+    let updated = existing;
+    if (hasUpdates) {
+      updates.updated_at = new Date().toISOString();
 
-    const setClauses = Object.keys(updates).map(k => `${k} = ?`).join(', ');
-    const values = [...Object.values(updates), req.params.id, businessId];
+      const setClauses = Object.keys(updates).map(k => `${k} = ?`).join(', ');
+      const values = [...Object.values(updates), req.params.id, businessId];
 
-    db.prepare(`UPDATE leads SET ${setClauses} WHERE id = ? AND business_id = ?`).run(...values);
+      db.prepare(`UPDATE leads SET ${setClauses} WHERE id = ? AND business_id = ?`).run(...values);
 
-    let updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+      updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    }
 
     // Log a status_change touchpoint whenever job_status actually changes, and
     // refresh the linked customer's derived lifecycle status so the Customers
@@ -472,14 +543,13 @@ router.put('/:id', (req, res) => {
       } catch (e) { console.error('[leads] ensureBaseInvoice error:', e.message); }
     }
 
-    // A call-driven attempt to change the booked schedule was diverted (not
-    // written). Record it on the timeline and notify the owner so it surfaces as a
-    // Tier-1 "approve reschedule?" item in the Action Queue. The schedule itself
-    // was preserved by guardBookedSchedule above.
+    // A call-driven attempt to change the booked schedule was diverted (not written).
+    // Record it as a pending reschedule request via the shared producer (own write +
+    // timeline log + socket refresh + owner push) so it surfaces as a Tier-1 "approve
+    // reschedule?" item in the Action Queue. The schedule itself was preserved by
+    // guardBookedSchedule above. Also covers a pure-reschedule PUT (no other updates).
     if (divertedReschedule.length) {
-      logActivity(updated.id, 'reschedule_requested', describeReschedule(divertedReschedule));
-      emitToBusiness(updated.business_id, 'lead_updated', updated);
-      notifyRescheduleApproval(updated);
+      updated = recordRescheduleRequest(updated, divertedReschedule) || updated;
     }
 
     res.json(updated);
@@ -931,3 +1001,7 @@ module.exports = router;
 // Pure helpers exported for unit tests; the router itself ignores extra props.
 module.exports.guardBookedSchedule = guardBookedSchedule;
 module.exports.describeReschedule = describeReschedule;
+// Shared owner-approval producers — also called by the webhook call-intent classifier
+// so the reschedule/cancel request shape + side-effects live in exactly one place.
+module.exports.recordRescheduleRequest = recordRescheduleRequest;
+module.exports.recordCancelRequest = recordCancelRequest;

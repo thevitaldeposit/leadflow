@@ -8,11 +8,13 @@ const { extractFromTranscript } = require('../services/extractionEngine');
 const { extractFromTranscriptVertical, VERTICAL_CONFIGS } = require('../services/verticalExtractionEngine');
 const { transcribe } = require('../services/transcriptionService');
 const { emitToBusiness } = require('../socket');
-const { resolveDeliveryDate, parseRentalDays, addDaysToISO, resolvePickupPhrase, enforceAutoBookAvailability } = require('../services/inventoryService');
+const { resolveDeliveryDate, parseRentalDays, addDaysToISO, resolvePickupPhrase, enforceAutoBookAvailability, localDateInTimeZone } = require('../services/inventoryService');
 const { sendPaymentSms } = require('../services/smsService');
 const { logActivity, formatDuration } = require('../services/activityLog');
 const { getTimezone } = require('../services/settingsService');
 const { getBusinessIdByTwilioNumber, getDefaultBusinessId } = require('../services/businesses');
+const { engagementsForLeads } = require('../services/customerService');
+const { classifyCallIntent } = require('../services/callIntentClassifier');
 
 const { RECORDINGS_DIR } = require('../config/paths');
 
@@ -126,6 +128,177 @@ function mergeRecentMissedCall(businessId, fromNumber, supersedingLead) {
     console.log(`[webhook] Merged missed-call lead ${missed.id} into lead ${supersedingLead.id}`);
   } catch (err) {
     console.error('[webhook] mergeRecentMissedCall error:', err.message);
+  }
+}
+
+// ── Call-intent classifier: caller who ALREADY has an open job ───────────────────
+// These three helpers power an ADDITIVE block (gated behind LEADFLOW_CALL_INTENT_CLASSIFIER)
+// that, when a caller already has an open job, understands what THIS call is asking for
+// and acts on it — instead of leaving it as a generic new inquiry. They never modify the
+// extraction engine, and every one is null/try-catch safe so the pipeline falls back to
+// today's behavior on any failure.
+
+// Pure read: the caller's single OPEN engagement (an Active Inquiry or a booked Job), or
+// null. Matches leads by the last-10 phone digits — the same proven pattern
+// mergeRecentMissedCall uses — then folds them with the customer service's PURE
+// engagementsForLeads. Deliberately NOT the reconcile/detail route layer, which WRITES on
+// read; the customers table is also lazily populated, so the caller may have no customer
+// row at call time. The new call lead is excluded so we read the caller's history as it was
+// BEFORE this call. Pure SELECT + in-memory fold; returns null on any error.
+function findOpenJobForCaller(businessId, fromNumber, excludeLeadId) {
+  try {
+    if (!fromNumber) return null;
+    const digits = String(fromNumber).replace(/\D/g, '');
+    if (digits.length < 10) return null;
+    const local = digits.slice(-10);
+    const rows = db.prepare(`
+      SELECT * FROM leads
+      WHERE business_id IS ?
+        AND vertical = 'home_services'
+        AND (discarded = 0 OR discarded IS NULL)
+        AND id != ?
+        AND (caller_number LIKE ? OR caller_phone_raw LIKE ?)
+      ORDER BY created_at DESC, id DESC
+    `).all(businessId, excludeLeadId || -1, `%${local}%`, `%${local}%`);
+    if (!rows.length) return null;
+    const engagements = engagementsForLeads(rows, {});
+    return engagements.find((e) => e.is_active) || null;
+  } catch (err) {
+    console.error('[webhook] findOpenJobForCaller error:', err.message);
+    return null;
+  }
+}
+
+// Resolve a call-driven date change to an ISO date, trusting Node date math over the
+// model (the extraction engine's stance): resolve the customer's own phrase first, and
+// only fall back to the model's ISO guess when it's a clean YYYY-MM-DD.
+function resolveIntentDate(kind, isoGuess, phrase, tz) {
+  const now = new Date();
+  let resolved = null;
+  if (phrase) {
+    resolved = kind === 'delivery'
+      ? resolveDeliveryDate(phrase, now, tz)
+      : resolvePickupPhrase(phrase, now, tz);
+  }
+  if (!resolved && typeof isoGuess === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(isoGuess)) {
+    resolved = isoGuess;
+  }
+  return resolved || null;
+}
+
+// Build the { field, from, to } change list (guardBookedSchedule's shape) for a
+// reschedule/pickup-change classification, including only fields that resolve to a
+// concrete value that actually differs from the current booked value.
+function buildRescheduleChanges(result, engagement, tz) {
+  const changes = [];
+  const push = (field, from, to) => {
+    if (to && String(to) !== String(from == null ? '' : from)) {
+      changes.push({ field, from: from == null ? null : from, to });
+    }
+  };
+  if (result.intent === 'delivery_reschedule') {
+    push('delivery_date', engagement.delivery_date, resolveIntentDate('delivery', result.newDeliveryDate, result.deliveryPhrase, tz));
+    if (result.newTime) push('scheduled_time', engagement.scheduled_time, result.newTime);
+    // A delivery reschedule may also move the pickup if the customer said so.
+    push('pickup_date', engagement.pickup_date, resolveIntentDate('pickup', result.newPickupDate, result.pickupPhrase, tz));
+  } else if (result.intent === 'pickup_change') {
+    push('pickup_date', engagement.pickup_date, resolveIntentDate('pickup', result.newPickupDate, result.pickupPhrase, tz));
+  }
+  return changes;
+}
+
+// Owner-notice text for the intents we deliberately do NOT auto-act on (swap / extension
+// build a draft invoice that has no owner-review surface yet; additional_dumpster has no
+// place to land). Surfaced as a plain timeline note — nothing customer-facing is created.
+function ownerNoticeFor(result) {
+  if (result.intent === 'swap') {
+    const size = result.swapSize ? ` (requested size: ${result.swapSize})` : '';
+    return `Customer called to SWAP OUT the dumpster${size} — needs an empty dropped and the full one hauled. Build a swap invoice and confirm with the customer (manual for now — no invoice was auto-created).`.slice(0, 500);
+  }
+  if (result.intent === 'extension') {
+    const days = result.extraDays ? ` (~${result.extraDays} extra day(s))` : '';
+    return `Customer called to EXTEND the rental${days} — keeping the dumpster longer incurs extra-day charges. Build an extension invoice and confirm with the customer (manual for now — no invoice was auto-created).`.slice(0, 500);
+  }
+  // additional_dumpster
+  return "Customer asked for an ADDITIONAL/second dumpster (a separate unit or site). A concurrent second job per customer isn't supported yet — follow up manually.".slice(0, 500);
+}
+
+// Classify what a call from a customer with an open job is asking for, then act:
+//   • BOOKED job → produce an owner-approval item (reschedule/cancel) via the shared
+//     leads.js producers, or a safe owner notice (swap/extension/additional_dumpster —
+//     NO invoice is minted; the call-driven draft-invoice review surface doesn't exist yet).
+//   • INQUIRY → log only; never changes inquiry write behavior (inquiries already merge
+//     correctly at the read layer).
+// Never throws (own try/catch). `lead` is the just-inserted call lead; `engagement` is
+// findOpenJobForCaller's result; `transcript` is the call transcript.
+async function handleCallIntent({ lead, engagement, transcript, businessId }) {
+  try {
+    const tz = getTimezone(businessId);
+    const todayISO = localDateInTimeZone(new Date(), tz);
+    const todayLabel = new Date(todayISO + 'T12:00:00Z').toLocaleDateString('en-US', {
+      timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    });
+
+    const job = {
+      status: engagement.status,
+      dumpster_size: engagement.dumpster_size,
+      delivery_date: engagement.delivery_date,
+      pickup_date: engagement.pickup_date,
+      scheduled_time: engagement.scheduled_time,
+      address: engagement.address,
+      rental_duration: engagement.rental_duration,
+    };
+
+    const result = await classifyCallIntent({ transcript, job, today: { iso: todayISO, label: todayLabel } });
+    if (!result || result.intent === 'none') {
+      if (result) console.log(`[webhook] Call-intent 'none' for lead ${lead.id} (caller has an open ${engagement.status})`);
+      return;
+    }
+
+    // INQUIRY: log only — must NOT change any inquiry write behavior.
+    if (engagement.status !== 'booked') {
+      console.log(`[webhook] Call-intent (inquiry, no write): '${result.intent}' for lead ${lead.id}`);
+      return;
+    }
+
+    // BOOKED or later: act on the EXISTING booked lead, never the new call lead.
+    if (!engagement.booked_lead_id) {
+      console.log(`[webhook] Call-intent: booked engagement missing booked_lead_id for lead ${lead.id} — skipping`);
+      return;
+    }
+    const bookedLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(engagement.booked_lead_id);
+    if (!bookedLead) return;
+
+    // Require lazily to avoid any route<->route load-order coupling.
+    const { recordRescheduleRequest, recordCancelRequest } = require('./leads');
+
+    // Cancel takes precedence over any schedule change.
+    if (result.intent === 'cancellation') {
+      recordCancelRequest(bookedLead, { reason: result.reason || null });
+      console.log(`[webhook] Call-intent: cancellation request recorded on booked lead ${bookedLead.id}`);
+      return;
+    }
+
+    if (result.intent === 'delivery_reschedule' || result.intent === 'pickup_change') {
+      const changes = buildRescheduleChanges(result, engagement, tz);
+      if (changes.length) {
+        recordRescheduleRequest(bookedLead, changes);
+        console.log(`[webhook] Call-intent: reschedule request (${changes.map((c) => c.field).join(', ')}) recorded on booked lead ${bookedLead.id}`);
+      } else {
+        console.log(`[webhook] Call-intent: '${result.intent}' detected but no concrete date change resolved for lead ${lead.id}`);
+      }
+      return;
+    }
+
+    // swap / extension / additional_dumpster → safe owner notice, no invoice minted.
+    if (result.intent === 'swap' || result.intent === 'extension' || result.intent === 'additional_dumpster') {
+      logActivity(bookedLead.id, 'note', ownerNoticeFor(result));
+      emitToBusiness(bookedLead.business_id, 'lead_updated', bookedLead);
+      console.log(`[webhook] Call-intent: '${result.intent}' → owner notice on booked lead ${bookedLead.id} (no invoice minted)`);
+      return;
+    }
+  } catch (err) {
+    console.error('[webhook] handleCallIntent error:', err.message);
   }
 }
 
@@ -419,6 +592,25 @@ async function processRecording(payload) {
       // number in the last 30 minutes (e.g. caller back after a missed call).
       mergeRecentMissedCall(lead.business_id, From, lead);
 
+      // ── Call-intent classifier (additive; triple-contained) ───────────────────
+      // If this caller ALREADY has an open job, understand what THIS call is asking
+      // for and act on it (booked → owner-approval item; inquiry → log only) instead
+      // of leaving it as a generic new inquiry. Placed AFTER the insert + discard gates
+      // and BEFORE auto-book. Containment: (1) env-flag off-switch, (2) only runs when
+      // the caller has an open job, (3) try/catch. With the flag off or no open job,
+      // control falls straight through to today's insert→gate→auto-book→emit flow and
+      // nothing new runs.
+      if (process.env.LEADFLOW_CALL_INTENT_CLASSIFIER === '1') {
+        try {
+          const openJob = findOpenJobForCaller(lead.business_id, From, lead.id);
+          if (openJob) {
+            await handleCallIntent({ lead, engagement: openJob, transcript, businessId: lead.business_id });
+          }
+        } catch (err) {
+          console.error('[webhook] call-intent block error:', err.message);
+        }
+      }
+
       // Auto-booking: when the AI detected a confirmed booking, verify pool
       // inventory is actually available for the requested size over the rental
       // window BEFORE confirming and sending a payment link. Inventory is
@@ -688,6 +880,21 @@ async function processVoicemail(payload) {
       // (or an earlier missed call from the same number) — remove the duplicate.
       mergeRecentMissedCall(lead.business_id, From, lead);
 
+      // ── Call-intent classifier (additive; triple-contained) ───────────────────
+      // A booked customer leaving a voicemail ("move my pickup to Friday") still
+      // produces an owner-approval item. Voicemails never auto-book, so only the
+      // approval/notice branch runs. Same containment as the answered-call path.
+      if (process.env.LEADFLOW_CALL_INTENT_CLASSIFIER === '1') {
+        try {
+          const openJob = findOpenJobForCaller(lead.business_id, From, lead.id);
+          if (openJob) {
+            await handleCallIntent({ lead, engagement: openJob, transcript, businessId: lead.business_id });
+          }
+        } catch (err) {
+          console.error('[webhook] call-intent block error:', err.message);
+        }
+      }
+
       emitToBusiness(lead.business_id, 'new_lead', lead);
       console.log(`[webhook] Voicemail lead ${lead.id} created from Twilio recording ${RecordingSid} (vertical: ${defaultVertical})`);
       return;
@@ -935,3 +1142,8 @@ router.post('/twilio/voice', (req, res) => {
 });
 
 module.exports = router;
+// Exported for unit/integration tests; the router itself ignores extra props.
+module.exports.findOpenJobForCaller = findOpenJobForCaller;
+module.exports.handleCallIntent = handleCallIntent;
+module.exports.buildRescheduleChanges = buildRescheduleChanges;
+module.exports.resolveIntentDate = resolveIntentDate;
