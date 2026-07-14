@@ -15,7 +15,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-sonnet-4-6';
 
 // Own timeout + retry budget so a slow/hung model call can never stall the pipeline.
-const CLASSIFIER_TIMEOUT_MS = Number(process.env.LEADFLOW_CALL_INTENT_TIMEOUT_MS) || 15000;
+const CLASSIFIER_TIMEOUT_MS = Number(process.env.STREAM_CALL_INTENT_TIMEOUT_MS) || 15000;
 
 // The single intent this call is asking for, relative to the caller's open job.
 const VALID_INTENTS = new Set([
@@ -46,12 +46,14 @@ Decide the ONE thing this call is primarily asking for. Definitions:
 - "delivery_reschedule": change the DELIVERY (drop-off) day or time to a different one.
 - "pickup_change": pick the dumpster up on a different day than currently scheduled WITHOUT asking to keep it longer for more days — e.g. "we finished early, grab it tomorrow" or "come Friday instead of Thursday".
 - "extension": the customer wants to KEEP the dumpster ADDITIONAL days beyond the current pickup — i.e. MORE rental days, which incurs extra-day charges. E.g. "can I keep it a few more days", "extend it a week".
-- "swap": haul the (full) dumpster away and drop off an empty replacement, usually the same size. E.g. "it's full, swap it out".
+- "swap": the customer is DONE with the CURRENT dumpster and needs it REPLACED within the same job — haul the current (usually full) unit away and drop an empty one in its place. The number of dumpsters on site stays the SAME (one leaves, one arrives), usually the same size; the customer is continuing the same job with a fresh unit, not adding capacity.
 - "cancellation": cancel the job entirely.
-- "additional_dumpster": the customer wants an ADDITIONAL, SEPARATE dumpster (a second unit, or one at another site) IN ADDITION to the existing one.
+- "additional_dumpster": the customer wants ANOTHER dumpster IN ADDITION to the current one — the current unit STAYS and a new, separate unit is added (more total capacity, a second unit, or one at another site). The number of dumpsters on site INCREASES.
 - "none": none of the above — a general question, a confirmation, an unrelated call, or a brand-new inquiry.
 
 CRITICAL distinction — extension vs pickup_change: both can move the pickup date later, but choose "extension" whenever the customer wants to keep the dumpster LONGER (more days); choose "pickup_change" only when they are just rescheduling when pickup happens without asking for extra days. When in doubt and they clearly want it longer, pick "extension".
+
+CRITICAL distinction — swap vs additional_dumpster: both involve a fresh dumpster arriving, so do NOT decide by literal words like "full" or "swap it out" — decide by whether the CURRENT dumpster STAYS or GOES. Current one hauled away and replaced (net units on site unchanged) → "swap". Current one stays and another is added (net units increase) → "additional_dumpster". Weigh the OWNER's side of the call, not just the customer's: the owner often restates the plan ("so we'll grab the full one and drop a fresh 20, that it?" → swap; "so you want a second one out there on top of the first" → additional_dumpster) — trust that confirmation over the customer's loose phrasing.
 
 Output a SINGLE JSON object, no other text, with EXACTLY these keys:
 {

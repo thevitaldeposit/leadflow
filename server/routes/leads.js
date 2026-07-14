@@ -152,6 +152,23 @@ function notifyCancelApproval(lead) {
   }
 }
 
+// Push the owner a "draft invoice ready to review" prompt for a call-driven swap /
+// extension (mirrors notifyRescheduleApproval). The draft is NOT sent to the customer —
+// the owner reviews + sends it from the Action Queue (Part 2). Best-effort; never throws.
+function notifyInvoiceReview(lead, { kind, amount } = {}) {
+  try {
+    const tokens = getBusinessDeviceTokens(lead.business_id);
+    const name = getLeadDisplayName(lead) || 'A customer';
+    const what = kind === 'extension' ? 'extend the rental' : 'swap out the dumpster';
+    const amt = amount != null ? ` ($${amount})` : '';
+    sendToAll(tokens, 'Invoice to review', `${name} called to ${what} — a draft invoice${amt} is ready to review`, {
+      type: 'invoice_review', leadId: lead.id,
+    }).catch(err => console.error('[leads] invoice-review push failed:', err.message));
+  } catch (err) {
+    console.error('[leads] invoice-review notify error:', err.message);
+  }
+}
+
 // ── Shared owner-approval producers ─────────────────────────────────────────────
 // Record a call-driven schedule change or cancellation as a PENDING request on the
 // BOOKED lead's vertical_data (the booked schedule itself is never touched), then run
@@ -1005,3 +1022,6 @@ module.exports.describeReschedule = describeReschedule;
 // so the reschedule/cancel request shape + side-effects live in exactly one place.
 module.exports.recordRescheduleRequest = recordRescheduleRequest;
 module.exports.recordCancelRequest = recordCancelRequest;
+// Call-driven draft-invoice review push — fired by the webhook after a swap/extension
+// draft is created (the draft itself is minted by jobLifecycle.ensureCallDrivenReviewInvoice).
+module.exports.notifyInvoiceReview = notifyInvoiceReview;

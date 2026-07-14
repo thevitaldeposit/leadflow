@@ -218,6 +218,26 @@ function computeOverage(businessId, weightTons, { size = null } = {}) {
   return { weightTons: w, includedTons, overTons, ratePerTon, amount: round2(overTons * ratePerTon), needsRate: false, needsAllowance: false };
 }
 
+// Whether a swap replacement has ALREADY been billed for this job on a REAL (non-draft)
+// invoice — i.e. a call-driven swap draft the owner reviewed + sent, or any prior sent/
+// paid swap line. Now that swaps are billed pay-in-advance FROM THE CALL, the dump-ticket
+// path must NOT add a second swap line when one is already on a live bill (double-billing).
+// A still-DRAFT call swap does not count (not yet a bill) — only sent/signed/paid do, so an
+// un-reviewed draft never blocks the ticket from billing the swap the normal way.
+function swapAlreadyBilled(businessId, leadId) {
+  if (!leadId) return false;
+  try {
+    return !!db.prepare(`
+      SELECT 1 FROM invoices i
+      JOIN invoice_line_items li ON li.invoice_id = i.id
+      WHERE i.business_id = ? AND i.lead_id = ?
+        AND i.status IN ('sent','signed','paid')
+        AND li.line_type = 'service' AND li.description LIKE 'Swap replacement%'
+      LIMIT 1
+    `).get(businessId, leadId);
+  } catch { return false; /* invoices tables absent / not migrated */ }
+}
+
 // ── Manual dump-ticket / weight entry (the trigger; OCR reuses this SAME path) ──
 // The owner enters the weight for a returned unit. This:
 //   (a) records the ticket + computes any overage (generating a 'sent' overage invoice
@@ -266,8 +286,11 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   }
   // Swap replacement rental, priced over the swap window (today → pickup) per the
   // size's swap config (same_as_rate → normal resolver; custom → custom price; off → none).
+  // SKIP billing it here when a call-driven swap invoice was already sent/paid for this job
+  // (swaps are now billed pay-in-advance from the call) — otherwise the swap is double-billed.
   let swapCharge = null;
-  if (swap && size) {
+  const swapPreBilled = !!(swap && size) && swapAlreadyBilled(businessId, lead.id);
+  if (swap && size && !swapPreBilled) {
     try {
       const pricingService = require('./pricingService');
       const customerRow = lead.customer_id
@@ -329,6 +352,7 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     overageNeedsAllowance: overage ? !!overage.needsAllowance : false,
     swap: !!swap,
     swapCharge: swapCharge != null ? swapCharge : null,
+    swapAlreadyBilled: swapPreBilled,
     unitsOutAfter: after,
     invoiceId: overageInvoiceId,
   };
@@ -344,7 +368,10 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   const oStr = overage && overage.overTons > 0
     ? (overage.amount != null ? ` · overage ${overage.overTons}t ($${overage.amount})` : ` · overage ${overage.overTons}t (rate not configured)`)
     : '';
-  logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${swap ? ' · swap-out, unit still on site' : ''}${oStr}`);
+  const swapNote = swap
+    ? (swapPreBilled ? ' · swap-out, unit still on site (swap already billed from the call)' : ' · swap-out, unit still on site')
+    : '';
+  logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${swapNote}${oStr}`);
 
   // Advance only when the LAST unit is back (swap-safe). Completion is gated on payment.
   let advancedTo = null;
@@ -469,6 +496,120 @@ function ensureBaseInvoice(businessId, leadOrId, { emailLink = false, markPaidNo
   }
 }
 
+// ── Call-driven draft invoice (swap / extension) — held for owner review ─────────
+// When the call-intent classifier detects a SWAP or EXTENSION on a caller's open, booked
+// job, materialize the correctly-priced charge as a DRAFT invoice the owner reviews before
+// it's sent — NOT a live bill. Mirrors ensureBaseInvoice (home_services fence, customer
+// resolution, createInvoice) but STOPS at 'draft': it never calls markSent, so the draft is
+// inert (excluded from the settled rollup — jobLifecycle's payment rollup ignores 'draft' —
+// so it blocks nothing) until Part 2's review surface sends it. The line item reuses the
+// swap-line shape recordDumpTicket already builds, so the editor + send flow read it as-is.
+//
+// Idempotent: ONE draft per pending review. A re-processed call (Twilio retry, redeploy)
+// finds vd.pendingInvoiceReview pointing at a still-DRAFT invoice and skips, so drafts never
+// stack. Once that draft is resolved (sent/paid → no longer a pending review, or voided),
+// the marker no longer blocks, so a later distinct change can create a fresh draft.
+//
+// EXTENSION with no configured day rate creates NO draft: it flags the job "needs a day
+// rate" (deliberate block) and returns { needsRate }, mirroring the overage needs-rate path.
+function pendingReviewDraftExists(businessId, vd) {
+  const id = vd && vd.pendingInvoiceReview && vd.pendingInvoiceReview.invoiceId;
+  if (!id) return false;
+  try {
+    const inv = db.prepare('SELECT status FROM invoices WHERE id = ? AND business_id = ?').get(id, businessId);
+    return !!inv && inv.status === 'draft';   // still awaiting review → don't stack another draft
+  } catch { return false; }
+}
+
+function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { kind, size = null, extraDays = null } = {}) {
+  const lead = loadLead(businessId, bookedLeadOrId);
+  if (!lead) return { error: 'not_found' };
+  if (kind !== 'swap' && kind !== 'extension') return { error: 'bad_kind' };
+  // Dumpster (home_services) concept only — same fence as ensureBaseInvoice.
+  if (lead.vertical && lead.vertical !== 'home_services') return { skipped: 'not_home_services' };
+
+  const vd = parseVd(lead);
+  const jobSize = size || vd.dumpsterSize || null;
+  if (!jobSize) return { skipped: 'no_size' };
+
+  // Idempotency: never stack a second draft while one is still pending review.
+  if (pendingReviewDraftExists(businessId, vd)) return { skipped: 'exists' };
+
+  const pricingService = require('./pricingService');
+
+  // Extension with no day rate → surface a "needs rate" prompt and create NO draft
+  // (mirrors the overage needs-rate surface). Check this BEFORE resolving a customer so a
+  // pure prompt never spuriously creates a customer row.
+  if (kind === 'extension') {
+    const n = Math.max(1, Math.round(Number(extraDays)) || 1);
+    const ext = pricingService.resolveExtensionPrice(businessId, { size: jobSize, extraDays: n });
+    if (!ext || ext.needsRate || ext.amount == null || ext.amount <= 0) {
+      const at = nowIso();
+      vd.extensionNeedsRate = { size: jobSize, extraDays: n, at };
+      db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), at, lead.id);
+      lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
+      logActivity(lead.id, 'note', `Customer asked to EXTEND ${n} more day(s) — set a day rate for ${jobSize} on the Pricing page to invoice this extension (no draft created).`.slice(0, 500));
+      emit(lead);
+      return { needsRate: true, size: jobSize, extraDays: n };
+    }
+  }
+
+  // Resolve the customer the SAME way ensureBaseInvoice does — customer_id can be NULL on an
+  // auto-booked job nobody has opened in Customers yet, so the fallback is required. Only
+  // findOrCreateCustomerForLead is touched (customers table only; never the write-on-read layer).
+  let customerId = lead.customer_id;
+  if (!customerId) {
+    try { customerId = require('./customerService').findOrCreateCustomerForLead(businessId, lead); } catch { customerId = null; }
+  }
+  if (!customerId) return { skipped: 'no_customer' };
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId);
+
+  // Price the change + build ONE line item matching the swap-line builder's shape.
+  let lineItem = null;
+  let amount = null;
+  if (kind === 'swap') {
+    const days = swapWindowDays(lead);
+    const sw = pricingService.resolveSwapPrice(businessId, { size: jobSize, days, customer });
+    if (!sw || sw.mode === 'off' || sw.amount == null || sw.amount <= 0) return { skipped: 'no_charge' };
+    amount = sw.amount;
+    lineItem = {
+      description: `Swap replacement — ${jobSize} (${days} day${days === 1 ? '' : 's'})`,
+      service_key: null, line_type: 'service', quantity: 1, unit: null, unit_rate: amount,
+    };
+  } else {
+    const n = Math.max(1, Math.round(Number(extraDays)) || 1);
+    const ext = pricingService.resolveExtensionPrice(businessId, { size: jobSize, extraDays: n });
+    amount = ext.amount;
+    lineItem = {
+      description: `Rental extension — ${n} extra day${n === 1 ? '' : 's'}${jobSize ? ` (${jobSize})` : ''}`,
+      service_key: null, line_type: 'service', quantity: n, unit: 'day', unit_rate: ext.dayRate,
+    };
+  }
+
+  // Create the DRAFT invoice (never markSent). createInvoice is self-contained — plain
+  // inserts/selects, no reconcile / payment recompute / delivery auto-advance — so it's safe
+  // from the webhook path. Then write the single idempotency marker + fire log/socket.
+  try {
+    const invoiceService = require('./invoiceService');
+    const inv = invoiceService.createInvoice(businessId, {
+      customer_id: customerId,
+      lead_id: lead.id,
+      line_items: [lineItem],
+    });
+    const at = nowIso();
+    vd.pendingInvoiceReview = { invoiceId: inv.id, kind, amount, size: jobSize, requestedAt: at };
+    db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), at, lead.id);
+    lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
+    logActivity(lead.id, 'invoice_created', `Draft ${kind} invoice ${inv.invoice_number} created from call — review before sending ($${amount})`);
+    try { emitToBusiness(businessId, 'invoice_updated', { id: inv.id }); } catch { /* non-fatal */ }
+    emit(lead);
+    return { invoice: inv, created: true, kind, amount };
+  } catch (e) {
+    console.error('[jobLifecycle] call-driven draft invoice failed:', e.message);
+    return { error: 'create_failed' };
+  }
+}
+
 // Advance whatever job(s) an invoice settlement affects. A lead-linked invoice
 // advances that job; a customer-level invoice (lead_id null) advances the customer's
 // open job(s) awaiting money (pending_payment → booked, awaiting_final_payment →
@@ -511,5 +652,6 @@ module.exports = {
   computeOverage,
   recordDumpTicket,
   ensureBaseInvoice,
+  ensureCallDrivenReviewInvoice,
   canComplete,
 };

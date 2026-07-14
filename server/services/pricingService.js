@@ -160,7 +160,13 @@ function computeBaseFromConfig(cfg, days, fallbackUnitPrice = null) {
   if (style === 'flat' || !style) {
     const flat = cfg && cfg.flat_rate != null ? round2(cfg.flat_rate) : fb;
     if (flat == null) return blank(style || 'flat');
-    return { priceable: true, style: style || 'flat', listBase: flat, tierLabel: null, tierDays: null, extraDays: 0, extraDayRate: null, extraDayCharge: 0 };
+    // Surface the size's configured day rate for flat pricing too (mirrors the tiered
+    // branch below) so an EXTENSION can be priced off a flat-priced size. The flat base
+    // is duration-independent, so extraDays stays 0 and no extra-day charge is added to
+    // the base here — extension pricing multiplies this rate by the requested extra days.
+    const dr = cfg && cfg.day_rate && typeof cfg.day_rate === 'object' ? cfg.day_rate : {};
+    const extraDayRate = dr.enabled && dr.rate != null ? round2(dr.rate) : null;
+    return { priceable: true, style: style || 'flat', listBase: flat, tierLabel: null, tierDays: null, extraDays: 0, extraDayRate, extraDayCharge: 0 };
   }
 
   // Tiered — sort the usable tiers ascending by day count and round the duration up.
@@ -280,6 +286,27 @@ function resolveSwapPrice(businessId, { size, days = 1, customer = null } = {}) 
   }
   const q = resolvePrice(businessId, { size, days, customer });   // same_as_rate → normal resolver over the swap window
   return { amount: q.priceable ? q.total : null, mode, breakdown: q };
+}
+
+// Price a rental EXTENSION — keeping the unit ADDITIONAL days — as (extraDays × the size's
+// configured day rate). The day rate is read via computeBaseFromConfig, now wired for BOTH
+// flat and tiered sizes, so any size that carries a day_rate can be priced. The per-customer
+// discount is deliberately NOT applied here: extra days bill at the FULL day rate (the owner
+// can adjust the amount in the review step). Returns { needsRate:false, amount, dayRate,
+// extraDays, size, size_key } when priceable, or { needsRate:true, amount:null, ... } when
+// the size has no day_rate configured — a DELIBERATE block (do NOT invent a price), mirroring
+// how the weight-overage path surfaces a "needs rate" prompt instead of charging a wrong number.
+function resolveExtensionPrice(businessId, { size, extraDays = 1 } = {}) {
+  const row = getPriceRowForSize(businessId, size);
+  const cfg = row ? row.pricing_config : null;
+  const fallbackUnit = row && row.unit_price != null ? Number(row.unit_price) : null;
+  const serviceKey = row ? row.service_key : (normalizeSizeKey(size) || null);
+  const n = Math.max(1, Math.round(Number(extraDays)) || 1);
+  const dayRate = computeBaseFromConfig(cfg, 1, fallbackUnit).extraDayRate;   // reads day_rate for flat + tiered
+  if (dayRate == null || dayRate <= 0) {
+    return { needsRate: true, amount: null, dayRate: null, extraDays: n, size: size || null, size_key: serviceKey };
+  }
+  return { needsRate: false, amount: round2(n * dayRate), dayRate, extraDays: n, size: size || null, size_key: serviceKey };
 }
 
 // The single enabled flat DELIVERY fee (or null). Mileage/out-of-area fees are
@@ -410,6 +437,7 @@ module.exports = {
   resolvePrice,
   getSizeWeightConfig,
   resolveSwapPrice,
+  resolveExtensionPrice,
   getDeliveryFee,
   getSurchargeItems,
   rentalDaysFromLead,

@@ -132,7 +132,7 @@ function mergeRecentMissedCall(businessId, fromNumber, supersedingLead) {
 }
 
 // ── Call-intent classifier: caller who ALREADY has an open job ───────────────────
-// These three helpers power an ADDITIVE block (gated behind LEADFLOW_CALL_INTENT_CLASSIFIER)
+// These three helpers power an ADDITIVE block (gated behind STREAM_CALL_INTENT_CLASSIFIER)
 // that, when a caller already has an open job, understands what THIS call is asking for
 // and acts on it — instead of leaving it as a generic new inquiry. They never modify the
 // extraction engine, and every one is null/try-catch safe so the pipeline falls back to
@@ -207,26 +207,19 @@ function buildRescheduleChanges(result, engagement, tz) {
   return changes;
 }
 
-// Owner-notice text for the intents we deliberately do NOT auto-act on (swap / extension
-// build a draft invoice that has no owner-review surface yet; additional_dumpster has no
-// place to land). Surfaced as a plain timeline note — nothing customer-facing is created.
+// Owner-notice text for additional_dumpster — the one open-job intent with no place to
+// land yet (a concurrent second job per customer isn't modeled). Surfaced as a plain
+// timeline note; nothing customer-facing is created. Swap/extension NO LONGER route through
+// here — they now mint a draft invoice held for review (ensureCallDrivenReviewInvoice).
 function ownerNoticeFor(result) {
-  if (result.intent === 'swap') {
-    const size = result.swapSize ? ` (requested size: ${result.swapSize})` : '';
-    return `Customer called to SWAP OUT the dumpster${size} — needs an empty dropped and the full one hauled. Build a swap invoice and confirm with the customer (manual for now — no invoice was auto-created).`.slice(0, 500);
-  }
-  if (result.intent === 'extension') {
-    const days = result.extraDays ? ` (~${result.extraDays} extra day(s))` : '';
-    return `Customer called to EXTEND the rental${days} — keeping the dumpster longer incurs extra-day charges. Build an extension invoice and confirm with the customer (manual for now — no invoice was auto-created).`.slice(0, 500);
-  }
-  // additional_dumpster
   return "Customer asked for an ADDITIONAL/second dumpster (a separate unit or site). A concurrent second job per customer isn't supported yet — follow up manually.".slice(0, 500);
 }
 
 // Classify what a call from a customer with an open job is asking for, then act:
 //   • BOOKED job → produce an owner-approval item (reschedule/cancel) via the shared
-//     leads.js producers, or a safe owner notice (swap/extension/additional_dumpster —
-//     NO invoice is minted; the call-driven draft-invoice review surface doesn't exist yet).
+//     leads.js producers; a swap/extension mints a DRAFT invoice held for owner review
+//     (jobLifecycle.ensureCallDrivenReviewInvoice — never auto-sent); additional_dumpster
+//     leaves a safe owner notice (no place to land a concurrent second job yet).
 //   • INQUIRY → log only; never changes inquiry write behavior (inquiries already merge
 //     correctly at the read layer).
 // Never throws (own try/catch). `lead` is the just-inserted call lead; `engagement` is
@@ -290,11 +283,36 @@ async function handleCallIntent({ lead, engagement, transcript, businessId }) {
       return;
     }
 
-    // swap / extension / additional_dumpster → safe owner notice, no invoice minted.
-    if (result.intent === 'swap' || result.intent === 'extension' || result.intent === 'additional_dumpster') {
+    // SWAP / EXTENSION → mint a DRAFT invoice from call context, priced + held for owner
+    // review (Part 2 adds the review/send surface). NOTHING is sent to the customer here.
+    if (result.intent === 'swap' || result.intent === 'extension') {
+      const jobLifecycle = require('../services/jobLifecycle');
+      const size = result.intent === 'swap'
+        ? (result.swapSize || engagement.dumpster_size || null)
+        : (engagement.dumpster_size || null);
+      const outcome = jobLifecycle.ensureCallDrivenReviewInvoice(bookedLead.business_id, bookedLead, {
+        kind: result.intent,
+        size,
+        extraDays: result.extraDays || null,
+      });
+      if (outcome && outcome.created) {
+        try {
+          require('./leads').notifyInvoiceReview(bookedLead, { kind: result.intent, amount: outcome.amount });
+        } catch (e) { console.error('[webhook] invoice-review notify failed:', e.message); }
+        console.log(`[webhook] Call-intent: '${result.intent}' → draft invoice ${outcome.invoice.id} for review on booked lead ${bookedLead.id} ($${outcome.amount})`);
+      } else if (outcome && outcome.needsRate) {
+        console.log(`[webhook] Call-intent: 'extension' on booked lead ${bookedLead.id} — no day rate for ${outcome.size}; owner prompted to set one (no draft)`);
+      } else {
+        console.log(`[webhook] Call-intent: '${result.intent}' on booked lead ${bookedLead.id} — no draft (${(outcome && (outcome.skipped || outcome.error)) || 'unknown'})`);
+      }
+      return;
+    }
+
+    // additional_dumpster → safe owner notice (no concurrent second job model yet).
+    if (result.intent === 'additional_dumpster') {
       logActivity(bookedLead.id, 'note', ownerNoticeFor(result));
       emitToBusiness(bookedLead.business_id, 'lead_updated', bookedLead);
-      console.log(`[webhook] Call-intent: '${result.intent}' → owner notice on booked lead ${bookedLead.id} (no invoice minted)`);
+      console.log(`[webhook] Call-intent: 'additional_dumpster' → owner notice on booked lead ${bookedLead.id} (no invoice minted)`);
       return;
     }
   } catch (err) {
@@ -600,7 +618,7 @@ async function processRecording(payload) {
       // the caller has an open job, (3) try/catch. With the flag off or no open job,
       // control falls straight through to today's insert→gate→auto-book→emit flow and
       // nothing new runs.
-      if (process.env.LEADFLOW_CALL_INTENT_CLASSIFIER === '1') {
+      if (process.env.STREAM_CALL_INTENT_CLASSIFIER === '1') {
         try {
           const openJob = findOpenJobForCaller(lead.business_id, From, lead.id);
           if (openJob) {
@@ -884,7 +902,7 @@ async function processVoicemail(payload) {
       // A booked customer leaving a voicemail ("move my pickup to Friday") still
       // produces an owner-approval item. Voicemails never auto-book, so only the
       // approval/notice branch runs. Same containment as the answered-call path.
-      if (process.env.LEADFLOW_CALL_INTENT_CLASSIFIER === '1') {
+      if (process.env.STREAM_CALL_INTENT_CLASSIFIER === '1') {
         try {
           const openJob = findOpenJobForCaller(lead.business_id, From, lead.id);
           if (openJob) {
