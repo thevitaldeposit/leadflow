@@ -42,7 +42,7 @@ The customer's current job:
 - Service address: ${j.address || 'unknown'}
 - Rental duration: ${j.rental_duration || 'unknown'}
 
-Decide the ONE thing this call is primarily asking for. Definitions:
+Decide the PRIMARY thing this call is asking for — that single choice is the "intent". SEPARATELY, a call can be BOTH a swap AND an extension at once (replace the current unit AND keep the replacement longer), so you ALSO flag those two independently via swapRequested / extensionRequested below — set each one true whenever that thing is present, regardless of which you pick as the primary intent. Definitions:
 - "delivery_reschedule": change the DELIVERY (drop-off) day or time to a different one.
 - "pickup_change": pick the dumpster up on a different day than currently scheduled WITHOUT asking to keep it longer for more days — e.g. "we finished early, grab it tomorrow" or "come Friday instead of Thursday".
 - "extension": the customer wants to KEEP the dumpster ADDITIONAL days beyond the current pickup — i.e. MORE rental days, which incurs extra-day charges. E.g. "can I keep it a few more days", "extend it a week".
@@ -55,9 +55,13 @@ CRITICAL distinction — extension vs pickup_change: both can move the pickup da
 
 CRITICAL distinction — swap vs additional_dumpster: both involve a fresh dumpster arriving, so do NOT decide by literal words like "full" or "swap it out" — decide by whether the CURRENT dumpster STAYS or GOES. Current one hauled away and replaced (net units on site unchanged) → "swap". Current one stays and another is added (net units increase) → "additional_dumpster". Weigh the OWNER's side of the call, not just the customer's: the owner often restates the plan ("so we'll grab the full one and drop a fresh 20, that it?" → swap; "so you want a second one out there on top of the first" → additional_dumpster) — trust that confirmation over the customer's loose phrasing.
 
+CRITICAL — swap and extension can BOTH be true on one call: if the customer wants the current unit hauled and replaced AND wants to keep the (replacement) unit additional days, that call is BOTH a swap and an extension. Set swapRequested=true AND extensionRequested=true, and fill BOTH swapSize (if the replacement differs in size) and extraDays. Do NOT drop one in favor of the other — capture both. Pick whichever is the bigger ask as the primary "intent"; the two booleans are what actually bill, so their accuracy matters more than which one you label primary.
+
 Output a SINGLE JSON object, no other text, with EXACTLY these keys:
 {
   "intent": one of ${[...VALID_INTENTS].map((i) => `"${i}"`).join(', ')},
+  "swapRequested": true or false,            // true if the CURRENT dumpster should be hauled away and replaced with an empty one (same job; net units on site unchanged)
+  "extensionRequested": true or false,       // true if the customer wants to KEEP the dumpster additional days (more rental days → extra-day charges)
   "newDeliveryDate": "YYYY-MM-DD or null",   // resolved new delivery date if a delivery_reschedule
   "deliveryPhrase": "the exact words the customer used for the new delivery timing, or null",
   "newPickupDate": "YYYY-MM-DD or null",     // resolved new pickup date if the pickup moves
@@ -113,8 +117,15 @@ function normalizeResult(parsed) {
   let confidence = Number(parsed.confidence);
   if (!Number.isFinite(confidence)) confidence = null;
   else confidence = Math.max(0, Math.min(1, confidence));
+  // Swap and extension are flagged independently so ONE call can be both. Fall back to the
+  // primary intent so a pure swap / pure extension still flags itself — backward-compatible
+  // with the old single-intent shape (a caller that only reads `intent` is unaffected).
+  const swapRequested = parsed.swapRequested === true || parsed.intent === 'swap';
+  const extensionRequested = parsed.extensionRequested === true || parsed.intent === 'extension';
   return {
     intent: parsed.intent,
+    swapRequested,
+    extensionRequested,
     newDeliveryDate: cleanIso(parsed.newDeliveryDate),
     deliveryPhrase: cleanStr(parsed.deliveryPhrase),
     newPickupDate: cleanIso(parsed.newPickupDate),

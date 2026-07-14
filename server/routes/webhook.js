@@ -283,23 +283,24 @@ async function handleCallIntent({ lead, engagement, transcript, businessId }) {
       return;
     }
 
-    // SWAP / EXTENSION → mint a DRAFT invoice from call context, priced + held for owner
-    // review (Part 2 adds the review/send surface). NOTHING is sent to the customer here.
+    // SWAP and/or EXTENSION → mint ONE DRAFT invoice from call context, priced + held for owner
+    // review (Part 2 adds the review/send surface). A single call can be BOTH — the draft then
+    // carries a swap line AND an extension line, each auto-priced. NOTHING is sent to the
+    // customer here. The two signals are flagged independently by the classifier.
     if (result.intent === 'swap' || result.intent === 'extension') {
       const jobLifecycle = require('../services/jobLifecycle');
-      const size = result.intent === 'swap'
-        ? (result.swapSize || engagement.dumpster_size || null)
-        : (engagement.dumpster_size || null);
-      const outcome = jobLifecycle.ensureCallDrivenReviewInvoice(bookedLead.business_id, bookedLead, {
-        kind: result.intent,
-        size,
-        extraDays: result.extraDays || null,
-      });
+      const swap = result.swapRequested
+        ? { size: result.swapSize || engagement.dumpster_size || null }
+        : null;
+      const extension = result.extensionRequested
+        ? { extraDays: result.extraDays || null }
+        : null;
+      const outcome = jobLifecycle.ensureCallDrivenReviewInvoice(bookedLead.business_id, bookedLead, { swap, extension });
       if (outcome && outcome.created) {
         try {
-          require('./leads').notifyInvoiceReview(bookedLead, { kind: result.intent, amount: outcome.amount });
+          require('./leads').notifyInvoiceReview(bookedLead, { kind: outcome.kind, amount: outcome.amount });
         } catch (e) { console.error('[webhook] invoice-review notify failed:', e.message); }
-        console.log(`[webhook] Call-intent: '${result.intent}' → draft invoice ${outcome.invoice.id} for review on booked lead ${bookedLead.id} ($${outcome.amount})`);
+        console.log(`[webhook] Call-intent: '${outcome.kind}' → draft invoice ${outcome.invoice.id} for review on booked lead ${bookedLead.id} ($${outcome.amount})${outcome.extensionNeedsRate ? ' [extension needs a day rate — noted for owner]' : ''}`);
       } else if (outcome && outcome.needsRate) {
         console.log(`[webhook] Call-intent: 'extension' on booked lead ${bookedLead.id} — no day rate for ${outcome.size}; owner prompted to set one (no draft)`);
       } else {

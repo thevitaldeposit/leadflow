@@ -159,7 +159,9 @@ function notifyInvoiceReview(lead, { kind, amount } = {}) {
   try {
     const tokens = getBusinessDeviceTokens(lead.business_id);
     const name = getLeadDisplayName(lead) || 'A customer';
-    const what = kind === 'extension' ? 'extend the rental' : 'swap out the dumpster';
+    const what = kind === 'swap_extension'
+      ? 'swap out the dumpster and extend the rental'
+      : kind === 'extension' ? 'extend the rental' : 'swap out the dumpster';
     const amt = amount != null ? ` ($${amount})` : '';
     sendToAll(tokens, 'Invoice to review', `${name} called to ${what} — a draft invoice${amt} is ready to review`, {
       type: 'invoice_review', leadId: lead.id,

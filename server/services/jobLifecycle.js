@@ -496,22 +496,29 @@ function ensureBaseInvoice(businessId, leadOrId, { emailLink = false, markPaidNo
   }
 }
 
-// ── Call-driven draft invoice (swap / extension) — held for owner review ─────────
-// When the call-intent classifier detects a SWAP or EXTENSION on a caller's open, booked
-// job, materialize the correctly-priced charge as a DRAFT invoice the owner reviews before
-// it's sent — NOT a live bill. Mirrors ensureBaseInvoice (home_services fence, customer
-// resolution, createInvoice) but STOPS at 'draft': it never calls markSent, so the draft is
-// inert (excluded from the settled rollup — jobLifecycle's payment rollup ignores 'draft' —
-// so it blocks nothing) until Part 2's review surface sends it. The line item reuses the
-// swap-line shape recordDumpTicket already builds, so the editor + send flow read it as-is.
+// ── Call-driven draft invoice (swap and/or extension) — held for owner review ────
+// When the call-intent classifier detects a SWAP and/or an EXTENSION on a caller's open,
+// booked job, materialize the correctly-priced charge(s) as a DRAFT invoice the owner reviews
+// before it's sent — NOT a live bill. A single call can ask for BOTH (replace the unit AND
+// keep it longer): we then put a swap line AND an extension line on the SAME draft, each
+// priced by its OWN resolver (resolveSwapPrice / resolveExtensionPrice). Mirrors
+// ensureBaseInvoice (home_services fence, customer resolution, createInvoice) but STOPS at
+// 'draft': it never calls markSent, so the draft is inert (excluded from the settled rollup —
+// jobLifecycle's payment rollup ignores 'draft' — so it blocks nothing) until Part 2's review
+// surface sends it. The swap line keeps the EXACT shape/description recordDumpTicket builds, so
+// the swapAlreadyBilled dedup + the editor + send flow all read it as-is.
 //
-// Idempotent: ONE draft per pending review. A re-processed call (Twilio retry, redeploy)
-// finds vd.pendingInvoiceReview pointing at a still-DRAFT invoice and skips, so drafts never
-// stack. Once that draft is resolved (sent/paid → no longer a pending review, or voided),
-// the marker no longer blocks, so a later distinct change can create a fresh draft.
+// Idempotent: ONE draft per pending review (it may hold up to two lines). A re-processed call
+// (Twilio retry, redeploy) finds vd.pendingInvoiceReview pointing at a still-DRAFT invoice and
+// skips, so drafts never stack. Once that draft is resolved (sent/paid → no longer a pending
+// review, or voided), the marker no longer blocks, so a later distinct change can create a
+// fresh draft.
 //
-// EXTENSION with no configured day rate creates NO draft: it flags the job "needs a day
-// rate" (deliberate block) and returns { needsRate }, mirroring the overage needs-rate path.
+// EXTENSION with no configured day rate: a PURE extension creates NO draft — it flags the job
+// "needs a day rate" (deliberate block) and returns { needsRate }, mirroring the overage
+// needs-rate path. But when the SAME call ALSO has a chargeable swap, the swap draft is still
+// created and the extension's needs-rate note is attached — we don't drop the whole draft just
+// because the extension half can't be priced yet.
 function pendingReviewDraftExists(businessId, vd) {
   const id = vd && vd.pendingInvoiceReview && vd.pendingInvoiceReview.invoiceId;
   if (!id) return false;
@@ -521,15 +528,19 @@ function pendingReviewDraftExists(businessId, vd) {
   } catch { return false; }
 }
 
-function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { kind, size = null, extraDays = null } = {}) {
+function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { swap = null, extension = null } = {}) {
   const lead = loadLead(businessId, bookedLeadOrId);
   if (!lead) return { error: 'not_found' };
-  if (kind !== 'swap' && kind !== 'extension') return { error: 'bad_kind' };
+  const wantSwap = !!swap;
+  const wantExtension = !!extension;
+  if (!wantSwap && !wantExtension) return { error: 'bad_kind' };
   // Dumpster (home_services) concept only — same fence as ensureBaseInvoice.
   if (lead.vertical && lead.vertical !== 'home_services') return { skipped: 'not_home_services' };
 
   const vd = parseVd(lead);
-  const jobSize = size || vd.dumpsterSize || null;
+  // A swap may replace with a DIFFERENT size; that replacement size is what the whole job —
+  // and the extension riding along on it — prices against. Otherwise price the booked size.
+  const jobSize = (swap && swap.size) || vd.dumpsterSize || null;
   if (!jobSize) return { skipped: 'no_size' };
 
   // Idempotency: never stack a second draft while one is still pending review.
@@ -537,21 +548,23 @@ function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { kind, size 
 
   const pricingService = require('./pricingService');
 
-  // Extension with no day rate → surface a "needs rate" prompt and create NO draft
-  // (mirrors the overage needs-rate surface). Check this BEFORE resolving a customer so a
-  // pure prompt never spuriously creates a customer row.
-  if (kind === 'extension') {
-    const n = Math.max(1, Math.round(Number(extraDays)) || 1);
-    const ext = pricingService.resolveExtensionPrice(businessId, { size: jobSize, extraDays: n });
-    if (!ext || ext.needsRate || ext.amount == null || ext.amount <= 0) {
-      const at = nowIso();
-      vd.extensionNeedsRate = { size: jobSize, extraDays: n, at };
-      db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), at, lead.id);
-      lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
-      logActivity(lead.id, 'note', `Customer asked to EXTEND ${n} more day(s) — set a day rate for ${jobSize} on the Pricing page to invoice this extension (no draft created).`.slice(0, 500));
-      emit(lead);
-      return { needsRate: true, size: jobSize, extraDays: n };
-    }
+  // Price the extension up-front (if asked) to learn whether it's chargeable. A PURE extension
+  // with no configured day rate surfaces a needs-rate prompt and creates NO draft — done BEFORE
+  // resolving a customer so that prompt never spuriously creates a customer row (unchanged).
+  const extraDaysN = wantExtension ? Math.max(1, Math.round(Number(extension.extraDays)) || 1) : null;
+  const extPrice = wantExtension
+    ? pricingService.resolveExtensionPrice(businessId, { size: jobSize, extraDays: extraDaysN })
+    : null;
+  const extPriceable = !!(extPrice && !extPrice.needsRate && extPrice.amount != null && extPrice.amount > 0);
+
+  if (wantExtension && !extPriceable && !wantSwap) {
+    const at = nowIso();
+    vd.extensionNeedsRate = { size: jobSize, extraDays: extraDaysN, at };
+    db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), at, lead.id);
+    lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
+    logActivity(lead.id, 'note', `Customer asked to EXTEND ${extraDaysN} more day(s) — set a day rate for ${jobSize} on the Pricing page to invoice this extension (no draft created).`.slice(0, 500));
+    emit(lead);
+    return { needsRate: true, size: jobSize, extraDays: extraDaysN };
   }
 
   // Resolve the customer the SAME way ensureBaseInvoice does — customer_id can be NULL on an
@@ -564,27 +577,52 @@ function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { kind, size 
   if (!customerId) return { skipped: 'no_customer' };
   const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId);
 
-  // Price the change + build ONE line item matching the swap-line builder's shape.
-  let lineItem = null;
-  let amount = null;
-  if (kind === 'swap') {
+  // Build a line per PRICEABLE signal — up to two on the ONE draft. The swap line keeps the
+  // exact shape/description recordDumpTicket uses so the swapAlreadyBilled dedup keeps working.
+  const lineItems = [];
+  const parts = [];
+
+  if (wantSwap) {
     const days = swapWindowDays(lead);
     const sw = pricingService.resolveSwapPrice(businessId, { size: jobSize, days, customer });
-    if (!sw || sw.mode === 'off' || sw.amount == null || sw.amount <= 0) return { skipped: 'no_charge' };
-    amount = sw.amount;
-    lineItem = {
-      description: `Swap replacement — ${jobSize} (${days} day${days === 1 ? '' : 's'})`,
-      service_key: null, line_type: 'service', quantity: 1, unit: null, unit_rate: amount,
-    };
-  } else {
-    const n = Math.max(1, Math.round(Number(extraDays)) || 1);
-    const ext = pricingService.resolveExtensionPrice(businessId, { size: jobSize, extraDays: n });
-    amount = ext.amount;
-    lineItem = {
-      description: `Rental extension — ${n} extra day${n === 1 ? '' : 's'}${jobSize ? ` (${jobSize})` : ''}`,
-      service_key: null, line_type: 'service', quantity: n, unit: 'day', unit_rate: ext.dayRate,
-    };
+    if (sw && sw.mode !== 'off' && sw.amount != null && sw.amount > 0) {
+      lineItems.push({
+        description: `Swap replacement — ${jobSize} (${days} day${days === 1 ? '' : 's'})`,
+        service_key: null, line_type: 'service', quantity: 1, unit: null, unit_rate: sw.amount,
+      });
+      parts.push('swap');
+    }
   }
+
+  if (wantExtension && extPriceable) {
+    lineItems.push({
+      description: `Rental extension — ${extraDaysN} extra day${extraDaysN === 1 ? '' : 's'}${jobSize ? ` (${jobSize})` : ''}`,
+      service_key: null, line_type: 'service', quantity: extraDaysN, unit: 'day', unit_rate: extPrice.dayRate,
+    });
+    parts.push('extension');
+  }
+
+  // Extension asked for but not priceable (a chargeable swap kept us going): remember to attach
+  // its needs-rate note so the owner knows the extension still needs a day rate to be added.
+  const extensionNeedsRate = wantExtension && !extPriceable;
+
+  if (!lineItems.length) {
+    // Nothing chargeable landed. If an extension needed a rate (and the swap, if any, had no
+    // charge), surface the needs-rate prompt; otherwise there is simply nothing to bill.
+    if (extensionNeedsRate) {
+      const at = nowIso();
+      vd.extensionNeedsRate = { size: jobSize, extraDays: extraDaysN, at };
+      db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), at, lead.id);
+      lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
+      logActivity(lead.id, 'note', `Customer asked to EXTEND ${extraDaysN} more day(s) — set a day rate for ${jobSize} on the Pricing page to invoice this extension (no draft created).`.slice(0, 500));
+      emit(lead);
+      return { needsRate: true, size: jobSize, extraDays: extraDaysN };
+    }
+    return { skipped: 'no_charge' };
+  }
+
+  const kind = parts.length === 2 ? 'swap_extension' : parts[0];
+  const amount = round2(lineItems.reduce((s, li) => s + Number(li.unit_rate) * Number(li.quantity), 0));
 
   // Create the DRAFT invoice (never markSent). createInvoice is self-contained — plain
   // inserts/selects, no reconcile / payment recompute / delivery auto-advance — so it's safe
@@ -594,16 +632,21 @@ function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { kind, size 
     const inv = invoiceService.createInvoice(businessId, {
       customer_id: customerId,
       lead_id: lead.id,
-      line_items: [lineItem],
+      line_items: lineItems,
     });
     const at = nowIso();
-    vd.pendingInvoiceReview = { invoiceId: inv.id, kind, amount, size: jobSize, requestedAt: at };
+    vd.pendingInvoiceReview = { invoiceId: inv.id, kind, amount, size: jobSize, parts, requestedAt: at };
+    if (extensionNeedsRate) vd.extensionNeedsRate = { size: jobSize, extraDays: extraDaysN, at };
     db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), at, lead.id);
     lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
-    logActivity(lead.id, 'invoice_created', `Draft ${kind} invoice ${inv.invoice_number} created from call — review before sending ($${amount})`);
+    const label = kind === 'swap_extension' ? 'swap + extension' : kind;
+    logActivity(lead.id, 'invoice_created', `Draft ${label} invoice ${inv.invoice_number} created from call — review before sending ($${amount})`);
+    if (extensionNeedsRate) {
+      logActivity(lead.id, 'note', `Customer also asked to EXTEND ${extraDaysN} more day(s) — set a day rate for ${jobSize} on the Pricing page to add the extension to this invoice.`.slice(0, 500));
+    }
     try { emitToBusiness(businessId, 'invoice_updated', { id: inv.id }); } catch { /* non-fatal */ }
     emit(lead);
-    return { invoice: inv, created: true, kind, amount };
+    return { invoice: inv, created: true, kind, amount, parts, extensionNeedsRate };
   } catch (e) {
     console.error('[jobLifecycle] call-driven draft invoice failed:', e.message);
     return { error: 'create_failed' };
