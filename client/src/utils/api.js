@@ -91,6 +91,16 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: !!confirm }),
     }),
+  // Call-driven draft-invoice review (Part 2): the pending swap/extension draft for a
+  // lead + a server-computed extension inventory warning. resolveInvoiceReview clears
+  // the marker — action 'sent' (owner approved + sent it) or 'discard' (drop the draft).
+  getInvoiceReview: (leadId) => request(`/leads/${leadId}/invoice-review`),
+  resolveInvoiceReview: (leadId, action) =>
+    request(`/leads/${leadId}/invoice-review/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    }),
   // Customers — the unified person-level record (consolidates leads/opportunities)
   getCustomers: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

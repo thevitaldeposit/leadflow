@@ -623,6 +623,14 @@ export function getLeadActionState(lead, now = new Date()) {
     recommendation = 'Customer expressed intent to cancel — confirm or disregard';
   }
 
+  // A booked job with a call-driven DRAFT invoice (swap / extension) waiting on the
+  // owner to review + send. Keys on the Part-1 marker (vd.pendingInvoiceReview); the
+  // owner reviews in the real invoice editor (see the dashboard's Review action).
+  const invoiceReviewRequested = !!(vd.pendingInvoiceReview && vd.pendingInvoiceReview.invoiceId);
+  if (invoiceReviewRequested) {
+    recommendation = 'Draft invoice from a call — review & send';
+  }
+
   // PAYMENT axis + the two new lifecycle stages, surfaced for the two-indicator UI
   // and the pending-payment / balance-chaser nudges.
   const paymentStatus = lead?.payment_status || 'unpaid';
@@ -704,6 +712,7 @@ export function getLeadActionState(lead, now = new Date()) {
     isDead,
     rescheduleRequested,
     cancelRequested,
+    invoiceReviewRequested,
     paymentStatus,
     pendingPayment,
     awaitingFinalPayment,

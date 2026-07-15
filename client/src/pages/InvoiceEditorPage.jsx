@@ -1,8 +1,14 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, Check, X, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Check, X, ChevronDown, Send, AlertTriangle, Info } from 'lucide-react';
 import { api } from '../utils/api';
 import { INVOICE_LINE_TYPES } from '../utils/verticalConfig';
+
+// A call-driven draft line whose description prefix is load-bearing: 'Swap replacement'
+// is what the dump-ticket double-bill dedup (swapAlreadyBilled) matches, and 'Rental
+// extension' is what the paid-extension pickup-date hook matches. In review mode we keep
+// those prefixes locked so the owner can retune the price but never break either match.
+const LOCKED_DESC_PREFIX = /^(Swap replacement|Rental extension)/i;
 
 const inputCls = 'w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent';
 const labelCls = 'block text-xs font-medium text-muted uppercase tracking-wide mb-1';
@@ -39,10 +45,16 @@ export default function InvoiceEditorPage() {
   const isEdit = !!id;
   const [search] = useSearchParams();
   const navigate = useNavigate();
+  // Review mode: opened from the Action Queue's Review action on a call-driven draft.
+  // `review` carries the booked lead id whose vd.pendingInvoiceReview points at this draft.
+  const reviewLeadId = search.get('review');
+  const reviewMode = isEdit && !!reviewLeadId;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [reviewInfo, setReviewInfo] = useState(null); // { extensionWarning, extensionNeedsRate }
+  const [reviewBusy, setReviewBusy] = useState(false);
   const [rates, setRates] = useState([]); // effective pricing rows for "add from rates"
   const [showRates, setShowRates] = useState(false);
   const [feeItems, setFeeItems] = useState([]); // delivery fee + surcharge items to add as lines
@@ -83,12 +95,21 @@ export default function InvoiceEditorPage() {
             description: it.description || '', line_type: it.line_type || 'service',
             quantity: String(it.quantity ?? 1), unit: it.unit || '',
             unit_rate: String(it.unit_rate ?? ''), service_key: it.service_key || null,
+            // In review mode, lock the swap/extension description prefix (see LOCKED_DESC_PREFIX).
+            _descLocked: reviewMode && LOCKED_DESC_PREFIX.test(it.description || ''),
           })) : [emptyLine()]);
           // Pricing for the "add from rates" menu.
           try {
             const pricing = await api.getCustomerPricing(inv.customer_id);
             if (active) setRates(pricing.items || []);
           } catch { /* non-fatal */ }
+          // Review mode: pull the server-computed extension inventory warning + needs-rate note.
+          if (reviewMode) {
+            try {
+              const ri = await api.getInvoiceReview(reviewLeadId);
+              if (active) setReviewInfo(ri);
+            } catch { /* non-fatal — the banner just won't show the warning */ }
+          }
         } else {
           const cid = search.get('customer_id');
           const leadId = search.get('lead_id');
@@ -132,7 +153,7 @@ export default function InvoiceEditorPage() {
       }
     })();
     return () => { active = false; };
-  }, [id, isEdit, search]);
+  }, [id, isEdit, search, reviewMode, reviewLeadId]);
 
   const setLine = (i, k, v) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, [k]: v } : l)));
   const addLine = (preset) => setLines((ls) => [...ls, preset || emptyLine()]);
@@ -163,34 +184,66 @@ export default function InvoiceEditorPage() {
   const taxAmount = subtotal * (num(form.tax_rate, 0) / 100);
   const total = subtotal + taxAmount;
 
+  const buildPayload = () => ({
+    ...form,
+    tax_rate: num(form.tax_rate, 0),
+    line_items: lines
+      .filter((l) => l.description.trim() || num(l.unit_rate, 0) !== 0)
+      .map((l, i) => ({
+        description: l.description.trim(),
+        line_type: l.line_type,
+        quantity: num(l.quantity, 1),
+        unit: l.unit.trim() || null,
+        unit_rate: num(l.unit_rate, 0),
+        service_key: l.service_key || null,
+        sort_order: i,
+      })),
+  });
+
   const save = async () => {
     setSaving(true); setError(null);
-    const payload = {
-      ...form,
-      tax_rate: num(form.tax_rate, 0),
-      line_items: lines
-        .filter((l) => l.description.trim() || num(l.unit_rate, 0) !== 0)
-        .map((l, i) => ({
-          description: l.description.trim(),
-          line_type: l.line_type,
-          quantity: num(l.quantity, 1),
-          unit: l.unit.trim() || null,
-          unit_rate: num(l.unit_rate, 0),
-          service_key: l.service_key || null,
-          sort_order: i,
-        })),
-    };
     try {
       if (isEdit) {
-        await api.updateInvoice(id, payload);
+        await api.updateInvoice(id, buildPayload());
         navigate(`/invoices/${id}`);
       } else {
-        const created = await api.createInvoice({ customer_id: customerId, ...payload });
+        const created = await api.createInvoice({ customer_id: customerId, ...buildPayload() });
         navigate(`/invoices/${created.id}`);
       }
     } catch (e) {
       setError(e.message || 'Save failed');
       setSaving(false);
+    }
+  };
+
+  // Review mode — Approve & Send: persist edits, then deliver via the SAME send endpoint
+  // every invoice uses (markSent + email/SMS of the /invoice/:token link), then clear the
+  // pending-review marker so the Action Queue item drops. The customer signs + pays on the
+  // normal public invoice page — no net-new customer-side code.
+  const approveAndSend = async () => {
+    setSaving(true); setError(null);
+    try {
+      await api.updateInvoice(id, buildPayload());
+      await api.sendInvoice(id, 'both');
+      try { await api.resolveInvoiceReview(reviewLeadId, 'sent'); } catch { /* marker clear is best-effort */ }
+      navigate(`/invoices/${id}`);
+    } catch (e) {
+      setError(e.message || 'Send failed');
+      setSaving(false);
+    }
+  };
+
+  // Review mode — Discard: drop a misclassified draft without sending. Clears the marker
+  // and deletes the inert draft server-side, then returns to the dashboard.
+  const discardDraft = async () => {
+    if (!confirm('Discard this draft invoice? It will not be sent to the customer.')) return;
+    setReviewBusy(true); setError(null);
+    try {
+      await api.resolveInvoiceReview(reviewLeadId, 'discard');
+      navigate('/');
+    } catch (e) {
+      setError(e.message || 'Discard failed');
+      setReviewBusy(false);
     }
   };
 
@@ -211,7 +264,33 @@ export default function InvoiceEditorPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <Link to={backLink} className="text-sm text-accent inline-flex items-center gap-1 hover:underline"><ArrowLeft size={14} /> Back</Link>
-      <h1 className="text-xl font-bold text-content">{isEdit ? 'Edit Invoice' : 'New Invoice'}</h1>
+      <h1 className="text-xl font-bold text-content">{reviewMode ? 'Review Draft Invoice' : isEdit ? 'Edit Invoice' : 'New Invoice'}</h1>
+
+      {reviewMode && (
+        <div className="bg-brand/5 border border-brand/30 rounded-xl px-5 py-4 space-y-2.5">
+          <p className="text-sm font-semibold text-content">Drafted from a customer call — review, then approve &amp; send.</p>
+          <p className="text-xs text-muted">
+            This swap / extension invoice was drafted automatically and has <span className="font-semibold">not</span> been sent.
+            Adjust the price or lines if needed, then <span className="font-semibold">Approve &amp; Send</span> to deliver it for
+            signature + payment — or Discard to drop it. To change delivery/pickup dates, use Edit Job Details on the job instead.
+          </p>
+          {reviewInfo?.extensionWarning && (
+            <div className="flex items-start gap-2 bg-warning/10 border border-warning/30 rounded-lg px-3 py-2.5">
+              <AlertTriangle size={16} className="text-warning flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-warning font-medium">{reviewInfo.extensionWarning.message}</p>
+            </div>
+          )}
+          {reviewInfo?.extensionNeedsRate && (
+            <div className="flex items-start gap-2 bg-surface-2 border border-divider rounded-lg px-3 py-2.5">
+              <Info size={16} className="text-muted flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-muted">
+                The customer also asked to extend {reviewInfo.extensionNeedsRate.extraDays} more day(s), but{' '}
+                {reviewInfo.extensionNeedsRate.size} has no day rate set — add one on the Pricing page to bill the extension.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Bill-to + dates */}
       <Card title="Bill To">
@@ -285,7 +364,14 @@ export default function InvoiceEditorPage() {
               {lines.map((l, i) => (
                 <tr key={i}>
                   <td className="px-4 py-2">
-                    <input className="w-full min-w-[10rem] text-sm border border-divider rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.description} onChange={(e) => setLine(i, 'description', e.target.value)} placeholder="Description" />
+                    <input
+                      className={`w-full min-w-[10rem] text-sm border border-divider rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent ${l._descLocked ? 'bg-surface-2 text-muted cursor-not-allowed' : ''}`}
+                      value={l.description}
+                      onChange={(e) => setLine(i, 'description', e.target.value)}
+                      readOnly={!!l._descLocked}
+                      title={l._descLocked ? 'This label is used to track the swap/extension — edit the price instead. Delete the line to remove it.' : undefined}
+                      placeholder="Description"
+                    />
                   </td>
                   <td className="px-2 py-2">
                     <select className="w-full text-sm border border-divider rounded px-1.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent" value={l.line_type} onChange={(e) => setLine(i, 'line_type', e.target.value)}>
@@ -339,12 +425,24 @@ export default function InvoiceEditorPage() {
 
       {error && <p className="text-sm text-danger">{error}</p>}
 
-      <div className="flex justify-end gap-2 pb-4">
-        <button onClick={() => navigate(backLink)} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-4 py-2 rounded-lg"><X size={14} /> Cancel</button>
-        <button onClick={save} disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-5 py-2 rounded-lg">
-          <Check size={14} /> {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Create invoice')}
-        </button>
-      </div>
+      {reviewMode ? (
+        <div className="flex items-center gap-2 pb-4">
+          <button onClick={discardDraft} disabled={saving || reviewBusy} className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-danger disabled:opacity-50 px-3 py-2 rounded-lg"><Trash2 size={14} /> Discard draft</button>
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={save} disabled={saving || reviewBusy} className="flex items-center gap-1.5 text-sm font-medium text-content bg-surface-2 hover:bg-surface-2 disabled:opacity-50 px-4 py-2 rounded-lg"><Check size={14} /> Save draft</button>
+            <button onClick={approveAndSend} disabled={saving || reviewBusy} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-5 py-2 rounded-lg">
+              <Send size={14} /> {saving ? 'Sending…' : 'Approve & Send'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex justify-end gap-2 pb-4">
+          <button onClick={() => navigate(backLink)} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-4 py-2 rounded-lg"><X size={14} /> Cancel</button>
+          <button onClick={save} disabled={saving} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-5 py-2 rounded-lg">
+            <Check size={14} /> {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Create invoice')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

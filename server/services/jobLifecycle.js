@@ -653,6 +653,75 @@ function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { swap = null
   }
 }
 
+// ── Extension payment hook: a PAID extension invoice pushes the pickup date out ──
+// When an invoice carrying a call-driven EXTENSION line settles, extend the job's
+// pickup_date (and vd.rentalDuration) by the extension's N days — the ONE genuinely
+// new lifecycle side-effect of the review feature. Scoped STRICTLY to invoices that
+// carry an extension line, so base / swap / overage payments never move a pickup date.
+// (Paying a SWAP invoice is just the green light — the physical rotation / units_out
+// still happens later at dump-ticket entry, so a swap has no date effect here.)
+//
+// Detection mirrors swapAlreadyBilled: a line_type='service' line whose description
+// starts with 'Rental extension'. The day count is that line's quantity, READ AT
+// SETTLEMENT TIME so any owner edit in the review editor is respected. Idempotent via
+// vd.extensionsApplied (invoice ids), so webhook retries / re-syncs never double-extend.
+function invoiceExtensionDays(businessId, invoiceId) {
+  if (!invoiceId) return 0;
+  try {
+    const rows = db.prepare(`
+      SELECT li.quantity AS q FROM invoice_line_items li
+      JOIN invoices i ON i.id = li.invoice_id
+      WHERE i.business_id = ? AND li.invoice_id = ?
+        AND li.line_type = 'service' AND li.description LIKE 'Rental extension%'
+    `).all(businessId, invoiceId);
+    return rows.reduce((s, r) => s + (Math.max(0, Math.round(Number(r.q))) || 0), 0);
+  } catch { return 0; /* invoices tables absent / not migrated */ }
+}
+
+function applyExtensionOnPayment(businessId, invoice) {
+  if (!invoice || !invoice.lead_id) return null;
+  // Only a settled invoice extends anything (advanceForInvoice is always post-payment,
+  // but guard so a future caller can't move a date off an unpaid invoice).
+  if (!(invoice.status === 'paid' || invoice.paid_at)) return null;
+  const extraDays = invoiceExtensionDays(businessId, invoice.id);
+  if (extraDays < 1) return null;   // not an extension invoice — base/swap/overage untouched
+
+  const lead = loadLead(businessId, invoice.lead_id);
+  if (!lead) return null;
+  const vd = parseVd(lead);
+  vd.extensionsApplied = Array.isArray(vd.extensionsApplied) ? vd.extensionsApplied : [];
+  if (vd.extensionsApplied.includes(invoice.id)) return null;   // already extended for this invoice
+
+  // Base the new pickup on the current pickup date (fall back to delivery + current
+  // duration). Mark applied even if we can't resolve a base date, so a paid extension
+  // never silently retries the log on every later settle event.
+  const inv = require('./inventoryService');
+  let basePickup = lead.pickup_date ? String(lead.pickup_date).slice(0, 10) : null;
+  if (!basePickup && lead.delivery_date) {
+    const curDays = inv.parseRentalDays(vd.rentalDuration) || 0;
+    if (curDays > 0) basePickup = inv.addDaysToISO(String(lead.delivery_date).slice(0, 10), curDays);
+  }
+  const at = nowIso();
+  vd.extensionsApplied.push(invoice.id);
+
+  if (basePickup) {
+    const newPickup = inv.addDaysToISO(basePickup, extraDays);
+    const curDays = inv.parseRentalDays(vd.rentalDuration);
+    if (curDays != null) vd.rentalDuration = `${curDays + extraDays} days`;
+    db.prepare('UPDATE leads SET pickup_date = ?, vertical_data = ?, updated_at = ? WHERE id = ?')
+      .run(newPickup, JSON.stringify(vd), at, lead.id);
+    lead.pickup_date = newPickup; lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
+    logActivity(lead.id, 'status_change', `Extension paid — pickup date extended ${extraDays} day(s) to ${newPickup}`);
+  } else {
+    db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(vd), at, lead.id);
+    lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
+    logActivity(lead.id, 'note_added', `Extension paid (${extraDays} day(s)) — set a pickup date to reflect the new rental end.`);
+  }
+  bumpCustomer(lead); emit(lead);
+  return { lead, extraDays, pickupDate: lead.pickup_date };
+}
+
 // Advance whatever job(s) an invoice settlement affects. A lead-linked invoice
 // advances that job; a customer-level invoice (lead_id null) advances the customer's
 // open job(s) awaiting money (pending_payment → booked, awaiting_final_payment →
@@ -674,6 +743,9 @@ function advanceForInvoice(businessId, invoice) {
   for (const leadId of targets) {
     try { advanceOnPayment(businessId, leadId); } catch (e) { console.error('[jobLifecycle] advanceForInvoice error:', e.message); }
   }
+  // A paid EXTENSION invoice also pushes the rental's pickup date out by its N days
+  // (scoped to extension-line invoices only; base/swap/overage are no-ops here).
+  try { applyExtensionOnPayment(businessId, invoice); } catch (e) { console.error('[jobLifecycle] applyExtensionOnPayment error:', e.message); }
 }
 
 // Whether a job may transition to 'completed' right now: gated on full payment.
@@ -690,6 +762,7 @@ module.exports = {
   recomputeLeadPaymentStatus,
   advanceOnPayment,
   advanceForInvoice,
+  applyExtensionOnPayment,
   advanceDueDeliveries,
   getOverageConfig,
   computeOverage,

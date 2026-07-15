@@ -1002,6 +1002,109 @@ router.post('/:id/cancel', requireAuth, (req, res) => {
   }
 });
 
+// GET /api/leads/:id/invoice-review — the pending call-driven DRAFT (Part 1) plus a
+// SERVER-COMPUTED extension inventory warning. This runs the overlapping-active-jobs
+// availability math, so it deliberately lives on the request/render path (hard auth,
+// web dashboard) and is NEVER called from the Twilio webhook. Read-only.
+router.get('/:id/invoice-review', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    let vd = {};
+    try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+    const pir = vd.pendingInvoiceReview || null;
+    if (!pir || !pir.invoiceId) {
+      return res.json({ pendingInvoiceReview: null, invoice: null, extensionWarning: null, extensionNeedsRate: vd.extensionNeedsRate || null });
+    }
+
+    const invoiceService = require('../services/invoiceService');
+    const invoice = invoiceService.getInvoice(businessId, pir.invoiceId) || null;
+
+    // Extension inventory warning: would keeping this size out the extra days collide
+    // with a later booking of the same size? The extra-days window is [pickup, pickup+N),
+    // and the size is short if no unit is free across it (same math as the booking modal).
+    let extensionWarning = null;
+    const extLine = invoice && Array.isArray(invoice.line_items)
+      ? invoice.line_items.find((li) => li.line_type === 'service' && /^Rental extension/i.test(li.description || ''))
+      : null;
+    const extraDays = extLine ? (Math.max(0, Math.round(Number(extLine.quantity))) || 0) : 0;
+    const size = pir.size || vd.dumpsterSize || null;
+    if (extraDays >= 1 && size && lead.pickup_date) {
+      try {
+        const inv = require('../services/inventoryService');
+        const basePickup = String(lead.pickup_date).slice(0, 10);
+        const newPickup = inv.addDaysToISO(basePickup, extraDays);
+        const avail = inv.getAvailabilityForSize(size, basePickup, newPickup, lead.id, businessId);
+        if (avail && avail.available <= 0) {
+          extensionWarning = {
+            size, extraDays, basePickup, newPickup,
+            booked: avail.booked, quantity: avail.quantity,
+            message: `Extending keeps a ${size} out ${extraDays} more day(s) (through ${newPickup}), but every ${size} is already committed to another job in that window. Approving may leave you short a unit — confirm before sending.`,
+          };
+        }
+      } catch (e) { console.error('[leads] extension warning failed:', e.message); }
+    }
+
+    res.json({ pendingInvoiceReview: pir, invoice, extensionWarning, extensionNeedsRate: vd.extensionNeedsRate || null });
+  } catch (err) {
+    console.error('GET /leads/:id/invoice-review error:', err);
+    res.status(500).json({ error: 'Failed to load invoice review' });
+  }
+});
+
+// POST /api/leads/:id/invoice-review/resolve — clear the pending draft-invoice marker
+// after the owner acts from the review surface. Body:
+//   { action: 'sent' }    → owner approved; the draft was delivered via the normal
+//                           /api/invoices/:id/send flow. Just clear the marker + log.
+//   { action: 'discard' } → dismiss a misclassified swap/extension: clear the marker,
+//                           delete the still-inert draft, and drop any needs-rate note.
+// Never sends anything itself (send goes through the existing endpoint) and never
+// auto-applies a change to the customer — it only resolves owner-review state. Hard auth.
+router.post('/:id/invoice-review/resolve', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    let vd = {};
+    try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+    const pir = vd.pendingInvoiceReview || null;
+    if (!pir) {
+      const cur = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+      return res.json({ lead: cur, resolved: false, alreadyResolved: true });
+    }
+
+    const now = new Date().toISOString();
+    const action = req.body && req.body.action === 'discard' ? 'discard' : 'sent';
+    if (action === 'discard') {
+      const invoiceId = pir.invoiceId;
+      delete vd.pendingInvoiceReview;
+      delete vd.extensionNeedsRate;   // dismissing the whole call-driven review
+      db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), now, lead.id);
+      // Remove the inert draft so it doesn't linger in the Invoices list.
+      try {
+        const invoiceService = require('../services/invoiceService');
+        const r = invoiceService.deleteInvoice(businessId, invoiceId);
+        if (r && r.ok) emitToBusiness(businessId, 'invoice_updated', { id: Number(invoiceId), deleted: true });
+      } catch (e) { console.error('[leads] discard draft delete failed:', e.message); }
+      logActivity(lead.id, 'note_added', 'Call-driven draft invoice discarded — not sent');
+    } else {
+      // 'sent': the delivery already happened via /invoices/:id/send — just clear the marker.
+      delete vd.pendingInvoiceReview;
+      db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), now, lead.id);
+      logActivity(lead.id, 'note_added', 'Call-driven draft invoice reviewed and sent');
+    }
+
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (updated.customer_id) recomputeCustomerStatus(updated.customer_id);
+    emitToBusiness(updated.business_id, 'lead_updated', updated);
+    res.json({ lead: updated, resolved: true, action });
+  } catch (err) {
+    console.error('POST /leads/:id/invoice-review/resolve error:', err);
+    res.status(500).json({ error: 'Failed to resolve invoice review' });
+  }
+});
+
 // DELETE /api/leads/:id
 router.delete('/:id', (req, res) => {
   try {

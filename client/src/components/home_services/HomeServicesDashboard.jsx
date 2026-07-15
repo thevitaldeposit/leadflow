@@ -305,6 +305,14 @@ function bookedAttentionReason(lead, vd, now) {
   // (2) Held reschedule request — booked schedule unchanged; owner decides.
   if (vd.rescheduleRequest) return 'Customer requested reschedule — approve?';
 
+  // (2b) Call-driven DRAFT invoice (swap / extension) held for owner review + send.
+  // The draft is inert until the owner reviews it in the real invoice editor.
+  if (vd.pendingInvoiceReview && vd.pendingInvoiceReview.invoiceId) {
+    const k = vd.pendingInvoiceReview.kind;
+    const what = k === 'swap_extension' ? 'Swap + extension' : k === 'extension' ? 'Extension' : 'Swap';
+    return `${what} invoice ready — review & send`;
+  }
+
   // (3) Pending-payment SALES nudge: booking initiated but unpaid by the next
   // business day. Nothing is reserved during pending_payment — this is about not
   // losing the deal, separate from inventory.
@@ -597,7 +605,7 @@ function CallButton({ lead, name }) {
 
 // Compact Action Queue row. Shows intent/critical badge, name + phone, the
 // operational reason it's in the queue, a time indicator, and call + dismiss.
-function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onCancel, onMissedCallClick }) {
+function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onCancel, onInvoiceReview, onDiscardReview, onMissedCallClick }) {
   const navigate = useNavigate();
   const isMissedCall = lead.call_type === 'missed_call';
   const isVoicemail = lead.call_type === 'voicemail';
@@ -607,6 +615,9 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onCa
   // A detected cancellation cue swaps in an explicit Confirm / Disregard decision
   // (see handleCancelDecision). Never auto-cancels — the owner decides.
   const isCancel = !!state.cancelRequested;
+  // A call-driven DRAFT invoice waiting to be reviewed: the primary action is Review
+  // (opens the real invoice editor), with a Discard to drop a misclassified draft.
+  const isInvoiceReview = !!state.invoiceReviewRequested;
   const name = getLeadName(lead);
   // Missed calls often have no name yet — fall back to the caller's number.
   const displayName = (isMissedCall && name === 'Unknown')
@@ -717,6 +728,28 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onCa
               className="p-1.5 rounded-lg text-muted hover:text-danger hover:bg-surface-2 transition-colors"
               title="Reject reschedule"
               aria-label="Reject reschedule"
+            >
+              <X size={14} />
+            </button>
+          </>
+        ) : isInvoiceReview ? (
+          <>
+            {/* Review opens the real invoice editor for the draft (edit price/lines,
+                see the extension inventory warning, then Approve & Send). Discard drops
+                a misclassified draft and clears the marker — nothing reaches the customer. */}
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onInvoiceReview(lead); }}
+              className="p-1.5 rounded-lg text-accent hover:bg-accent/10 transition-colors"
+              title="Review & send draft invoice"
+              aria-label="Review draft invoice"
+            >
+              <FileText size={15} />
+            </button>
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDiscardReview(lead); }}
+              className="p-1.5 rounded-lg text-muted hover:text-danger hover:bg-surface-2 transition-colors"
+              title="Discard draft (don't send)"
+              aria-label="Discard draft invoice"
             >
               <X size={14} />
             </button>
@@ -1426,6 +1459,31 @@ export default function HomeServicesDashboard() {
     }
   }, []);
 
+  // Open the call-driven draft in the real invoice editor (review mode). The editor
+  // shows the server-computed extension inventory warning and the Approve & Send /
+  // Discard actions; nothing reaches the customer until the owner approves + sends.
+  const handleInvoiceReview = useCallback((lead) => {
+    const vd = parseVerticalData(lead);
+    const invId = vd.pendingInvoiceReview && vd.pendingInvoiceReview.invoiceId;
+    if (!invId) return;
+    navigate(`/invoices/${invId}/edit?review=${lead.id}`);
+  }, [navigate]);
+
+  // Discard a misclassified swap/extension draft without sending — clears the marker
+  // (server also deletes the inert draft). Optimistically drop it from the queue.
+  const handleDiscardInvoiceReview = useCallback(async (lead) => {
+    const vd = parseVerticalData(lead);
+    const clearedVd = JSON.stringify({ ...vd, pendingInvoiceReview: null });
+    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, vertical_data: clearedVd } : l));
+    try {
+      const res = await api.resolveInvoiceReview(lead.id, 'discard');
+      if (res && res.lead) setLeads(prev => prev.map(l => l.id === res.lead.id ? res.lead : l));
+    } catch (err) {
+      console.error('Failed to discard invoice review', lead.id, err);
+      loadRef.current().catch(() => {}); // resync on failure
+    }
+  }, []);
+
   // Missed-call decision modal actions. A missed call is not a lead until the
   // owner explicitly acts on it here.
   // Create Lead: open the manual form prefilled with the caller's number; the
@@ -1713,6 +1771,8 @@ export default function HomeServicesDashboard() {
                   onDismiss={handleDismiss}
                   onReschedule={handleRescheduleDecision}
                   onCancel={handleCancelDecision}
+                  onInvoiceReview={handleInvoiceReview}
+                  onDiscardReview={handleDiscardInvoiceReview}
                   onMissedCallClick={setMissedCallModal}
                 />
               ))}
