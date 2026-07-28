@@ -101,6 +101,15 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action }),
     }),
+  // Owner set/changed the swap's delivery date on the review screen → server recomputes
+  // the swap line's remaining-days + price (pickup date stays fixed). Returns the new
+  // { swapDeliveryDate, days, amount, description, invoice }.
+  recomputeSwapDate: (leadId, swapDeliveryDate) =>
+    request(`/leads/${leadId}/invoice-review/recompute-swap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ swapDeliveryDate }),
+    }),
   // Customers — the unified person-level record (consolidates leads/opportunities)
   getCustomers: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

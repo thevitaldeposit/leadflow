@@ -21,6 +21,14 @@ const num = (v, f = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : f;
 };
+// The day before a YYYY-MM-DD date (UTC-anchored) — the latest a swap can be delivered and
+// still leave ≥1 rental day, used to cap the swap-delivery-date picker at pickup − 1.
+const isoMinus1 = (iso) => {
+  if (!iso) return undefined;
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+};
 
 // One editable line row. Amount is derived (qty × rate) for display; the server
 // recomputes it authoritatively on save.
@@ -53,8 +61,10 @@ export default function InvoiceEditorPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [reviewInfo, setReviewInfo] = useState(null); // { extensionWarning, extensionNeedsRate }
+  const [reviewInfo, setReviewInfo] = useState(null); // { extensionWarning, extensionNeedsRate, swapReview }
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [swapDate, setSwapDate] = useState(''); // owner-editable swap delivery date (review mode)
+  const [swapBusy, setSwapBusy] = useState(false);
   const [rates, setRates] = useState([]); // effective pricing rows for "add from rates"
   const [showRates, setShowRates] = useState(false);
   const [feeItems, setFeeItems] = useState([]); // delivery fee + surcharge items to add as lines
@@ -107,7 +117,11 @@ export default function InvoiceEditorPage() {
           if (reviewMode) {
             try {
               const ri = await api.getInvoiceReview(reviewLeadId);
-              if (active) setReviewInfo(ri);
+              if (active) {
+                setReviewInfo(ri);
+                // Seed the swap-delivery-date input from the server (stored date, else today).
+                if (ri?.swapReview?.swapDeliveryDate) setSwapDate(ri.swapReview.swapDeliveryDate);
+              }
             } catch { /* non-fatal — the banner just won't show the warning */ }
           }
         } else {
@@ -247,6 +261,27 @@ export default function InvoiceEditorPage() {
     }
   };
 
+  // Review mode — the owner set/changed the swap's delivery date. The server recomputes the
+  // swap line's remaining days + price (pickup date stays fixed) and rewrites that one line;
+  // we patch it into the editor locally so any other in-progress edits are preserved. The
+  // recomputed price is a starting point — the owner can still hand-adjust the rate below.
+  const recomputeSwap = async (date) => {
+    if (!date) return;
+    setSwapBusy(true); setError(null);
+    try {
+      const r = await api.recomputeSwapDate(reviewLeadId, date);
+      setLines((ls) => ls.map((l) => (/^Swap replacement/i.test(l.description || '')
+        ? { ...l, description: r.description, unit_rate: String(r.amount) }
+        : l)));
+      setReviewInfo((ri) => (ri ? { ...ri, swapReview: { ...ri.swapReview, swapDeliveryDate: r.swapDeliveryDate, days: r.days } } : ri));
+      setSwapDate(r.swapDeliveryDate);
+    } catch (e) {
+      setError(e.message || 'Could not recompute the swap price');
+    } finally {
+      setSwapBusy(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-accent border-t-transparent rounded-full" /></div>;
   }
@@ -272,7 +307,7 @@ export default function InvoiceEditorPage() {
           <p className="text-xs text-muted">
             This swap / extension invoice was drafted automatically and has <span className="font-semibold">not</span> been sent.
             Adjust the price or lines if needed, then <span className="font-semibold">Approve &amp; Send</span> to deliver it for
-            signature + payment — or Discard to drop it. To change delivery/pickup dates, use Edit Job Details on the job instead.
+            signature + payment — or Discard to drop it. The job's pickup date stays fixed (change it via Edit Job Details).
           </p>
           {reviewInfo?.extensionWarning && (
             <div className="flex items-start gap-2 bg-warning/10 border border-warning/30 rounded-lg px-3 py-2.5">
@@ -287,6 +322,25 @@ export default function InvoiceEditorPage() {
                 The customer also asked to extend {reviewInfo.extensionNeedsRate.extraDays} more day(s), but{' '}
                 {reviewInfo.extensionNeedsRate.size} has no day rate set — add one on the Pricing page to bill the extension.
               </p>
+            </div>
+          )}
+          {reviewInfo?.swapReview && (
+            <div className="flex flex-wrap items-center gap-2 bg-surface-2 border border-divider rounded-lg px-3 py-2.5">
+              <label className="text-xs font-semibold text-content">Swap delivery date</label>
+              <input
+                type="date"
+                value={swapDate}
+                max={isoMinus1(reviewInfo.swapReview.pickupDate)}
+                disabled={swapBusy}
+                onChange={(e) => { setSwapDate(e.target.value); recomputeSwap(e.target.value); }}
+                className="text-sm border border-divider rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
+              />
+              <span className="text-xs text-muted">
+                {reviewInfo.swapReview.days != null
+                  ? `${reviewInfo.swapReview.days} day${reviewInfo.swapReview.days === 1 ? '' : 's'} left — pickup stays ${reviewInfo.swapReview.pickupDate}`
+                  : `pickup ${reviewInfo.swapReview.pickupDate}`}
+                {swapBusy ? ' · updating…' : ''}
+              </span>
             </div>
           )}
         </div>

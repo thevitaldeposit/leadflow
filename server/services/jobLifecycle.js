@@ -34,17 +34,42 @@ function localTodayStr() {
 function parseVd(lead) {
   try { return lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { return {}; }
 }
-// Days a swap replacement stays out: today (the swap date) → the job's pickup date,
-// min 1. Falls back to the configured rental duration when there's no pickup date.
-function swapWindowDays(lead) {
+// Whole-day difference between two YYYY-MM-DD dates, both anchored at UTC midnight —
+// the SAME convention rentalDaysFromLead uses for the base rental (so a swap and the
+// base rental count days identically). Returns null on unparseable input. Anchoring
+// both endpoints the same way is what fixes the old local-vs-UTC off-by-one.
+function daysBetweenISO(startISO, endISO) {
+  if (!startISO || !endISO) return null;
+  const a = new Date(`${String(startISO).slice(0, 10)}T00:00:00Z`);
+  const b = new Date(`${String(endISO).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+}
+
+// Today's calendar date (YYYY-MM-DD) in the BUSINESS's timezone — the correct default
+// for a swap's delivery date. Server-local (localTodayStr) can be a day ahead of the
+// business (e.g. a UTC host after the business's local midnight), which is exactly what
+// mispriced a swap by a day; resolve the business day instead.
+function businessLocalToday(businessId) {
+  try {
+    const { getTimezone } = require('./settingsService');
+    const { localDateInTimeZone } = require('./inventoryService');
+    return localDateInTimeZone(new Date(), getTimezone(businessId));
+  } catch { return localTodayStr(); }
+}
+
+// Days a swap replacement stays out: its delivery date (the swap-out day) → the job's
+// pickup date, min 1 — the days REMAINING in the original rental (a swap never extends
+// it, so the pickup date is the fixed endpoint). Uses the base-rental day convention via
+// daysBetweenISO. The caller may pass an explicit swap delivery date (owner-set on the
+// review screen); when omitted, defaults to server-local today (the dump-ticket path).
+// Falls back to the configured rental duration when there's no pickup date.
+function swapWindowDays(lead, swapDeliveryDate = null) {
   const pd = lead && lead.pickup_date;
+  const start = swapDeliveryDate || localTodayStr();
   if (pd) {
-    const a = new Date(`${localTodayStr()}T00:00:00Z`);
-    const b = new Date(`${String(pd).slice(0, 10)}T00:00:00Z`);
-    if (!Number.isNaN(a.getTime()) && !Number.isNaN(b.getTime())) {
-      const days = Math.round((b.getTime() - a.getTime()) / 86400000);
-      if (days >= 1) return days;
-    }
+    const days = daysBetweenISO(start, pd);
+    if (days != null && days >= 1) return days;
   }
   try { return require('./pricingService').rentalDaysFromLead(lead); } catch { return 1; }
 }
@@ -597,8 +622,11 @@ function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { swap = null
   const lineItems = [];
   const parts = [];
 
+  // The swap's delivery date defaults to the business's today; the owner can retune it on
+  // the review screen (→ recompute-swap route), which re-derives days + price from here.
+  const swapDeliveryDate = wantSwap ? businessLocalToday(businessId) : null;
   if (wantSwap) {
-    const days = swapWindowDays(lead);
+    const days = swapWindowDays(lead, swapDeliveryDate);
     const sw = pricingService.resolveSwapPrice(businessId, { size: jobSize, days, customer });
     if (sw && sw.mode !== 'off' && sw.amount != null && sw.amount > 0) {
       lineItems.push({
@@ -650,7 +678,7 @@ function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { swap = null
       line_items: lineItems,
     });
     const at = nowIso();
-    vd.pendingInvoiceReview = { invoiceId: inv.id, kind, amount, size: jobSize, parts, requestedAt: at };
+    vd.pendingInvoiceReview = { invoiceId: inv.id, kind, amount, size: jobSize, parts, requestedAt: at, swapDeliveryDate: parts.includes('swap') ? swapDeliveryDate : null };
     if (extensionNeedsRate) vd.extensionNeedsRate = { size: jobSize, extraDays: extraDaysN, at };
     db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), at, lead.id);
     lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
@@ -839,4 +867,7 @@ module.exports = {
   ensureBaseInvoice,
   ensureCallDrivenReviewInvoice,
   canComplete,
+  daysBetweenISO,
+  businessLocalToday,
+  swapWindowDays,
 };

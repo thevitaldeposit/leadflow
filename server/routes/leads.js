@@ -1046,7 +1046,26 @@ router.get('/:id/invoice-review', requireAuth, (req, res) => {
       } catch (e) { console.error('[leads] extension warning failed:', e.message); }
     }
 
-    res.json({ pendingInvoiceReview: pir, invoice, extensionWarning, extensionNeedsRate: vd.extensionNeedsRate || null });
+    // Swap delivery date (owner-editable on the review screen): the swap window = the
+    // ORIGINAL pickup date − this date (days remaining in the rental; a swap never extends
+    // it). Default to the stored date, else the business's today. Only present when the
+    // draft actually carries a swap line, so a pure-extension draft shows no control.
+    let swapReview = null;
+    const swapLine = invoice && Array.isArray(invoice.line_items)
+      ? invoice.line_items.find((li) => li.line_type === 'service' && /^Swap replacement/i.test(li.description || ''))
+      : null;
+    if (swapLine && lead.pickup_date) {
+      const swapDeliveryDate = pir.swapDeliveryDate || jobLifecycle.businessLocalToday(businessId);
+      const days = jobLifecycle.daysBetweenISO(swapDeliveryDate, lead.pickup_date);
+      swapReview = {
+        size: pir.size || vd.dumpsterSize || null,
+        swapDeliveryDate,
+        pickupDate: String(lead.pickup_date).slice(0, 10),
+        days: days != null && days >= 1 ? days : null,
+      };
+    }
+
+    res.json({ pendingInvoiceReview: pir, invoice, extensionWarning, extensionNeedsRate: vd.extensionNeedsRate || null, swapReview });
   } catch (err) {
     console.error('GET /leads/:id/invoice-review error:', err);
     res.status(500).json({ error: 'Failed to load invoice review' });
@@ -1102,6 +1121,81 @@ router.post('/:id/invoice-review/resolve', requireAuth, (req, res) => {
   } catch (err) {
     console.error('POST /leads/:id/invoice-review/resolve error:', err);
     res.status(500).json({ error: 'Failed to resolve invoice review' });
+  }
+});
+
+// POST /api/leads/:id/invoice-review/recompute-swap — the owner set/changed the swap's
+// delivery date on the review screen. Recompute the swap line's day count (ORIGINAL pickup
+// − delivery date = days remaining in the rental) and its price via the existing
+// resolveSwapPrice, rewrite ONLY that line on the draft, and remember the date on the
+// review marker. The pickup date is NEVER moved (a swap doesn't extend the rental). Never
+// recomputes a signed/paid invoice (respects the invoice lock). Body: { swapDeliveryDate }.
+// Hard auth, web dashboard only.
+router.post('/:id/invoice-review/recompute-swap', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    let vd = {};
+    try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+    const pir = vd.pendingInvoiceReview || null;
+    if (!pir || !pir.invoiceId) return res.status(400).json({ error: 'No pending invoice review' });
+    if (!lead.pickup_date) return res.status(400).json({ error: 'Job has no pickup date to measure the swap window against' });
+
+    const swapDeliveryDate = typeof (req.body && req.body.swapDeliveryDate) === 'string' ? req.body.swapDeliveryDate.slice(0, 10) : null;
+    if (!swapDeliveryDate || !/^\d{4}-\d{2}-\d{2}$/.test(swapDeliveryDate)) {
+      return res.status(400).json({ error: 'swapDeliveryDate must be a YYYY-MM-DD date' });
+    }
+    const pickup = String(lead.pickup_date).slice(0, 10);
+    const days = jobLifecycle.daysBetweenISO(swapDeliveryDate, pickup);
+    if (days == null || days < 1) {
+      return res.status(400).json({ error: 'The swap delivery date must be before the pickup date.' });
+    }
+
+    const invoiceService = require('../services/invoiceService');
+    const invoice = invoiceService.getInvoice(businessId, pir.invoiceId);
+    if (!invoice) return res.status(404).json({ error: 'Draft invoice not found' });
+    if (invoice.status === 'signed' || invoice.status === 'paid') {
+      return res.status(409).json({ error: 'This invoice is already signed or paid and can no longer be recomputed.' });
+    }
+    const items = Array.isArray(invoice.line_items) ? invoice.line_items : [];
+    const swapIdx = items.findIndex((li) => li.line_type === 'service' && /^Swap replacement/i.test(li.description || ''));
+    if (swapIdx < 0) return res.status(400).json({ error: 'This invoice has no swap line to recompute' });
+
+    const size = pir.size || vd.dumpsterSize || null;
+    const customer = lead.customer_id
+      ? db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(lead.customer_id, businessId)
+      : null;
+    const pricingService = require('../services/pricingService');
+    const sw = pricingService.resolveSwapPrice(businessId, { size, days, customer });
+    if (!sw || sw.mode === 'off' || sw.amount == null) {
+      return res.status(400).json({ error: `No swap price is configured for ${size || 'this size'}.` });
+    }
+    const description = `Swap replacement — ${size} (${days} day${days === 1 ? '' : 's'})`;
+
+    // Rewrite ONLY the swap line (new remaining-days label + recomputed price); every other
+    // line is passed through untouched. updateInvoice recomputes the totals authoritatively.
+    const nextItems = items.map((li, i) => (i === swapIdx
+      ? { ...li, description, quantity: 1, unit_rate: sw.amount }
+      : li)).map((li) => ({
+      description: li.description, line_type: li.line_type, quantity: li.quantity,
+      unit: li.unit || null, unit_rate: li.unit_rate, service_key: li.service_key || null,
+    }));
+    const upd = invoiceService.updateInvoice(businessId, pir.invoiceId, { line_items: nextItems });
+    if (upd.error) return res.status(upd.error === 'locked' ? 409 : 400).json({ error: upd.error });
+
+    // Remember the chosen date on the review marker + refresh the shown draft amount.
+    const now = new Date().toISOString();
+    pir.swapDeliveryDate = swapDeliveryDate;
+    if (upd.invoice && upd.invoice.total != null) pir.amount = upd.invoice.total;
+    vd.pendingInvoiceReview = pir;
+    db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), now, lead.id);
+    try { emitToBusiness(businessId, 'invoice_updated', { id: Number(pir.invoiceId) }); } catch { /* non-fatal */ }
+
+    res.json({ ok: true, swapDeliveryDate, days, amount: sw.amount, description, invoice: upd.invoice });
+  } catch (err) {
+    console.error('POST /leads/:id/invoice-review/recompute-swap error:', err);
+    res.status(500).json({ error: 'Failed to recompute swap' });
   }
 });
 
