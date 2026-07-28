@@ -258,12 +258,22 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   const overage = weightTons != null && weightTons !== '' ? computeOverage(businessId, weightTons, { size }) : null;
 
   // Swap-safe units-out accounting. Default: one dumpster comes back per ticket.
+  // A PAID call-driven swap leaves an outstanding swap-out marker (vd.pendingSwapOuts, a
+  // counter). The FIRST ordinary ticket after it is the swap-out haul — the original unit
+  // pulled during the swap — so it keeps a unit out (the replacement) and consumes one
+  // marker, exactly like the manual `swap` checkbox does. The job then completes only when
+  // the replacement is finally picked up (the next ordinary ticket).
+  const pendingSwapOuts = Math.max(0, Math.round(Number(vd.pendingSwapOuts) || 0));
   const before = lead.units_out == null ? 1 : lead.units_out;
   let after;
+  let consumedSwapOut = false;
   if (unitsRemaining != null && Number.isFinite(Number(unitsRemaining))) {
     after = Math.max(0, Math.round(Number(unitsRemaining)));   // explicit owner/OCR override
   } else if (swap) {
-    after = before;                                            // replacement dropped → a unit is still out
+    after = before;                                            // manual swap checkbox → replacement dropped, a unit is still out
+  } else if (pendingSwapOuts > 0) {
+    after = before;                                            // paid call-driven swap-out haul → replacement still out
+    consumedSwapOut = true;
   } else {
     after = Math.max(0, before - 1);                           // final pickup for this unit
   }
@@ -353,12 +363,17 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     swap: !!swap,
     swapCharge: swapCharge != null ? swapCharge : null,
     swapAlreadyBilled: swapPreBilled,
+    swapOut: consumedSwapOut,   // this haul was the original unit pulled during a paid swap
     unitsOutAfter: after,
     invoiceId: overageInvoiceId,
   };
   vd.dumpTickets = Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [];
   vd.dumpTickets.push(ticket);
   vd.overageNeedsRate = ticket.overageNeedsRate || ticket.overageNeedsAllowance || vd.overageNeedsRate || false;
+  // Consume one outstanding swap-out marker: the replacement is still on site, so units_out
+  // was left unchanged above; drop the counter so the NEXT ordinary ticket is the real
+  // final pickup that completes the job.
+  if (consumedSwapOut) vd.pendingSwapOuts = pendingSwapOuts - 1;
 
   db.prepare('UPDATE leads SET units_out = ?, vertical_data = ?, updated_at = ? WHERE id = ?')
     .run(after, JSON.stringify(vd), at, lead.id);
@@ -370,7 +385,7 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     : '';
   const swapNote = swap
     ? (swapPreBilled ? ' · swap-out, unit still on site (swap already billed from the call)' : ' · swap-out, unit still on site')
-    : '';
+    : (consumedSwapOut ? ' · swap-out haul (paid swap) — replacement still on site' : '');
   logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${swapNote}${oStr}`);
 
   // Advance only when the LAST unit is back (swap-safe). Completion is gated on payment.
@@ -722,6 +737,56 @@ function applyExtensionOnPayment(businessId, invoice) {
   return { lead, extraDays, pickupDate: lead.pickup_date };
 }
 
+// ── Swap payment hook: a PAID swap invoice registers an outstanding swap-out ──────
+// When an invoice carrying a call-driven SWAP line settles, record on the booked lead that
+// one replacement dumpster is still deployed — vd.pendingSwapOuts, a COUNTER so two paid
+// swaps stack. The next ordinary dump ticket reads that marker and treats itself as the
+// swap-out haul (keeps a unit out instead of completing the job — see recordDumpTicket).
+// Payment is the trigger: a swap is only authorized once paid (pay-in-advance). Scoped
+// STRICTLY to invoices carrying a swap line, so base/extension/overage payments are no-ops.
+//
+// Detection mirrors swapAlreadyBilled / applyExtensionOnPayment: a line_type='service' line
+// whose description starts with 'Swap replacement'. The count is the sum of those lines'
+// quantities (normally 1 each). Idempotent via vd.swapOutsApplied (invoice ids), so webhook
+// retries / re-syncs never double-count a swap.
+function invoiceSwapCount(businessId, invoiceId) {
+  if (!invoiceId) return 0;
+  try {
+    const rows = db.prepare(`
+      SELECT li.quantity AS q FROM invoice_line_items li
+      JOIN invoices i ON i.id = li.invoice_id
+      WHERE i.business_id = ? AND li.invoice_id = ?
+        AND li.line_type = 'service' AND li.description LIKE 'Swap replacement%'
+    `).all(businessId, invoiceId);
+    return rows.reduce((s, r) => s + (Math.max(0, Math.round(Number(r.q))) || 0), 0);
+  } catch { return 0; /* invoices tables absent / not migrated */ }
+}
+
+function applySwapOutOnPayment(businessId, invoice) {
+  if (!invoice || !invoice.lead_id) return null;
+  // Only a settled invoice arms the marker (advanceForInvoice is always post-payment, but
+  // guard so a future caller can't arm it off an unpaid invoice).
+  if (!(invoice.status === 'paid' || invoice.paid_at)) return null;
+  const swaps = invoiceSwapCount(businessId, invoice.id);
+  if (swaps < 1) return null;   // not a swap invoice — base/extension/overage untouched
+
+  const lead = loadLead(businessId, invoice.lead_id);
+  if (!lead) return null;
+  const vd = parseVd(lead);
+  vd.swapOutsApplied = Array.isArray(vd.swapOutsApplied) ? vd.swapOutsApplied : [];
+  if (vd.swapOutsApplied.includes(invoice.id)) return null;   // already registered for this invoice
+
+  const at = nowIso();
+  vd.pendingSwapOuts = Math.max(0, Math.round(Number(vd.pendingSwapOuts) || 0)) + swaps;
+  vd.swapOutsApplied.push(invoice.id);
+  db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(vd), at, lead.id);
+  lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
+  logActivity(lead.id, 'status_change', `Swap paid — replacement dumpster still deployed; job stays open until it's picked up${swaps > 1 ? ` (×${swaps})` : ''}`);
+  bumpCustomer(lead); emit(lead);
+  return { lead, swaps, pendingSwapOuts: vd.pendingSwapOuts };
+}
+
 // Advance whatever job(s) an invoice settlement affects. A lead-linked invoice
 // advances that job; a customer-level invoice (lead_id null) advances the customer's
 // open job(s) awaiting money (pending_payment → booked, awaiting_final_payment →
@@ -746,6 +811,9 @@ function advanceForInvoice(businessId, invoice) {
   // A paid EXTENSION invoice also pushes the rental's pickup date out by its N days
   // (scoped to extension-line invoices only; base/swap/overage are no-ops here).
   try { applyExtensionOnPayment(businessId, invoice); } catch (e) { console.error('[jobLifecycle] applyExtensionOnPayment error:', e.message); }
+  // A paid SWAP invoice arms an outstanding swap-out so the next dump ticket keeps the
+  // replacement unit out instead of completing the job (scoped to swap-line invoices only).
+  try { applySwapOutOnPayment(businessId, invoice); } catch (e) { console.error('[jobLifecycle] applySwapOutOnPayment error:', e.message); }
 }
 
 // Whether a job may transition to 'completed' right now: gated on full payment.
@@ -763,6 +831,7 @@ module.exports = {
   advanceOnPayment,
   advanceForInvoice,
   applyExtensionOnPayment,
+  applySwapOutOnPayment,
   advanceDueDeliveries,
   getOverageConfig,
   computeOverage,
