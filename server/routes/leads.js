@@ -1050,6 +1050,31 @@ router.post('/:id/cancel', requireAuth, (req, res) => {
   }
 });
 
+// Extension inventory warning: would keeping this size out `extraDays` more days collide
+// with a later booking of the same size? The extra-days window is [pickup, pickup+N), and
+// the size is short if no unit is free across it (same overlapping-active-jobs math the
+// booking modal uses). Returns the warning object or null. Shared by the review GET and the
+// extension recompute route so BOTH report the same conflict for a given extra-days value.
+// Read-only availability math — never mutates anything.
+function computeExtensionWarning(businessId, lead, size, extraDays) {
+  const n = Math.max(0, Math.round(Number(extraDays)) || 0);
+  if (n < 1 || !size || !lead || !lead.pickup_date) return null;
+  try {
+    const inv = require('../services/inventoryService');
+    const basePickup = String(lead.pickup_date).slice(0, 10);
+    const newPickup = inv.addDaysToISO(basePickup, n);
+    const avail = inv.getAvailabilityForSize(size, basePickup, newPickup, lead.id, businessId);
+    if (avail && avail.available <= 0) {
+      return {
+        size, extraDays: n, basePickup, newPickup,
+        booked: avail.booked, quantity: avail.quantity,
+        message: `Extending keeps a ${size} out ${n} more day(s) (through ${newPickup}), but every ${size} is already committed to another job in that window. Approving may leave you short a unit — confirm before sending.`,
+      };
+    }
+  } catch (e) { console.error('[leads] extension warning failed:', e.message); }
+  return null;
+}
+
 // GET /api/leads/:id/invoice-review — the pending call-driven DRAFT (Part 1) plus a
 // SERVER-COMPUTED extension inventory warning. This runs the overlapping-active-jobs
 // availability math, so it deliberately lives on the request/render path (hard auth,
@@ -1069,29 +1094,29 @@ router.get('/:id/invoice-review', requireAuth, (req, res) => {
     const invoiceService = require('../services/invoiceService');
     const invoice = invoiceService.getInvoice(businessId, pir.invoiceId) || null;
 
-    // Extension inventory warning: would keeping this size out the extra days collide
-    // with a later booking of the same size? The extra-days window is [pickup, pickup+N),
-    // and the size is short if no unit is free across it (same math as the booking modal).
-    let extensionWarning = null;
+    // Extension inventory warning + the owner's editable extra-days control. The current
+    // extra-days = the extension line's quantity (0 when the draft has no extension line yet).
     const extLine = invoice && Array.isArray(invoice.line_items)
       ? invoice.line_items.find((li) => li.line_type === 'service' && /^Rental extension/i.test(li.description || ''))
       : null;
     const extraDays = extLine ? (Math.max(0, Math.round(Number(extLine.quantity))) || 0) : 0;
     const size = pir.size || vd.dumpsterSize || null;
-    if (extraDays >= 1 && size && lead.pickup_date) {
-      try {
-        const inv = require('../services/inventoryService');
-        const basePickup = String(lead.pickup_date).slice(0, 10);
-        const newPickup = inv.addDaysToISO(basePickup, extraDays);
-        const avail = inv.getAvailabilityForSize(size, basePickup, newPickup, lead.id, businessId);
-        if (avail && avail.available <= 0) {
-          extensionWarning = {
-            size, extraDays, basePickup, newPickup,
-            booked: avail.booked, quantity: avail.quantity,
-            message: `Extending keeps a ${size} out ${extraDays} more day(s) (through ${newPickup}), but every ${size} is already committed to another job in that window. Approving may leave you short a unit — confirm before sending.`,
-          };
-        }
-      } catch (e) { console.error('[leads] extension warning failed:', e.message); }
+    const extensionWarning = computeExtensionWarning(businessId, lead, size, extraDays);
+
+    // Extension review control: the size's day rate + the current extra-days so the owner can
+    // set/adjust the extension on the review screen. Present whenever a size resolves — even a
+    // swap-only draft, so the owner can ADD an extension here. needsRate → the size has no day
+    // rate configured yet (the owner must add one on the Pricing page before it can be billed).
+    let extensionReview = null;
+    if (size) {
+      const pricingService = require('../services/pricingService');
+      const probe = pricingService.resolveExtensionPrice(businessId, { size, extraDays: Math.max(1, extraDays || 1) });
+      extensionReview = {
+        size, extraDays,
+        dayRate: probe.needsRate ? null : probe.dayRate,
+        needsRate: !!probe.needsRate,
+        pickupDate: lead.pickup_date ? String(lead.pickup_date).slice(0, 10) : null,
+      };
     }
 
     // Swap delivery date (owner-editable on the review screen): the swap window = the
@@ -1113,7 +1138,7 @@ router.get('/:id/invoice-review', requireAuth, (req, res) => {
       };
     }
 
-    res.json({ pendingInvoiceReview: pir, invoice, extensionWarning, extensionNeedsRate: vd.extensionNeedsRate || null, swapReview });
+    res.json({ pendingInvoiceReview: pir, invoice, extensionWarning, extensionReview, extensionNeedsRate: vd.extensionNeedsRate || null, swapReview });
   } catch (err) {
     console.error('GET /leads/:id/invoice-review error:', err);
     res.status(500).json({ error: 'Failed to load invoice review' });
@@ -1244,6 +1269,119 @@ router.post('/:id/invoice-review/recompute-swap', requireAuth, (req, res) => {
   } catch (err) {
     console.error('POST /leads/:id/invoice-review/recompute-swap error:', err);
     res.status(500).json({ error: 'Failed to recompute swap' });
+  }
+});
+
+// POST /api/leads/:id/invoice-review/recompute-extension — the owner set/changed the extension's
+// EXTRA DAYS on the review screen. Reprice via resolveExtensionPrice (extraDays × the size's day
+// rate) and rewrite ONLY the extension line on the draft (swap + every other line untouched):
+//   • extraDays >= 1 and the size has a day rate → add the priced extension line, or update it in
+//     place; quantity = extraDays so the paid-extension pickup hook advances by exactly that many.
+//   • extraDays === 0 → remove the extension line entirely.
+//   • the size has no day rate → remove any extension line and flag needs-rate (never invent a
+//     price — same deliberate block the create path uses).
+// The pickup_date is NEVER moved here — it advances only when the extension invoice is PAID
+// (applyExtensionOnPayment reads the settled line's quantity). Never recomputes a signed/paid
+// invoice (respects the invoice lock → 409). Body: { extraDays }. Hard auth, web dashboard only.
+router.post('/:id/invoice-review/recompute-extension', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    let vd = {};
+    try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+    const pir = vd.pendingInvoiceReview || null;
+    if (!pir || !pir.invoiceId) return res.status(400).json({ error: 'No pending invoice review' });
+
+    const rawDays = Number(req.body && req.body.extraDays);
+    if (!Number.isFinite(rawDays) || rawDays < 0) {
+      return res.status(400).json({ error: 'extraDays must be a number >= 0' });
+    }
+    const extraDays = Math.max(0, Math.round(rawDays));
+
+    const invoiceService = require('../services/invoiceService');
+    const invoice = invoiceService.getInvoice(businessId, pir.invoiceId);
+    if (!invoice) return res.status(404).json({ error: 'Draft invoice not found' });
+    if (invoice.status === 'signed' || invoice.status === 'paid') {
+      return res.status(409).json({ error: 'This invoice is already signed or paid and can no longer be recomputed.' });
+    }
+    const items = Array.isArray(invoice.line_items) ? invoice.line_items : [];
+    const extIdx = items.findIndex((li) => li.line_type === 'service' && /^Rental extension/i.test(li.description || ''));
+
+    const size = pir.size || vd.dumpsterSize || null;
+    if (extraDays >= 1 && !size) {
+      return res.status(400).json({ error: 'This job has no dumpster size to price an extension against.' });
+    }
+
+    // Canonical passthrough shape updateInvoice expects (matches recompute-swap): every line
+    // other than the extension is handed back verbatim so nothing else on the draft moves.
+    const canon = (li) => ({
+      description: li.description, line_type: li.line_type, quantity: li.quantity,
+      unit: li.unit || null, unit_rate: li.unit_rate, service_key: li.service_key || null,
+    });
+
+    let nextItems;
+    let priced = null;
+    let needsRate = false;
+    let description = null;
+    if (extraDays === 0) {
+      // Zero extra days → drop the extension line entirely; clear any needs-rate note.
+      nextItems = items.filter((_, i) => i !== extIdx).map(canon);
+      delete vd.extensionNeedsRate;
+    } else {
+      const pricingService = require('../services/pricingService');
+      const ext = pricingService.resolveExtensionPrice(businessId, { size, extraDays });
+      if (ext.needsRate || ext.dayRate == null || ext.amount == null) {
+        // No day rate for this size — never invent a price. Drop any priced line + flag needs-rate.
+        needsRate = true;
+        nextItems = items.filter((_, i) => i !== extIdx).map(canon);
+        vd.extensionNeedsRate = { size, extraDays, at: new Date().toISOString() };
+      } else {
+        priced = ext;
+        // Keep the 'Rental extension' prefix (applyExtensionOnPayment matches it) and
+        // quantity = extraDays (that hook reads it at settlement) so pickup advances by N.
+        description = `Rental extension — ${extraDays} extra day${extraDays === 1 ? '' : 's'}${size ? ` (${size})` : ''}`;
+        const extLine = { description, line_type: 'service', quantity: extraDays, unit: 'day', unit_rate: ext.dayRate, service_key: null };
+        nextItems = extIdx >= 0
+          ? items.map((li, i) => (i === extIdx ? extLine : canon(li)))
+          : [...items.map(canon), extLine];
+        delete vd.extensionNeedsRate;
+      }
+    }
+
+    const upd = invoiceService.updateInvoice(businessId, pir.invoiceId, { line_items: nextItems });
+    if (upd.error) return res.status(upd.error === 'locked' ? 409 : 400).json({ error: upd.error });
+
+    // Keep the review marker honest: refresh the amount and re-derive kind/parts from the
+    // resulting lines (swap-only, extension-only, or both) so the Action Queue label matches.
+    const finalItems = (upd.invoice && Array.isArray(upd.invoice.line_items)) ? upd.invoice.line_items : nextItems;
+    const hasSwap = finalItems.some((li) => li.line_type === 'service' && /^Swap replacement/i.test(li.description || ''));
+    const hasExt = finalItems.some((li) => li.line_type === 'service' && /^Rental extension/i.test(li.description || ''));
+    const parts = [...(hasSwap ? ['swap'] : []), ...(hasExt ? ['extension'] : [])];
+    pir.parts = parts;
+    pir.kind = parts.length === 2 ? 'swap_extension' : (parts[0] || pir.kind || 'extension');
+    if (upd.invoice && upd.invoice.total != null) pir.amount = upd.invoice.total;
+    vd.pendingInvoiceReview = pir;
+    const now = new Date().toISOString();
+    db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), now, lead.id);
+    try { emitToBusiness(businessId, 'invoice_updated', { id: Number(pir.invoiceId) }); } catch { /* non-fatal */ }
+    try { emitToBusiness(businessId, 'lead_updated', db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(lead.id, businessId)); } catch { /* non-fatal */ }
+
+    const extensionWarning = computeExtensionWarning(businessId, lead, size, extraDays);
+    res.json({
+      ok: true,
+      extraDays,
+      removed: extraDays === 0,
+      needsRate,
+      amount: priced ? priced.amount : null,
+      dayRate: priced ? priced.dayRate : null,
+      description,
+      extensionWarning,
+      invoice: upd.invoice,
+    });
+  } catch (err) {
+    console.error('POST /leads/:id/invoice-review/recompute-extension error:', err);
+    res.status(500).json({ error: 'Failed to recompute extension' });
   }
 });
 

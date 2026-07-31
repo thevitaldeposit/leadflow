@@ -110,6 +110,16 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ swapDeliveryDate }),
     }),
+  // Owner set/changed the extension's extra days on the review screen → server reprices the
+  // extension line (extraDays × the size's day rate; pickup advances only on payment). Days 0
+  // removes the line; a size with no day rate returns { needsRate }. Returns
+  // { extraDays, removed, needsRate, amount, dayRate, description, extensionWarning, invoice }.
+  recomputeExtensionDays: (leadId, extraDays) =>
+    request(`/leads/${leadId}/invoice-review/recompute-extension`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ extraDays }),
+    }),
   // Customers — the unified person-level record (consolidates leads/opportunities)
   getCustomers: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

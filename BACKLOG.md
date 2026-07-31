@@ -9,6 +9,7 @@
 - [x] Swap Fix A — paid swap keeps job open until replacement pickup (no premature completion / orphaned inquiry)
 - [x] Swap Fix B — correct swap duration (tz-safe day count) + editable swap delivery date on review screen
 - [x] Review-flow UX — review item now inserts into the Action Queue **live** (upsert on `lead_updated`, no manual refresh); rows show the linked customer's **real name** (server-resolved via `customer_id`, plain lookup); in-row **Review** is the obvious primary action (whole card opens the editor, keeps Discard); **Add from rates** fills the real per-size price from `pricing_config` (not the NULL legacy `unit_price`)
+- [x] Editable extension on review page — owner sets/edits the extension's **extra days** on the review screen and the extension line **auto-prices** via `resolveExtensionPrice` (extra days × the size's `day_rate`); days > 0 adds the line (or edits it in place), 0 removes it, no `day_rate` shows the needs-rate note; quantity stays = extra days so the paid-extension pickup hook advances by exactly that many; server `recompute-extension` route mirrors `recompute-swap` (rewrites only the extension line, refuses signed/paid). Even a swap-only draft can add an extension here.
 
 ---
 

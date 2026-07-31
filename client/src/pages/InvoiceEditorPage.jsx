@@ -65,6 +65,8 @@ export default function InvoiceEditorPage() {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [swapDate, setSwapDate] = useState(''); // owner-editable swap delivery date (review mode)
   const [swapBusy, setSwapBusy] = useState(false);
+  const [extDays, setExtDays] = useState('0'); // owner-editable extension extra-days (review mode)
+  const [extBusy, setExtBusy] = useState(false);
   const [rates, setRates] = useState([]); // effective pricing rows for "add from rates"
   const [showRates, setShowRates] = useState(false);
   const [feeItems, setFeeItems] = useState([]); // delivery fee + surcharge items to add as lines
@@ -121,6 +123,8 @@ export default function InvoiceEditorPage() {
                 setReviewInfo(ri);
                 // Seed the swap-delivery-date input from the server (stored date, else today).
                 if (ri?.swapReview?.swapDeliveryDate) setSwapDate(ri.swapReview.swapDeliveryDate);
+                // Seed the extension extra-days input (the extension line's current quantity, 0 if none).
+                if (ri?.extensionReview) setExtDays(String(ri.extensionReview.extraDays ?? 0));
               }
             } catch { /* non-fatal — the banner just won't show the warning */ }
           }
@@ -282,6 +286,53 @@ export default function InvoiceEditorPage() {
     }
   };
 
+  // Review mode — the owner set/changed the extension's EXTRA DAYS. The server reprices the
+  // extension line (extraDays × the size's day rate) and rewrites only that line; we patch it
+  // into the editor locally so other in-progress edits are preserved. Setting days > 0 adds the
+  // line (or updates it in place), 0 removes it, and a size with no day rate returns needsRate
+  // (no priced line). Recomputes on blur / Enter — a free-typed number shouldn't reprice on every
+  // keystroke. The recomputed rate is a starting point; the owner can still hand-adjust it below.
+  const EXT_RE = /^Rental extension/i;
+  const recomputeExtension = async (raw) => {
+    const n = Math.max(0, Math.round(Number(raw)) || 0);
+    setExtBusy(true); setError(null);
+    try {
+      const r = await api.recomputeExtensionDays(reviewLeadId, n);
+      setLines((ls) => {
+        if (r.removed || r.needsRate) {
+          // No priced line: drop the extension line, keeping at least one editable row.
+          const next = ls.filter((l) => !EXT_RE.test(l.description || ''));
+          return next.length ? next : [emptyLine()];
+        }
+        // Priced: update the existing extension line in place, or append a new (locked) one.
+        // quantity = extra days, unit_rate = per-day rate (amount = qty × rate).
+        const patched = {
+          description: r.description, line_type: 'service',
+          quantity: String(r.extraDays), unit: 'day',
+          unit_rate: String(r.dayRate), service_key: null, _descLocked: true,
+        };
+        if (ls.some((l) => EXT_RE.test(l.description || ''))) {
+          return ls.map((l) => (EXT_RE.test(l.description || '') ? { ...l, ...patched } : l));
+        }
+        return [...ls, patched];
+      });
+      setReviewInfo((ri) => (ri ? {
+        ...ri,
+        extensionWarning: r.extensionWarning || null,
+        // The control's own inline helper reports needs-rate for manual edits; the top note is
+        // the call-derived one. Only CLEAR it once the extension is priceable/removed (mirrors
+        // the server deleting vd.extensionNeedsRate); never re-phrase it as "customer asked".
+        extensionReview: ri.extensionReview ? { ...ri.extensionReview, extraDays: n, needsRate: !!r.needsRate } : ri.extensionReview,
+        extensionNeedsRate: r.needsRate ? ri.extensionNeedsRate : null,
+      } : ri));
+      setExtDays(String(n));
+    } catch (e) {
+      setError(e.message || 'Could not recompute the extension price');
+    } finally {
+      setExtBusy(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-accent border-t-transparent rounded-full" /></div>;
   }
@@ -340,6 +391,30 @@ export default function InvoiceEditorPage() {
                   ? `${reviewInfo.swapReview.days} day${reviewInfo.swapReview.days === 1 ? '' : 's'} left — pickup stays ${reviewInfo.swapReview.pickupDate}`
                   : `pickup ${reviewInfo.swapReview.pickupDate}`}
                 {swapBusy ? ' · updating…' : ''}
+              </span>
+            </div>
+          )}
+          {reviewInfo?.extensionReview && (
+            <div className="flex flex-wrap items-center gap-2 bg-surface-2 border border-divider rounded-lg px-3 py-2.5">
+              <label className="text-xs font-semibold text-content">Extra days (extension)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={extDays}
+                disabled={extBusy}
+                onChange={(e) => setExtDays(e.target.value)}
+                onBlur={(e) => recomputeExtension(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); recomputeExtension(e.target.value); } }}
+                className="w-20 text-sm border border-divider rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
+              />
+              <span className="text-xs text-muted">
+                {reviewInfo.extensionReview.needsRate
+                  ? `No day rate set for ${reviewInfo.extensionReview.size} — add one on the Pricing page to bill this`
+                  : reviewInfo.extensionReview.dayRate != null
+                    ? `${money(reviewInfo.extensionReview.dayRate)}/day — pickup advances by this many days when paid`
+                    : 'pickup advances by this many days when paid'}
+                {extBusy ? ' · updating…' : ''}
               </span>
             </div>
           )}
