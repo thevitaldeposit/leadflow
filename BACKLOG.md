@@ -8,6 +8,7 @@
 - [x] Call-intent classifier: Part 1 + 1b (swap+extension together) + Part 2 (editable review → approve → send → sign → pay)
 - [x] Swap Fix A — paid swap keeps job open until replacement pickup (no premature completion / orphaned inquiry)
 - [x] Swap Fix B — correct swap duration (tz-safe day count) + editable swap delivery date on review screen
+- [x] Review-flow UX — review item now inserts into the Action Queue **live** (upsert on `lead_updated`, no manual refresh); rows show the linked customer's **real name** (server-resolved via `customer_id`, plain lookup); in-row **Review** is the obvious primary action (whole card opens the editor, keeps Discard); **Add from rates** fills the real per-size price from `pricing_config` (not the NULL legacy `unit_price`)
 
 ---
 
@@ -23,6 +24,8 @@
 - [ ] **Invoice dedup is per-`lead_id`** → follow-up calls can duplicate invoices. Needs engagement/customer-level dedup.
 - [ ] **Cancellation never fires from a call.** Marker read/cleared but never set; producer stub (HANDOFF §10.5).
 - [ ] **Owner can't edit a job's delivery address.** No UI field (leads.js:879); writes to `leads.vertical_data.deliveryAddress`.
+- [ ] **Auto-correct customer name spelling.** Customer name is written once and never overwritten (`enrichCustomerFromLead`, customerService.js:90-92 only fills blank fields), so an early wrong spelling persists and prints on invoices. Recognize an authoritative spelling (customer spells it at booking) and update the stored name.
+- [ ] **Dump-ticket / weight-entry rework (next).** (a) tons-vs-lbs input default confusion; (b) editing a recorded weight doesn't update the dump-ticket section or the activity feed; (c) swap-out checkbox double-arm — checking the box (CustomerDetailPage.jsx:1039) while a PAID call-driven swap has armed `vd.pendingSwapOuts` runs the manual `swap` branch (jobLifecycle.js:297-298) WITHOUT consuming the marker, so the next (final-pickup) ticket is ALSO treated as a swap-out and the job needs an extra ticket to complete. Fix = single source of truth (marker authoritative / consume on manual check / make the UI marker-aware).
 - [ ] **Verify legacy `/pay` state.** Harvest says `/pay/:leadId` page + `sendPaymentLinkEmail` may still exist as a disabled stub and booking may still email the legacy link. Finish removal → `/invoice/:token`.
 
 ## 3. Known functional gaps (needed, not blocking)
@@ -42,6 +45,7 @@
 - [ ] **Full Insights/analytics page** — stub over morning brief (InsightsPage.jsx:50-54).
 - [ ] **Photo-OCR dump tickets** — only `source:'manual'` wired.
 - [ ] **A2P 10DLC + payment SMS** — compliance pages only; SMS paused.
+- [ ] **In-app voicemail access (high owner-impact)** — calls forward to the app, bypassing native iPhone voicemail; voicemails are only listenable on the web app. Add in-app playback + a new-voicemail notification; verify whether native carrier voicemail can be restored.
 - [ ] **Future verticals** — insurance_agent + HVAC (extraction only).
 
 ## 5. iOS / infra

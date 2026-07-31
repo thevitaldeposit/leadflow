@@ -385,7 +385,12 @@ function resolveEffectivePricing(businessId, customer) {
   const items = [...keys].map((key) => {
     const def = defaults.find((d) => d.service_key === key) || null;
     const ovr = overrideByKey.get(key) || null;
-    const base = def && def.unit_price != null ? Number(def.unit_price) : null;
+    // Resolve the size's LIST base from its pricing_config (flat rate / smallest tier),
+    // falling back to the legacy flat unit_price — the SAME base the booking resolver uses
+    // (computeBaseFromConfig). Reading unit_price ALONE returned null for modern per-size
+    // pricing (the price lives in pricing_config), which populated "Add from rates" at $0.
+    const cfgBase = computeBaseFromConfig(def ? def.pricing_config : null, 1, def && def.unit_price != null ? Number(def.unit_price) : null);
+    const base = cfgBase.priceable ? cfgBase.listBase : null;
     const groupPrice = base != null && pct ? round2(base * (1 - pct / 100)) : base;
 
     let effective, source;

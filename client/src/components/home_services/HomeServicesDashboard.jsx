@@ -29,11 +29,14 @@ function pctChange(cur, base) {
 }
 
 function getLeadName(lead) {
+  // customer_name is resolved server-side from the linked customer (GET /leads) for
+  // leads with no name of their own, so an unnamed call/booked lead still shows the
+  // known customer's name instead of "Unknown".
   try {
     const vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {};
-    return vd.customerName || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown';
+    return vd.customerName || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || lead.customer_name || 'Unknown';
   } catch {
-    return [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown';
+    return [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || lead.customer_name || 'Unknown';
   }
 }
 
@@ -648,7 +651,13 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onCa
   return (
     <div
       className={`flex items-center gap-2.5 px-3 py-2.5 hover:bg-surface-2 cursor-pointer transition-colors ${tierBorderClass(tier)}`}
-      onClick={() => (isMissedCall ? onMissedCallClick(lead) : navigate(`/leads/${lead.id}`))}
+      onClick={() => {
+        if (isMissedCall) return onMissedCallClick(lead);
+        // For a review item the whole row opens the draft invoice editor — the primary,
+        // obvious action (the old card click dead-ended on the customer profile).
+        if (isInvoiceReview) return onInvoiceReview(lead);
+        return navigate(`/leads/${lead.id}`);
+      }}
     >
       <div className="flex-1 min-w-0">
         {/* Line 1: name, phone, then the type badge (right of the phone). The
@@ -688,7 +697,7 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onCa
           {elapsedLabel}
         </span>
       )}
-      <div className="flex items-center justify-end gap-0.5 flex-shrink-0 w-14" onClick={e => e.stopPropagation()}>
+      <div className={`flex items-center justify-end gap-0.5 flex-shrink-0 ${isInvoiceReview ? '' : 'w-14'}`} onClick={e => e.stopPropagation()}>
         {isCancel ? (
           <>
             {/* Confirm moves the job to Lost; Disregard leaves it unchanged and
@@ -739,11 +748,11 @@ function AttentionRow({ lead, state, tier, reason, onDismiss, onReschedule, onCa
                 a misclassified draft and clears the marker — nothing reaches the customer. */}
             <button
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onInvoiceReview(lead); }}
-              className="p-1.5 rounded-lg text-accent hover:bg-accent/10 transition-colors"
-              title="Review & send draft invoice"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-white bg-accent hover:opacity-90 transition-colors"
+              title="Review & approve draft invoice"
               aria-label="Review draft invoice"
             >
-              <FileText size={15} />
+              <FileText size={13} /> Review
             </button>
             <button
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDiscardReview(lead); }}
@@ -1370,7 +1379,14 @@ export default function HomeServicesDashboard() {
     };
     const handleLeadUpdated = (lead) => {
       if (lead.vertical !== 'home_services') return;
-      setLeads(prev => prev.map(l => l.id === lead.id ? lead : l));
+      // Upsert: patch the lead if it's already loaded, else INSERT it. A call-driven
+      // review item arrives as a lead_updated for a BOOKED lead that may not be in the
+      // current list (e.g. an older booked job); a patch-only .map silently dropped it,
+      // so the "Review & send" item only appeared after a manual refresh. Upserting
+      // surfaces it in the Action Queue in real time.
+      setLeads(prev => prev.some(l => l.id === lead.id)
+        ? prev.map(l => l.id === lead.id ? lead : l)
+        : [lead, ...prev]);
     };
     // A missed-call placeholder merged into a later voicemail/conversation lead.
     const handleLeadRemoved = ({ id }) => {

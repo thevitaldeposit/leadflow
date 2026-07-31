@@ -16,12 +16,57 @@ const { JOB_STATUS, LEGACY_STATUS, ACTIVE_JOB_STATUS_SET } = require('../config/
 // request to the caller's business when a token is present, else to Valley Binz.
 router.use(attachBusiness);
 
-function getLeadDisplayName(lead) {
+// The name carried on the lead ROW itself (no customer join) — vd.customerName, else
+// the split first/last columns. Null when the call lead was never named.
+function leadOwnName(lead) {
   let vd = {};
   try { vd = JSON.parse(lead.vertical_data || '{}'); } catch {}
   return vd.customerName
     || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ')
     || null;
+}
+
+// A lead's display name: its own name, else the linked customer's stored name resolved
+// via a PLAIN row lookup by customer_id (never the write-on-read customer/engagement
+// layer). So an unnamed call/booked lead still shows the known customer's name instead
+// of "Unknown". Returns null when neither the lead nor the customer has a name.
+function getLeadDisplayName(lead) {
+  const own = leadOwnName(lead);
+  if (own) return own;
+  if (lead.customer_id) {
+    try {
+      const c = db.prepare('SELECT first_name, last_name, display_name FROM customers WHERE id = ? AND business_id = ?')
+        .get(lead.customer_id, lead.business_id);
+      const nm = c && (c.display_name || [c.first_name, c.last_name].filter(Boolean).join(' '));
+      if (nm) return nm;
+    } catch { /* customers table absent / not migrated — no fallback */ }
+  }
+  return null;
+}
+
+// Attach a resolved `customer_name` to any lead that has no name of its own, via ONE
+// batched lookup of the linked customer rows by customer_id (plain SELECT — never the
+// write-on-read customer layer). Lets the dashboard rows the client fetches carry the
+// real customer name so the Action Queue / schedule never show "Unknown" for a lead
+// whose customer profile is named. Mutates + returns the array.
+function attachCustomerNames(businessId, leads) {
+  if (!Array.isArray(leads) || !leads.length) return leads;
+  const needy = leads.filter((l) => l.customer_id && !leadOwnName(l));
+  if (!needy.length) return leads;
+  const ids = [...new Set(needy.map((l) => l.customer_id))];
+  let rows = [];
+  try {
+    rows = db.prepare(
+      `SELECT id, first_name, last_name, display_name FROM customers WHERE business_id = ? AND id IN (${ids.map(() => '?').join(',')})`
+    ).all(businessId, ...ids);
+  } catch { rows = []; /* customers table absent / not migrated */ }
+  const byId = new Map(rows.map((c) => [c.id, c]));
+  for (const l of needy) {
+    const c = byId.get(l.customer_id);
+    const nm = c && (c.display_name || [c.first_name, c.last_name].filter(Boolean).join(' '));
+    if (nm) l.customer_name = nm;
+  }
+  return leads;
 }
 
 // Append a timestamped line to the lead's free-text internal log.
@@ -294,6 +339,9 @@ router.get('/', (req, res) => {
     query += ` ORDER BY ${sortCol} ${sortDir}`;
 
     const leads = db.prepare(query).all(...params);
+    // Fill a resolved customer_name from the linked customer for leads with no name of
+    // their own, so dashboard rows show the real name instead of "Unknown".
+    attachCustomerNames(req.business.id, leads);
     res.json(leads);
   } catch (err) {
     console.error('GET /leads error:', err);
