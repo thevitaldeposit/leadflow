@@ -77,10 +77,20 @@ export const api = {
       body: JSON.stringify(body),
     }),
   // Record a dump ticket / weight for a returned unit (swap-safe lifecycle advance).
-  // Body: { weightTons?, swap?, unitsRemaining?, note? }.
+  // Body: { weightLbs?, swap?, unitsRemaining?, note? } — weight is entered in POUNDS
+  // and converted to the stored tons at the server boundary.
   recordDumpTicket: (id, body) =>
     request(`/leads/${id}/dump-ticket`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    }),
+  // Correct a recorded weight (index into the job's dump tickets). The ticket is the
+  // source of truth — the server rewrites its overage invoice line + logs the
+  // correction. 409 when that ticket's invoice is already signed/paid.
+  updateDumpTicketWeight: (id, index, body) =>
+    request(`/leads/${id}/dump-ticket/${index}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
     }),

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Calendar, Package } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar, Package, Phone, Navigation, Scale } from 'lucide-react';
 import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
+import DumpTicketAction from '../components/home_services/DumpTicketAction';
 
 // This page serves the Home Services dumpster-rental business; wording comes from
 // the shared terminology table so the same calendar can label other verticals.
@@ -193,6 +194,11 @@ function CalendarSection() {
 
   useEffect(() => { load(year, month); }, [year, month, load]);
 
+  // Re-pull the month after a pickup is recorded from a day card, so the ticket list,
+  // units-out and any completed job reflect immediately (a completed job leaves the
+  // calendar entirely).
+  const reload = useCallback(() => load(year, month), [load, year, month]);
+
   function prevMonth() {
     if (month === 1) { setYear(y => y - 1); setMonth(12); }
     else setMonth(m => m - 1);
@@ -328,7 +334,7 @@ function CalendarSection() {
 
         {/* Day panel */}
         {selectedDay && (
-          <div className="w-72 border-l border-divider flex-shrink-0">
+          <div className="w-80 border-l border-divider flex-shrink-0">
             <div className="px-4 py-3 bg-surface-2 border-b border-divider">
               <p className="text-sm font-bold text-content">{formatDate(selectedDay)}</p>
             </div>
@@ -341,7 +347,7 @@ function CalendarSection() {
                     <DayJobRow key={`d-${job.id}`} job={job} type="delivery" navigate={navigate} />
                   ))}
                   {[...selectedData.pickups].sort(byScheduledTime).map(job => (
-                    <DayJobRow key={`p-${job.id}`} job={job} type="pickup" navigate={navigate} />
+                    <DayJobRow key={`p-${job.id}`} job={job} type="pickup" navigate={navigate} onChanged={reload} />
                   ))}
                   {selectedData.activeRentals.map(job => (
                     <DayJobRow key={`a-${job.id}`} job={job} type="active" navigate={navigate} />
@@ -356,7 +362,18 @@ function CalendarSection() {
   );
 }
 
-function DayJobRow({ job, type, navigate }) {
+// Directions to the job site in whatever maps app the device prefers. Address-only —
+// no geocoding; Google resolves the destination string itself.
+function directionsUrl(address) {
+  return address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}` : null;
+}
+
+// A pickup is a job to DO, so its row carries the three things the owner needs on site:
+// call the customer, navigate to the address, and record the weight — the same
+// DumpTicketAction the customer profile uses, opened right here. Deliveries and active
+// rentals stay informational (the card still opens the job).
+function DayJobRow({ job, type, navigate, onChanged }) {
+  const [showWeight, setShowWeight] = useState(false);
   const typeConfig = {
     delivery: { label: term.startBadge, bg: 'bg-success/10 text-success' },
     pickup: { label: term.endBadge, bg: 'bg-brand/10 text-brand' },
@@ -366,27 +383,81 @@ function DayJobRow({ job, type, navigate }) {
   // Active rentals are ongoing, so a specific time of day doesn't apply to them.
   const timeLabel = type === 'active' ? null : (formatTime12(job.scheduledTime) || 'Flexible');
 
+  const isPickup = type === 'pickup';
+  const tel = job.phone ? `tel:${String(job.phone).replace(/[^\d+]/g, '')}` : null;
+  const maps = directionsUrl(job.address);
+  // units_out is only initialized once the delivery date lands, so treat "unknown"
+  // (null) as still out — the server defaults it to 1 anyway. Hidden only when every
+  // unit is explicitly back.
+  const canRecord = isPickup && (job.unitsOut == null || job.unitsOut > 0);
+
+  const actionClass = 'flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg transition-colors';
+
   return (
-    <button
-      onClick={() => navigate(`/leads/${job.id}`)}
-      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-surface-2 transition-colors text-left"
-    >
-      <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${bg}`}>
-        {label}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-semibold text-content truncate">{job.customerName}</p>
-          {timeLabel && (
-            <span className={`text-xs font-semibold flex-shrink-0 ${job.scheduledTime ? 'text-muted' : 'text-muted'}`}>
-              {timeLabel}
+    <div className="px-4 py-3 hover:bg-surface-2 transition-colors">
+      <button
+        onClick={() => navigate(`/leads/${job.id}`)}
+        className="w-full flex items-start gap-3 text-left"
+      >
+        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${bg}`}>
+          {label}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-content truncate">{job.customerName}</p>
+            {timeLabel && (
+              <span className="text-xs font-semibold flex-shrink-0 text-muted">{timeLabel}</span>
+            )}
+          </div>
+          {job.dumpsterSize && <p className="text-xs text-muted">{job.dumpsterSize}</p>}
+          {job.address && <p className="text-xs text-muted truncate">{job.address}</p>}
+        </div>
+      </button>
+
+      {isPickup && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-1">
+          {tel ? (
+            <a href={tel} className={`${actionClass} text-content bg-surface-2 hover:bg-divider`}>
+              <Phone size={11} /> Call
+            </a>
+          ) : (
+            <span className={`${actionClass} text-muted bg-surface-2 opacity-50 cursor-default`} title="No phone number on this job">
+              <Phone size={11} /> Call
             </span>
           )}
+          {maps ? (
+            <a href={maps} target="_blank" rel="noreferrer" className={`${actionClass} text-content bg-surface-2 hover:bg-divider`}>
+              <Navigation size={11} /> Navigate
+            </a>
+          ) : (
+            <span className={`${actionClass} text-muted bg-surface-2 opacity-50 cursor-default`} title="No delivery address on this job">
+              <Navigation size={11} /> Navigate
+            </span>
+          )}
+          {canRecord && (
+            <button
+              onClick={() => setShowWeight(v => !v)}
+              className={`${actionClass} ${showWeight ? 'text-white bg-brand' : 'text-brand bg-brand/10 hover:bg-brand/20'}`}
+            >
+              <Scale size={11} /> {showWeight ? 'Close' : 'Record pickup'}
+            </button>
+          )}
         </div>
-        {job.dumpsterSize && <p className="text-xs text-muted">{job.dumpsterSize}</p>}
-        {job.address && <p className="text-xs text-muted truncate">{job.address}</p>}
-      </div>
-    </button>
+      )}
+
+      {showWeight && (
+        <div className="mt-2.5 pl-1">
+          <DumpTicketAction
+            compact
+            leadId={job.id}
+            unitsOut={job.unitsOut}
+            dumpTickets={job.dumpTickets || []}
+            overageNeedsRate={job.overageNeedsRate}
+            onDone={onChanged}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 

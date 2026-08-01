@@ -10,6 +10,7 @@
 - [x] Swap Fix B — correct swap duration (tz-safe day count) + editable swap delivery date on review screen
 - [x] Review-flow UX — review item now inserts into the Action Queue **live** (upsert on `lead_updated`, no manual refresh); rows show the linked customer's **real name** (server-resolved via `customer_id`, plain lookup); in-row **Review** is the obvious primary action (whole card opens the editor, keeps Discard); **Add from rates** fills the real per-size price from `pricing_config` (not the NULL legacy `unit_price`)
 - [x] Editable extension on review page — owner sets/edits the extension's **extra days** on the review screen and the extension line **auto-prices** via `resolveExtensionPrice` (extra days × the size's `day_rate`); days > 0 adds the line (or edits it in place), 0 removes it, no `day_rate` shows the needs-rate note; quantity stays = extra days so the paid-extension pickup hook advances by exactly that many; server `recompute-extension` route mirrors `recompute-swap` (rewrites only the extension line, refuses signed/paid). Even a swap-only draft can add an extension here.
+- [x] **Pickup/weight Phase 1** — connected pickup flow + lbs weight + editable dump ticket. Schedule pickup rows are now actionable cards (**Call** `tel:`, **Navigate** Google-Maps directions to the delivery address, **Record pickup** opening the same `DumpTicketAction`, now shared at `components/home_services/DumpTicketAction.jsx`); weight is entered in **pounds** and converted at ONE server boundary (`jobLifecycle.tonsFromLbs`, the only ÷2000) with **tons still the stored unit**; a recorded weight is **editable** and the ticket is the source of truth — `PATCH /leads/:id/dump-ticket/:index` rewrites the ticket, regenerates that ticket's overage invoice line (voids a now-empty invoice, raises a fresh one when a correction becomes chargeable, leaves any swap line untouched) and appends a "weight corrected" activity entry; blocked with a 409 once that ticket's invoice is signed/paid. Swap markers + `units_out` completion gating untouched.
 
 ---
 
@@ -26,25 +27,33 @@
 - [ ] **Cancellation never fires from a call.** Marker read/cleared but never set; producer stub (HANDOFF §10.5).
 - [ ] **Owner can't edit a job's delivery address.** No UI field (leads.js:879); writes to `leads.vertical_data.deliveryAddress`.
 - [ ] **Auto-correct customer name spelling.** Customer name is written once and never overwritten (`enrichCustomerFromLead`, customerService.js:90-92 only fills blank fields), so an early wrong spelling persists and prints on invoices. Recognize an authoritative spelling (customer spells it at booking) and update the stored name.
-- [ ] **Dump-ticket / weight-entry rework (next).** (a) tons-vs-lbs input default confusion; (b) editing a recorded weight doesn't update the dump-ticket section or the activity feed; (c) swap-out checkbox double-arm — checking the box (CustomerDetailPage.jsx:1039) while a PAID call-driven swap has armed `vd.pendingSwapOuts` runs the manual `swap` branch (jobLifecycle.js:297-298) WITHOUT consuming the marker, so the next (final-pickup) ticket is ALSO treated as a swap-out and the job needs an extra ticket to complete. Fix = single source of truth (marker authoritative / consume on manual check / make the UI marker-aware).
+- [ ] **Dump-ticket / weight-entry rework.** ~~(a) tons-vs-lbs input default confusion~~ ✅ Phase 1; ~~(b) editing a recorded weight doesn't update the dump-ticket section or the activity feed~~ ✅ Phase 1. **(c) still open — swap-out checkbox double-arm:** checking the box (`DumpTicketAction.jsx`) while a PAID call-driven swap has armed `vd.pendingSwapOuts` runs the manual `swap` branch (jobLifecycle.js `recordDumpTicket`) WITHOUT consuming the marker, so the next (final-pickup) ticket is ALSO treated as a swap-out and the job needs an extra ticket to complete. Fix = single source of truth (marker authoritative / consume on manual check / make the UI marker-aware). → folded into **Phase 2** below.
+
+### Pickup rework — remaining phases (Phase 1 shipped; see §0)
+- [ ] **Phase 2 — asset model.** Per-dumpster IDs (a real unit entity, not just a pool count); capture WHICH unit was dropped and WHICH was picked up; per-unit overage attribution; **configurable swap weight allowance** (full fresh allowance per replacement vs none — today a swapped unit silently gets its own full allowance); fix the **size-changing-swap size write-back bug** (a swap to a different size never updates the job's `vd.dumpsterSize`, so later overage/pricing resolves against the old size); the **two-concurrent-jobs completion edge case**; plus the swap-checkbox double-arm above (2c).
+- [ ] **Phase 3 — weight photo → OCR**, co-equal with manual entry (photograph the scale ticket or type it; both land on the same `recordDumpTicket` path with `source:'ocr'`).
+- [ ] **Phase 4 — driver role.** Create-driver endpoint + a `requireRole` guard. ⚠️ Today a driver token would have **full owner API access** — role exists on the user row but nothing enforces it.
+- [ ] **Phase 5 — dump sites.** Table + CRUD + a maps deep-link to the selected site (same directions-URL pattern the pickup card now uses).
+- [ ] **Later — SMS "on my way"** from the pickup card (deliberately omitted from Phase 1; ships with the SMS/A2P phase).
 - [ ] **Verify legacy `/pay` state.** Harvest says `/pay/:leadId` page + `sendPaymentLinkEmail` may still exist as a disabled stub and booking may still email the legacy link. Finish removal → `/invoice/:token`.
 
 ## 3. Known functional gaps (needed, not blocking)
 - [ ] **Concurrent multi-job** — one open job per customer; multi-site contractors unsupported (structural) + multi-job pricing override + "which job is this call about?"
 - [ ] **Delivery-vs-pickup date-change classification** — never built.
 - [ ] **Swap availability/inventory** — replacement invisible to availability pool.
-- [ ] **Weight display + driver weight-entry** on the profile.
+- [ ] ~~**Weight display**~~ ✅ Phase 1 (tickets read in lbs + tons, editable, on the profile AND the schedule pickup card). **Driver weight-entry** still pending → pickup Phase 4.
 - [ ] **Overage config dual-source cleanup** (pricing_config vs legacy settings).
 - [ ] **Inquiry auto-book backfill** — deferred.
 - [ ] **Single pending-change/draft limit** — 2nd pending change per job is skipped.
 
 ## 4. Features not started (bigger builds)
 - [ ] **Dispatch** — scope TBD.
-- [ ] **Driver / limited-user view** — iOS role reserved, no UI (AuthManager.swift:40-46).
+- [ ] **Driver / limited-user view** — iOS role reserved, no UI (AuthManager.swift:40-46). → pickup **Phase 4**.
 - [ ] **Mileage / distance pricing + geocoding/mapping** — configurable but never computed (pricingService.js:312-313).
 - [ ] **Per-business contract builder** — inert seam (invoiceService.js:767-768); no Settings editor.
 - [ ] **Full Insights/analytics page** — stub over morning brief (InsightsPage.jsx:50-54).
-- [ ] **Photo-OCR dump tickets** — only `source:'manual'` wired.
+- [ ] **Photo-OCR dump tickets** — only `source:'manual'` wired. → pickup **Phase 3**.
+- [ ] **Dump sites** — no table/CRUD; nowhere to record where a load went. → pickup **Phase 5**.
 - [ ] **A2P 10DLC + payment SMS** — compliance pages only; SMS paused.
 - [ ] **In-app voicemail access (high owner-impact)** — calls forward to the app, bypassing native iPhone voicemail; voicemails are only listenable on the web app. Add in-app playback + a new-voicemail notification; verify whether native carrier voicemail can be restored.
 - [ ] **Future verticals** — insurance_agent + HVAC (extraction only).

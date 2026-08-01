@@ -61,7 +61,8 @@ router.get('/calendar', (req, res) => {
     // - active rental spanning into the month (delivery before month-end, pickup after month-start or null)
     const leads = db.prepare(`
       SELECT id, customer_first_name, customer_last_name, vertical_data, sub_vertical,
-             job_status, delivery_date, scheduled_time, pickup_date, estimated_revenue
+             job_status, delivery_date, scheduled_time, pickup_date, estimated_revenue,
+             phone, caller_number, caller_phone_raw, units_out
       FROM leads
       WHERE vertical = 'home_services'
         AND business_id = ?
@@ -95,6 +96,13 @@ router.get('/calendar', (req, res) => {
         deliveryDate: lead.delivery_date,
         scheduledTime: lead.scheduled_time || null,
         pickupDate: lead.pickup_date,
+        // Everything the day panel's actionable pickup card needs, so recording a
+        // pickup never means hunting through the customer profile. Same phone
+        // resolution order the customer identity layer uses.
+        phone: lead.phone || lead.caller_number || lead.caller_phone_raw || null,
+        unitsOut: lead.units_out == null ? null : lead.units_out,
+        dumpTickets: Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [],
+        overageNeedsRate: !!vd.overageNeedsRate,
       };
 
       if (lead.delivery_date && dayMap[lead.delivery_date]) {

@@ -15,6 +15,7 @@ import {
   ENGAGEMENT_STATUS,
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
+import DumpTicketAction from '../components/home_services/DumpTicketAction';
 import VoicemailBadge from '../components/home_services/VoicemailBadge';
 import { CreateJobModal, EditJobDetailsModal } from '../components/home_services/HomeServicesStickyHeader';
 import { buildBookingUpdates } from '../utils/booking';
@@ -943,120 +944,6 @@ export default function CustomerDetailPage() {
         <aside className="w-full lg:w-80 flex-shrink-0 lg:sticky lg:top-0 lg:self-start">
           <ActivityFeed activity={c.activity} onViewCall={focusCall} />
         </aside>
-      </div>
-    </div>
-  );
-}
-
-// Manual dump-ticket / weight entry for a job with a dumpster still out. This is the
-// TRIGGER the future photo-OCR feature will reuse (same api.recordDumpTicket path —
-// OCR just auto-fills the weight). Records the weight (computing/flagging any overage
-// server-side) and advances the lifecycle swap-safely: only the LAST unit back
-// advances the job past active_rental. onDone refreshes the profile.
-function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], overageNeedsRate, onDone }) {
-  const [open, setOpen] = useState(false);
-  const [weight, setWeight] = useState('');
-  const [swap, setSwap] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
-
-  const submit = async () => {
-    setBusy(true); setMsg(null);
-    try {
-      const res = await api.recordDumpTicket(leadId, {
-        weightTons: weight === '' ? null : Number(weight),
-        swap,
-      });
-      const parts = [];
-      if (res.overage && res.overage.overTons > 0) {
-        parts.push(res.overage.amount != null
-          ? `Overage: ${res.overage.overTons}t ($${res.overage.amount})`
-          : `Overage: ${res.overage.overTons}t — set overage pricing for this size on the Pricing page to bill it`);
-      }
-      if (res.overageInvoiceId) parts.push('Invoice emailed to the customer.');
-      if (res.advancedTo === 'completed') parts.push('Job completed.');
-      else if (res.advancedTo === 'awaiting_final_payment') parts.push('Awaiting final charges.');
-      else parts.push(`${res.unitsOut} unit(s) still out.`);
-      setMsg(parts.join(' '));
-      setWeight(''); setSwap(false); setOpen(false);
-      onDone?.();
-    } catch (e) {
-      setMsg('Failed to record — check server logs.');
-      console.error('Dump ticket error:', e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-divider flex items-center gap-2 bg-surface-2">
-        <Briefcase size={15} className="text-muted" />
-        <h3 className="text-sm font-semibold text-content">Dump Ticket / Weight</h3>
-        <span className="ml-auto text-[11px] font-medium text-muted">
-          {unitsOut != null ? `${unitsOut} dumpster${unitsOut === 1 ? '' : 's'} out` : ''}
-        </span>
-      </div>
-      <div className="p-4 space-y-3">
-        {dumpTickets.length > 0 && (
-          <ul className="text-xs text-muted space-y-1">
-            {dumpTickets.map((t, i) => (
-              <li key={i} className="flex items-center gap-2">
-                <Check size={12} className="text-success flex-shrink-0" />
-                <span>
-                  {t.weightTons != null ? `${t.weightTons} tons` : 'weight not entered'}
-                  {t.swap ? ' · swap-out' : ''}
-                  {t.swapCharge != null ? ` · swap $${t.swapCharge}` : ''}
-                  {t.overageTons > 0 ? (t.overageAmount != null ? ` · overage $${t.overageAmount}` : ' · overage (rate needed)') : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {overageNeedsRate && (
-          <p className="text-xs text-warning bg-warning/10 px-2 py-1.5 rounded-lg">
-            Overage recorded but not priced — set this size's weight allowance and per-ton overage rate on the Pricing page to bill it.
-          </p>
-        )}
-        {!open ? (
-          <button
-            onClick={() => setOpen(true)}
-            className="flex items-center gap-1.5 text-sm font-medium text-brand bg-brand/10 hover:bg-brand/10 px-3 py-2 rounded-lg transition-colors"
-          >
-            <Plus size={13} /> Add dump ticket / enter weight
-          </button>
-        ) : (
-          <div className="space-y-2.5">
-            <div>
-              <label className="text-xs font-medium text-muted uppercase tracking-wide mb-1 block">Weight (tons)</label>
-              <input
-                type="number" min="0" step="0.01" value={weight}
-                onChange={(e) => setWeight(e.target.value)}
-                placeholder="e.g. 3.5"
-                className="w-full px-3 py-2 text-sm rounded-lg border border-divider bg-surface text-content focus:outline-none focus:ring-2 focus:ring-brand/30"
-              />
-            </div>
-            <label className="flex items-center gap-2 text-sm text-content">
-              <input type="checkbox" checked={swap} onChange={(e) => setSwap(e.target.checked)} className="rounded" />
-              Swap-out — a replacement dumpster was dropped (a unit is still on site)
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={submit} disabled={busy}
-                className="flex items-center gap-1.5 text-sm font-medium text-white bg-brand hover:opacity-90 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
-              >
-                <Check size={13} /> {busy ? 'Saving…' : 'Record ticket'}
-              </button>
-              <button
-                onClick={() => { setOpen(false); setMsg(null); }}
-                className="flex items-center gap-1.5 text-sm font-medium text-muted bg-surface-2 hover:bg-surface-2 px-3 py-2 rounded-lg transition-colors"
-              >
-                <X size={13} /> Cancel
-              </button>
-            </div>
-          </div>
-        )}
-        {msg && <p className="text-xs text-content bg-surface-2 px-2 py-1.5 rounded-lg">{msg}</p>}
       </div>
     </div>
   );

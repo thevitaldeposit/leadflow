@@ -26,6 +26,25 @@ function round2(n) {
   if (!Number.isFinite(x)) return 0;
   return Math.round(x * 100) / 100;
 }
+
+// ── Weight units: entered in POUNDS, stored in TONS ────────────────────────────
+// The owner types pounds (what a scale prints); TONS stay the stored unit so every
+// pricing_config weight allowance and every previously recorded ticket keeps its
+// meaning. tonsFromLbs is the ONE place that divides by 2000 — the routes call it and
+// nothing downstream (computeOverage, the invoice line, the pool) ever sees pounds.
+// Pounds are rounded to a whole pound first, which makes lbs → tons → lbs exact
+// (any integer / 2000 has at most 4 decimals).
+const LBS_PER_TON = 2000;
+function tonsFromLbs(lbs) {
+  const n = Number(lbs);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round((Math.round(n) / LBS_PER_TON) * 10000) / 10000;
+}
+function lbsFromTons(tons) {
+  const n = Number(tons);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * LBS_PER_TON);
+}
 function nowIso() { return new Date().toISOString(); }
 function localTodayStr() {
   const d = new Date();
@@ -263,6 +282,61 @@ function swapAlreadyBilled(businessId, leadId) {
   } catch { return false; /* invoices tables absent / not migrated */ }
 }
 
+// Bill a ticket's line items as ONE 'sent' invoice for the job: resolve a customer
+// (a booked job is linked by reconcile-on-read, but resolve one defensively so a bill
+// never silently vanishes), create, mark sent, log, and email it. Shared by the
+// record path and the weight-correction path so a corrected weight bills exactly the
+// way the original entry would have. Returns the invoice, or null when nothing could
+// be billed.
+function createTicketInvoice(businessId, lead, lineItems, bits = '') {
+  if (!lineItems.length) return null;
+  let customerId = lead.customer_id;
+  if (!customerId) {
+    try { customerId = require('./customerService').findOrCreateCustomerForLead(businessId, lead); } catch { customerId = null; }
+  }
+  if (!customerId) return null;
+  try {
+    const invoiceService = require('./invoiceService');
+    const inv = invoiceService.createInvoice(businessId, {
+      customer_id: customerId,
+      lead_id: lead.id,
+      line_items: lineItems,
+    });
+    // 'sent' so it counts as an outstanding bill in the settled rollup (blocks completion).
+    invoiceService.markSent(businessId, inv.id);
+    logActivity(lead.id, 'invoice_created', `Invoice ${inv.invoice_number} created${bits ? ` (${bits})` : ''}`);
+    // Email the bill to the customer (same Resend path as the payment link).
+    require('./emailService').sendInvoiceLinkEmail({ ...inv, business_id: businessId })
+      .then((r) => { if (r && !r.sent) console.log(`[jobLifecycle] invoice email not sent (inv ${inv.id}): ${r.reason}`); })
+      .catch((e) => console.error('[jobLifecycle] invoice email error:', e.message));
+    return inv;
+  } catch (e) {
+    console.error('[jobLifecycle] ticket invoice failed:', e.message);
+    return null;
+  }
+}
+
+// A stored (tons) weight written back in the unit the owner actually entered, so the
+// timeline reads in pounds: "7,000 lbs (3.5 tons)".
+function describeWeight(tons) {
+  if (tons == null || !Number.isFinite(Number(tons))) return 'weight not entered';
+  return `${lbsFromTons(tons).toLocaleString('en-US')} lbs (${Number(tons)} tons)`;
+}
+
+// The overage line for a recorded weight, or null when there's nothing chargeable
+// (under the allowance, or no configured rate). One builder so the record path and
+// the correction path always produce an identically-shaped line.
+function overageLineItem(overage, size) {
+  if (!overage || !(overage.overTons > 0) || overage.amount == null || !(overage.amount > 0)) return null;
+  return {
+    description: `Weight overage — ${overage.overTons} ton(s) over ${overage.includedTons} included${size ? ` (${size})` : ''}`,
+    quantity: overage.overTons,
+    unit: 'ton',
+    unit_rate: overage.ratePerTon,
+    line_type: 'overage',
+  };
+}
+
 // ── Manual dump-ticket / weight entry (the trigger; OCR reuses this SAME path) ──
 // The owner enters the weight for a returned unit. This:
 //   (a) records the ticket + computes any overage (generating a 'sent' overage invoice
@@ -310,15 +384,8 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   // job is linked by reconcile-on-read, but resolve one defensively so a bill never
   // silently vanishes. A swapped unit is a NEW rental → its own weight allowance.
   const lineItems = [];
-  if (overage && overage.overTons > 0 && overage.amount != null && overage.amount > 0) {
-    lineItems.push({
-      description: `Weight overage — ${overage.overTons} ton(s) over ${overage.includedTons} included${size ? ` (${size})` : ''}`,
-      quantity: overage.overTons,
-      unit: 'ton',
-      unit_rate: overage.ratePerTon,
-      line_type: 'overage',
-    });
-  }
+  const overLine = overageLineItem(overage, size);
+  if (overLine) lineItems.push(overLine);
   // Swap replacement rental, priced over the swap window (today → pickup) per the
   // size's swap config (same_as_rate → normal resolver; custom → custom price; off → none).
   // SKIP billing it here when a call-driven swap invoice was already sent/paid for this job
@@ -345,35 +412,12 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     } catch (e) { console.error('[jobLifecycle] swap pricing failed:', e.message); }
   }
 
-  let overageInvoiceId = null;
-  if (lineItems.length) {
-    let customerId = lead.customer_id;
-    if (!customerId) {
-      try { customerId = require('./customerService').findOrCreateCustomerForLead(businessId, lead); } catch { customerId = null; }
-    }
-    if (customerId) {
-      try {
-        const invoiceService = require('./invoiceService');
-        const inv = invoiceService.createInvoice(businessId, {
-          customer_id: customerId,
-          lead_id: lead.id,
-          line_items: lineItems,
-        });
-        // 'sent' so it counts as an outstanding bill in the settled rollup (blocks completion).
-        invoiceService.markSent(businessId, inv.id);
-        overageInvoiceId = inv.id;
-        const bits = [
-          overage && overage.overTons > 0 && overage.amount ? `overage $${overage.amount}` : null,
-          swapCharge ? `swap $${swapCharge}` : null,
-        ].filter(Boolean).join(' + ');
-        logActivity(lead.id, 'invoice_created', `Invoice ${inv.invoice_number} created${bits ? ` (${bits})` : ''}`);
-        // Email the bill to the customer (same Resend path as the payment link).
-        require('./emailService').sendInvoiceLinkEmail({ ...inv, business_id: businessId })
-          .then((r) => { if (r && !r.sent) console.log(`[jobLifecycle] invoice email not sent (inv ${inv.id}): ${r.reason}`); })
-          .catch((e) => console.error('[jobLifecycle] invoice email error:', e.message));
-      } catch (e) { console.error('[jobLifecycle] ticket invoice failed:', e.message); }
-    }
-  }
+  const bits = [
+    overage && overage.overTons > 0 && overage.amount ? `overage $${overage.amount}` : null,
+    swapCharge ? `swap $${swapCharge}` : null,
+  ].filter(Boolean).join(' + ');
+  const ticketInvoice = createTicketInvoice(businessId, lead, lineItems, bits);
+  const overageInvoiceId = ticketInvoice ? ticketInvoice.id : null;
 
   const ticket = {
     at,
@@ -404,7 +448,7 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     .run(after, JSON.stringify(vd), at, lead.id);
   lead.units_out = after; lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
 
-  const wStr = overage && overage.weightTons != null ? `${overage.weightTons} tons` : 'weight not entered';
+  const wStr = describeWeight(overage ? overage.weightTons : null);
   const oStr = overage && overage.overTons > 0
     ? (overage.amount != null ? ` · overage ${overage.overTons}t ($${overage.amount})` : ` · overage ${overage.overTons}t (rate not configured)`)
     : '';
@@ -430,6 +474,124 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   }
   emit(lead);
   return { lead, overage, advancedTo, unitsOut: after, overageInvoiceId };
+}
+
+// ── Correct a recorded weight — the DUMP TICKET is the single source of truth ───
+// The owner mistyped a weight (or the scale ticket read differently). This rewrites
+// the ticket in place and then makes everything downstream agree with it:
+//   • vd.dumpTickets[index] — the source of truth — gets the new weight + recomputed
+//     overage, and remembers what it was corrected from.
+//   • the ticket's overage INVOICE LINE is rewritten from the new weight (removed when
+//     the corrected weight is under the allowance; the invoice is voided if that leaves
+//     it with nothing to bill; a fresh bill is raised if the correction newly creates a
+//     chargeable overage). Any OTHER line on that invoice — notably a swap replacement —
+//     is preserved untouched.
+//   • an append-only "weight corrected" activity entry records the change (the original
+//     entry stays; we never mutate history).
+// LOCKED: if that ticket's invoice is already signed or paid it is settled money /
+// dispute evidence — the edit is refused ({ error: 'locked' }) so weight corrections are
+// steered through the ticket rather than silently rewriting a paid bill.
+//
+// Deliberately does NOT touch units_out, the swap markers (pendingSwapOuts /
+// swapOutsApplied) or the swap line: only the weight and the weight's overage change.
+// The lifecycle can still advance FORWARD (advanceOnPayment is forward-only and gated)
+// when dropping a bogus overage leaves the job fully paid.
+function updateDumpTicketWeight(businessId, leadOrId, { index, weightTons = null, source = 'manual' } = {}) {
+  const lead = loadLead(businessId, leadOrId);
+  if (!lead) return { error: 'not_found' };
+  const vd = parseVd(lead);
+  const tickets = Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [];
+  const i = Math.round(Number(index));
+  if (!Number.isInteger(i) || i < 0 || i >= tickets.length) return { error: 'ticket_not_found' };
+  const ticket = tickets[i];
+  const size = vd.dumpsterSize || null;
+  const invoiceService = require('./invoiceService');
+
+  // The live invoice this ticket billed to, if any (a voided one counts as gone).
+  let invoice = null;
+  if (ticket.invoiceId) {
+    try { invoice = invoiceService.getInvoice(businessId, ticket.invoiceId); } catch { invoice = null; }
+    if (invoice && invoice.status === 'void') invoice = null;
+  }
+  if (invoice && (invoice.status === 'signed' || invoice.status === 'paid' || invoice.signed_at || invoice.paid_at)) {
+    return { error: 'locked', invoiceId: invoice.id, invoiceNumber: invoice.invoice_number, invoiceStatus: invoice.status };
+  }
+
+  const prevTons = ticket.weightTons != null ? Number(ticket.weightTons) : null;
+  const overage = weightTons != null ? computeOverage(businessId, weightTons, { size }) : null;
+  const overLine = overageLineItem(overage, size);
+
+  const at = nowIso();
+  let invoiceId = invoice ? invoice.id : null;
+  let invoiceNote = null;
+
+  if (invoice) {
+    // Rewrite this ticket's overage line on its existing invoice, keeping every other
+    // line (e.g. the swap replacement rental) exactly as it is.
+    const kept = (invoice.line_items || []).filter((li) => li.line_type !== 'overage');
+    const items = overLine ? [...kept, overLine] : kept;
+    if (!items.length) {
+      // Nothing left to bill — void it rather than leave a $0 'sent' invoice sitting in
+      // the settled rollup blocking completion forever.
+      const r = invoiceService.updateInvoice(businessId, invoice.id, { status: 'void' });
+      if (r && r.error) return { error: r.error };
+      invoiceId = null;
+      invoiceNote = `invoice ${invoice.invoice_number} voided (no charge)`;
+    } else {
+      const r = invoiceService.updateInvoice(businessId, invoice.id, { line_items: items });
+      if (r && r.error) return { error: r.error };
+      invoiceNote = overLine
+        ? `invoice ${invoice.invoice_number} updated to $${r.invoice.total}`
+        : `overage removed from invoice ${invoice.invoice_number}`;
+    }
+    try { emitToBusiness(businessId, 'invoice_updated', { id: invoice.id }); } catch { /* non-fatal */ }
+  } else if (overLine) {
+    // The corrected weight is chargeable but this ticket has no live invoice (it was
+    // under the allowance before, or its invoice was voided) — bill it now exactly the
+    // way the original entry would have.
+    const inv = createTicketInvoice(businessId, lead, [overLine], `overage $${overage.amount}`);
+    if (inv) {
+      invoiceId = inv.id;
+      invoiceNote = `invoice ${inv.invoice_number} created ($${inv.total})`;
+      try { emitToBusiness(businessId, 'invoice_updated', { id: inv.id }); } catch { /* non-fatal */ }
+    }
+  }
+
+  tickets[i] = {
+    ...ticket,
+    weightTons: overage ? overage.weightTons : null,
+    includedTons: overage ? (overage.includedTons ?? null) : null,
+    overageTons: overage ? overage.overTons : 0,
+    overageAmount: overage ? overage.amount : null,
+    overageNeedsRate: overage ? !!overage.needsRate : false,
+    overageNeedsAllowance: overage ? !!overage.needsAllowance : false,
+    invoiceId,
+    editedAt: at,
+    editedFromTons: prevTons,
+    editSource: source,
+  };
+  vd.dumpTickets = tickets;
+  // Recompute the job-level flag across ALL tickets so correcting a weight also clears a
+  // stale "overage recorded but not priced" warning (and re-raises it when warranted).
+  vd.overageNeedsRate = tickets.some((t) => t.overageNeedsRate || t.overageNeedsAllowance);
+
+  db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(vd), at, lead.id);
+  lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
+
+  const oStr = overage && overage.overTons > 0
+    ? (overage.amount != null ? ` · overage ${overage.overTons}t ($${overage.amount})` : ` · overage ${overage.overTons}t (rate not configured)`)
+    : ' · no overage';
+  logActivity(
+    lead.id, 'note_added',
+    `Weight corrected — ${describeWeight(prevTons)} → ${describeWeight(overage ? overage.weightTons : null)}${oStr}${invoiceNote ? ` · ${invoiceNote}` : ''}`
+  );
+
+  // The invoice total changed, so the payment rollup may have. Forward-only + gated:
+  // this can complete a job whose last blocking charge just went away, never un-complete one.
+  try { advanceOnPayment(businessId, lead); } catch (e) { console.error('[jobLifecycle] weight-correction advance error:', e.message); }
+  bumpCustomer(lead); emit(lead);
+  return { lead, index: i, ticket: tickets[i], overage, invoiceId };
 }
 
 // ── Base-rental invoice on booking (mirrors the overage path in recordDumpTicket) ──
@@ -864,6 +1026,9 @@ module.exports = {
   getOverageConfig,
   computeOverage,
   recordDumpTicket,
+  updateDumpTicketWeight,
+  tonsFromLbs,
+  lbsFromTons,
   ensureBaseInvoice,
   ensureCallDrivenReviewInvoice,
   canComplete,

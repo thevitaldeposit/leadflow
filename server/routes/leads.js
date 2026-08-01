@@ -965,9 +965,30 @@ router.post('/manual', requireAuth, (req, res) => {
   }
 });
 
+// ── Weight boundary: the owner enters POUNDS, the system stores TONS ────────────
+// This is the one place a request's weight is converted (via jobLifecycle.tonsFromLbs,
+// the only ÷2000 in the codebase), so pricing_config allowances and every previously
+// stored ticket stay valid. `weightTons` is still accepted for older callers (iOS /
+// scripts) and passes through unconverted. Returns { tons } or { error }.
+function resolveWeightTons(body) {
+  const lbs = body.weightLbs;
+  if (lbs !== undefined && lbs !== null && lbs !== '') {
+    const n = Number(lbs);
+    if (!Number.isFinite(n) || n < 0) return { error: 'weightLbs must be a non-negative number' };
+    return { tons: jobLifecycle.tonsFromLbs(n) };
+  }
+  const tons = body.weightTons;
+  if (tons !== undefined && tons !== null && tons !== '') {
+    const n = Number(tons);
+    if (!Number.isFinite(n) || n < 0) return { error: 'weightTons must be a non-negative number' };
+    return { tons: n };
+  }
+  return { tons: null };
+}
+
 // POST /api/leads/:id/dump-ticket — manual weight / dump-ticket entry for a returned
 // unit (the OCR feature will call the SAME jobLifecycle path with source:'ocr'). Body:
-//   { weightTons?, swap?, unitsRemaining?, note? }
+//   { weightLbs?, swap?, unitsRemaining?, note? }   (legacy `weightTons` still accepted)
 // Records the ticket + any overage (invoice when a rate is configured, else flagged),
 // then advances the lifecycle SWAP-SAFELY (only past active_rental once no unit is
 // still out). Web-dashboard only → hard auth.
@@ -978,12 +999,10 @@ router.post('/:id/dump-ticket', requireAuth, (req, res) => {
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
     const b = req.body || {};
-    const weightTons = b.weightTons === '' || b.weightTons == null ? null : Number(b.weightTons);
-    if (weightTons != null && (Number.isNaN(weightTons) || weightTons < 0)) {
-      return res.status(400).json({ error: 'weightTons must be a non-negative number' });
-    }
+    const w = resolveWeightTons(b);
+    if (w.error) return res.status(400).json({ error: w.error });
     const result = jobLifecycle.recordDumpTicket(businessId, lead, {
-      weightTons,
+      weightTons: w.tons,
       swap: b.swap === true,
       unitsRemaining: b.unitsRemaining,
       note: typeof b.note === 'string' ? b.note.trim() : null,
@@ -1002,6 +1021,51 @@ router.post('/:id/dump-ticket', requireAuth, (req, res) => {
   } catch (err) {
     console.error('POST /leads/:id/dump-ticket error:', err);
     res.status(500).json({ error: 'Failed to record dump ticket' });
+  }
+});
+
+// PATCH /api/leads/:id/dump-ticket/:index — correct a recorded weight. The dump ticket
+// is the source of truth: the ticket, its overage invoice line and the activity feed are
+// all brought back into agreement (see jobLifecycle.updateDumpTicketWeight). Body:
+//   { weightLbs }   (legacy `weightTons` still accepted)
+// 409 when that ticket's invoice is already signed/paid — a settled bill is never
+// silently rewritten. Web-dashboard only → hard auth.
+router.patch('/:id/dump-ticket/:index', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const w = resolveWeightTons(req.body || {});
+    if (w.error) return res.status(400).json({ error: w.error });
+    if (w.tons == null) return res.status(400).json({ error: 'weightLbs is required' });
+
+    const result = jobLifecycle.updateDumpTicketWeight(businessId, lead, {
+      index: req.params.index,
+      weightTons: w.tons,
+      source: 'manual',
+    });
+    if (result.error === 'not_found') return res.status(404).json({ error: 'Lead not found' });
+    if (result.error === 'ticket_not_found') return res.status(404).json({ error: 'Dump ticket not found' });
+    if (result.error === 'locked') {
+      return res.status(409).json({
+        error: `Invoice ${result.invoiceNumber} for this ticket is already ${result.invoiceStatus} — its weight can't be changed. Issue a refund or a new charge instead.`,
+        locked: true,
+        invoiceId: result.invoiceId,
+      });
+    }
+    if (result.error) return res.status(500).json({ error: 'Failed to update dump ticket' });
+
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    res.json({
+      lead: updated,
+      ticket: result.ticket,
+      overage: result.overage || null,
+      invoiceId: result.invoiceId || null,
+    });
+  } catch (err) {
+    console.error('PATCH /leads/:id/dump-ticket/:index error:', err);
+    res.status(500).json({ error: 'Failed to update dump ticket' });
   }
 });
 
