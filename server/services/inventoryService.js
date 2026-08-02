@@ -54,14 +54,64 @@ function getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId = null
   return counts;
 }
 
-// Compute availability for every pool size for a given date window.
+// Group sizes for counting. Two spellings of the same size ("20 yard" / "20 yd")
+// must land in one bucket, so the key is the leading integer the availability math
+// already keys off. Sizes with no number keep their own bucket.
+function sizeGroupKey(size) {
+  const n = normalizeSize(size);
+  return n !== null ? `n:${n}` : `raw:${String(size || '').trim().toLowerCase()}`;
+}
+
+// Per-size fleet counts, read from the ASSET REGISTRY (Phase 2a). This is the
+// source of "how many do I own" — `inventory_pool.quantity` is no longer read.
+//
+//   quantity          active (non-retired) assets of that size
+//   units_in_service  those of them flagged out_of_service
+//
+// so `quantity − units_in_service` is the sellable count. Location statuses
+// (`out`, `at_yard`) are ignored on purpose: availability is a pure count minus
+// overlapping jobs and must never depend on a unit being assigned to a job.
+//
+// `inventory_pool` is still read — but only as the per-size registry that carries
+// the row `id` and `notes`, and to keep a size visible after its last unit is
+// retired. Sizes that only exist in the fleet get a row with a null id.
+function getFleetBySize(businessId) {
+  const groups = new Map();
+  const upsert = (key, size) => {
+    let g = groups.get(key);
+    if (!g) {
+      g = { id: null, size, notes: null, quantity: 0, units_in_service: 0 };
+      groups.set(key, g);
+    }
+    return g;
+  };
+
+  for (const p of db.prepare('SELECT id, size, notes FROM inventory_pool WHERE business_id = ?').all(businessId)) {
+    const g = upsert(sizeGroupKey(p.size), p.size);
+    // First pool row for a size wins the id/label; later duplicates only add notes.
+    if (g.id === null) { g.id = p.id; g.size = p.size; }
+    if (!g.notes) g.notes = p.notes || null;
+  }
+
+  for (const a of db.prepare('SELECT size, status FROM assets WHERE business_id = ? AND active = 1').all(businessId)) {
+    const g = upsert(sizeGroupKey(a.size), a.size);
+    g.quantity += 1;
+    if (a.status === 'out_of_service') g.units_in_service += 1;
+  }
+
+  const rows = [...groups.values()];
+  rows.sort((a, b) => (normalizeSize(a.size) || 999) - (normalizeSize(b.size) || 999));
+  return rows;
+}
+
+// Compute availability for every size for a given date window.
 // available = owned quantity − units_in_service − overlapping active jobs of that size.
 // Returns an array sorted numerically by size. Scoped to one tenant's inventory.
 function getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId = null, businessId) {
-  const pools = db.prepare('SELECT * FROM inventory_pool WHERE business_id = ?').all(businessId);
+  const fleet = getFleetBySize(businessId);
   const counts = getActiveJobCountsBySize(deliveryDate, pickupDate, excludeLeadId, businessId);
 
-  const result = pools.map(p => {
+  const result = fleet.map(p => {
     const n = normalizeSize(p.size);
     const booked = (n !== null ? counts.get(n) : 0) || 0;
     const owned = p.quantity || 0;
@@ -72,6 +122,7 @@ function getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId = null, b
       size: p.size,
       quantity: owned,
       units_in_service: inService,
+      notes: p.notes || null,
       booked,
       available,
     };
@@ -371,6 +422,7 @@ function enforceAutoBookAvailability(lead, verticalData) {
 
 module.exports = {
   getActiveJobCountsBySize,
+  getFleetBySize,
   getAvailabilityBySize,
   getAvailabilityForSize,
   getNextAvailableDate,

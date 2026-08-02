@@ -1012,6 +1012,94 @@ function runMigrations() {
     WHERE slug = 'valley-binz'
   `).run();
 
+  // ── Pickup rework Phase 2a: per-unit asset registry ───────────────────────
+  // Inventory has been pure counts since the legacy `dumpsters` table was
+  // collapsed into `inventory_pool` (see the block near the top of this file).
+  // Phase 2 reintroduces the physical unit as a first-class row so a later phase
+  // can record WHICH dumpster was dropped and WHICH was picked up.
+  //
+  // `assets` — one row per physical dumpster the business owns.
+  //   label   the number/ID the owner paints on the can; unique per business
+  //   status  available | out | at_yard | out_of_service
+  //           Only `out_of_service` affects availability (a unit down for
+  //           maintenance can't be sold). `out` / `at_yard` are location state
+  //           for 2b and are deliberately NOT part of the availability math —
+  //           "can I book this?" stays a pure count minus overlapping jobs and
+  //           must never require a unit to be assigned to a job.
+  //   active  0 = retired from the fleet (kept for history, excluded from counts)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS assets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER NOT NULL REFERENCES businesses(id),
+      size TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'available',
+      notes TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(business_id, label)
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_assets_business_size ON assets(business_id, size)');
+
+  // `assignments` — the unit↔job link: which asset sat on which job, when it was
+  // dropped, picked up, and weighed. Created here so the model is complete;
+  // NOTHING writes to or reads from it until Phase 2b wires drop/pickup.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS assignments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER NOT NULL REFERENCES businesses(id),
+      asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+      lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+      dropped_at DATETIME,
+      picked_up_at DATETIME,
+      weighed_at DATETIME,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_assignments_lead ON assignments(lead_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_assignments_asset ON assignments(asset_id)');
+
+  // Seed the fleet from the existing pool counts so availability is unchanged the
+  // moment this ships: for each size create `quantity` assets and flag the first
+  // `units_in_service` of them out_of_service. Availability then computes
+  // owned = active assets, in-service = out_of_service assets, and
+  // (owned − in_service) reproduces the pool's (quantity − units_in_service)
+  // exactly — see services/inventoryService.getFleetBySize.
+  //
+  // Guarded per business on "has no asset rows at all". Retiring a unit is a soft
+  // delete (active = 0), so once a business is seeded it can never fall back to
+  // zero rows and re-seed. Labels are generic and owner-renameable.
+  const poolBusinesses = db.prepare(`
+    SELECT DISTINCT business_id FROM inventory_pool WHERE business_id IS NOT NULL
+  `).all();
+  const countAssets = db.prepare('SELECT COUNT(*) AS n FROM assets WHERE business_id = ?');
+  const insertAsset = db.prepare(
+    'INSERT INTO assets (business_id, size, label, status) VALUES (?, ?, ?, ?)'
+  );
+  for (const { business_id: bizId } of poolBusinesses) {
+    if (countAssets.get(bizId).n > 0) continue;
+    const pools = db.prepare(
+      'SELECT size, quantity, units_in_service FROM inventory_pool WHERE business_id = ?'
+    ).all(bizId);
+    let seeded = 0;
+    for (const pool of pools) {
+      const qty = Math.max(0, pool.quantity || 0);
+      const downCount = Math.min(qty, Math.max(0, pool.units_in_service || 0));
+      const size = String(pool.size || '').trim() || 'Unspecified';
+      for (let i = 1; i <= qty; i++) {
+        insertAsset.run(bizId, size, `${size} #${i}`, i <= downCount ? 'out_of_service' : 'available');
+        seeded++;
+      }
+    }
+    if (seeded > 0) {
+      console.log(`[migrations] Seeded ${seeded} asset(s) from inventory_pool for business_id = ${bizId}`);
+    }
+  }
+
   console.log('Database migrations completed successfully.');
 }
 

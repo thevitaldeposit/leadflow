@@ -381,6 +381,27 @@ export const api = {
     }),
   deleteInventory: (id) => request(`/dumpsters/${id}`, { method: 'DELETE' }),
 
+  // Fleet registry — the individual dumpsters a business owns. Per-size counts
+  // (and therefore availability) are derived from these rows.
+  // getFleet resolves to { assets, bySize, statuses }.
+  getFleet: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/assets${qs ? `?${qs}` : ''}`);
+  },
+  createAsset: (body) =>
+    request('/assets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateAsset: (id, body) =>
+    request(`/assets/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  retireAsset: (id) => request(`/assets/${id}`, { method: 'DELETE' }),
+
   // Earliest delivery date after the requested one with a free unit of `size` for
   // the same rental length (the "Next available: …" hint when a window is full).
   // params: { size, delivery_date, rental_duration, exclude_lead_id? }

@@ -619,7 +619,10 @@ const LEADS = [
   }),
 ];
 
-// ── inventory pool ──────────────────────────────────────────────────────────
+// ── inventory ───────────────────────────────────────────────────────────────
+// Availability counts rows in `assets` (Phase 2a), so seeding registers actual
+// units; the inventory_pool row is the per-size registry that carries the id and
+// notes and mirrors the fleet counts.
 const INVENTORY = [
   { size: '10 yard', quantity: 1 },
   { size: '15 yard', quantity: 2 },
@@ -633,9 +636,21 @@ function upsertInventory() {
     ON CONFLICT(business_id, size)
     DO UPDATE SET quantity = excluded.quantity, updated_at = excluded.updated_at
   `);
+  const countUnits = db.prepare(
+    'SELECT COUNT(*) AS n FROM assets WHERE business_id = ? AND size = ? AND active = 1'
+  );
+  const insertAsset = db.prepare(
+    'INSERT INTO assets (business_id, size, label, status) VALUES (?, ?, ?, ?)'
+  );
+
   for (const item of INVENTORY) {
     stmt.run(BUSINESS_ID, item.size, item.quantity, ts(NOW));
+    // Top the fleet up to the target count; existing units keep their labels.
+    for (let i = countUnits.get(BUSINESS_ID, item.size).n + 1; i <= item.quantity; i++) {
+      insertAsset.run(BUSINESS_ID, item.size, `${item.size} #${i}`, 'available');
+    }
   }
+
   const total = INVENTORY.reduce((n, i) => n + i.quantity, 0);
   console.log(`[seed] Inventory upserted for business ${BUSINESS_ID}: ` +
     INVENTORY.map((i) => `${i.quantity}× ${i.size}`).join(', ') + ` (${total} units total)`);

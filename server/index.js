@@ -21,6 +21,7 @@ const uploadRouter = require('./routes/upload');
 const devicesRouter = require('./routes/devices');
 const { router: voiceRouter } = require('./routes/voice');
 const dumpsterRouter = require('./routes/inventory');
+const assetsRouter = require('./routes/assets');
 const scheduleRouter = require('./routes/schedule');
 const settingsRouter = require('./routes/settings');
 const authRouter = require('./routes/auth');
@@ -155,6 +156,7 @@ app.use('/api/invoices', invoicesRouter);
 // Public, tokenized invoice surface (no auth) — the customer's review + sign page.
 app.use('/api/public/invoices', publicInvoicesRouter);
 app.use('/api/dumpsters', dumpsterRouter);
+app.use('/api/assets', assetsRouter);
 app.use('/api/schedule', scheduleRouter);
 app.use('/api/extract', extractRouter);
 app.use('/api/webhook', webhookRouter);

@@ -1,14 +1,25 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Package, PlusCircle, Edit2, Trash2, X, Check, Wrench } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Package, PlusCircle, Edit2, X, Check, Wrench, Truck, Archive, RotateCcw } from 'lucide-react';
 import { api } from '../utils/api';
 
 const SIZE_SUGGESTIONS = ['10 yard', '15 yard', '20 yard', '30 yard', '40 yard'];
 
-function PoolForm({ initial, onSave, onCancel }) {
+// Only `out_of_service` reduces availability — the location statuses are there so
+// the owner can see where a can is, and are what Phase 2b will drive off drops
+// and pickups.
+const STATUS_META = {
+  available: { label: 'Available' },
+  out: { label: 'Out on job' },
+  at_yard: { label: 'At yard' },
+  out_of_service: { label: 'Out of service' },
+};
+const STATUS_ORDER = ['available', 'out', 'at_yard', 'out_of_service'];
+
+function AssetForm({ initial, knownSizes, onSave, onCancel }) {
   const [form, setForm] = useState({
+    label: initial?.label || '',
     size: initial?.size || '',
-    quantity: initial?.quantity ?? 0,
-    units_in_service: initial?.units_in_service ?? 0,
+    status: initial?.status || 'available',
     notes: initial?.notes || '',
   });
   const [saving, setSaving] = useState(false);
@@ -18,14 +29,15 @@ function PoolForm({ initial, onSave, onCancel }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.label.trim()) { setError('Unit number is required'); return; }
     if (!form.size.trim()) { setError('Size is required'); return; }
     setSaving(true);
     setError(null);
     try {
       await onSave({
+        label: form.label.trim(),
         size: form.size.trim(),
-        quantity: Math.max(0, parseInt(form.quantity, 10) || 0),
-        units_in_service: Math.max(0, parseInt(form.units_in_service, 10) || 0),
+        status: form.status,
         notes: form.notes,
       });
     } catch (err) {
@@ -34,42 +46,43 @@ function PoolForm({ initial, onSave, onCancel }) {
     }
   };
 
+  const sizeOptions = [...new Set([...knownSizes, ...SIZE_SUGGESTIONS])];
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       {error && <p className="text-xs text-danger">{error}</p>}
       <div className="grid grid-cols-2 gap-3">
         <div>
+          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">Unit Number</label>
+          <input
+            value={form.label}
+            onChange={e => set('label', e.target.value)}
+            placeholder="e.g. 104"
+            className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </div>
+        <div>
           <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">Size</label>
           <input
             value={form.size}
             onChange={e => set('size', e.target.value)}
-            placeholder="10 yard"
+            placeholder="20 yard"
             list="size-suggestions"
             className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
           <datalist id="size-suggestions">
-            {SIZE_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+            {sizeOptions.map(s => <option key={s} value={s} />)}
           </datalist>
         </div>
         <div>
-          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">Quantity Owned</label>
-          <input
-            type="number"
-            min="0"
-            value={form.quantity}
-            onChange={e => set('quantity', e.target.value)}
+          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">Status</label>
+          <select
+            value={form.status}
+            onChange={e => set('status', e.target.value)}
             className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">Units Needing Service</label>
-          <input
-            type="number"
-            min="0"
-            value={form.units_in_service}
-            onChange={e => set('units_in_service', e.target.value)}
-            className="w-full text-sm border border-divider rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
-          />
+          >
+            {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+          </select>
         </div>
         <div>
           <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">Notes</label>
@@ -102,47 +115,63 @@ function PoolForm({ initial, onSave, onCancel }) {
 }
 
 export default function InventoryPage() {
-  const [pools, setPools] = useState([]);
+  const [assets, setAssets] = useState([]);
+  const [bySize, setBySize] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [showRetired, setShowRetired] = useState(false);
 
-  const load = useCallback(() => {
-    return api.getInventory().then(setPools);
+  const load = useCallback((includeRetired) => {
+    return api.getFleet(includeRetired ? { include_retired: 1 } : {}).then(res => {
+      setAssets(res.assets || []);
+      setBySize(res.bySize || []);
+    });
   }, []);
 
   useEffect(() => {
-    load().catch(console.error).finally(() => setLoading(false));
-  }, [load]);
+    load(showRetired).catch(console.error).finally(() => setLoading(false));
+  }, [load, showRetired]);
 
   const handleAdd = async (form) => {
-    const created = await api.createInventory(form);
-    setPools(prev => [...prev, created]);
+    await api.createAsset(form);
+    await load(showRetired);
     setShowAdd(false);
   };
 
   const handleEdit = async (id, form) => {
-    const updated = await api.updateInventory(id, form);
-    setPools(prev => prev.map(p => p.id === updated.id ? updated : p));
+    await api.updateAsset(id, form);
+    await load(showRetired);
     setEditingId(null);
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Remove this size from inventory?')) return;
-    await api.deleteInventory(id);
-    setPools(prev => prev.filter(p => p.id !== id));
+  // Inline status change without entering full edit mode.
+  const changeStatus = async (asset, status) => {
+    await api.updateAsset(asset.id, { status });
+    await load(showRetired);
   };
 
-  // Inline service adjustment without entering full edit mode.
-  const adjustService = async (pool, value) => {
-    const units_in_service = Math.max(0, Math.min(pool.quantity, parseInt(value, 10) || 0));
-    const updated = await api.updateInventory(pool.id, { units_in_service });
-    setPools(prev => prev.map(p => p.id === updated.id ? updated : p));
+  const handleRetire = async (asset) => {
+    if (!confirm(`Retire ${asset.label} from the fleet? It stops counting toward availability.`)) return;
+    await api.retireAsset(asset.id);
+    await load(showRetired);
   };
 
-  const totalOwned = pools.reduce((sum, p) => sum + (p.quantity || 0), 0);
-  const totalInService = pools.reduce((sum, p) => sum + (p.units_in_service || 0), 0);
-  const totalAvailable = pools.reduce((sum, p) => sum + Math.max(0, (p.quantity || 0) - (p.units_in_service || 0)), 0);
+  const handleUnretire = async (asset) => {
+    await api.updateAsset(asset.id, { active: 1 });
+    await load(showRetired);
+  };
+
+  const knownSizes = useMemo(
+    () => [...new Set(bySize.map(s => s.size).filter(Boolean))],
+    [bySize]
+  );
+
+  const activeAssets = assets.filter(a => a.active !== 0);
+  const retiredAssets = assets.filter(a => a.active === 0);
+  const totalOwned = activeAssets.length;
+  const totalInService = activeAssets.filter(a => a.status === 'out_of_service').length;
+  const totalSellable = totalOwned - totalInService;
 
   if (loading) {
     return (
@@ -152,129 +181,187 @@ export default function InventoryPage() {
     );
   }
 
+  const renderAssetRow = (a) => (
+    editingId === a.id ? (
+      <tr key={a.id} className="bg-surface-2">
+        <td colSpan={5} className="px-5 py-4">
+          <AssetForm
+            initial={a}
+            knownSizes={knownSizes}
+            onSave={(form) => handleEdit(a.id, form)}
+            onCancel={() => setEditingId(null)}
+          />
+        </td>
+      </tr>
+    ) : (
+      <tr key={a.id} className={`hover:bg-surface-2 transition-colors ${a.active === 0 ? 'opacity-50' : ''}`}>
+        <td className="px-5 py-3 font-semibold text-content">{a.label}</td>
+        <td className="px-4 py-3 text-content">{a.size}</td>
+        <td className="px-4 py-3">
+          {a.active === 0 ? (
+            <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full border bg-surface-2 text-muted border-divider">
+              Retired
+            </span>
+          ) : (
+            <select
+              value={a.status}
+              onChange={e => changeStatus(a, e.target.value)}
+              className="text-xs border border-divider rounded-lg px-2 py-1 bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
+            >
+              {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+            </select>
+          )}
+        </td>
+        <td className="px-4 py-3 text-muted text-xs max-w-[200px] truncate">{a.notes || '—'}</td>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-1 justify-end">
+            {a.active === 0 ? (
+              <button
+                onClick={() => handleUnretire(a)}
+                className="p-1.5 rounded text-muted hover:text-success hover:bg-success/10 transition-colors"
+                title="Return to fleet"
+              >
+                <RotateCcw size={13} />
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => setEditingId(a.id)}
+                  className="p-1.5 rounded text-muted hover:text-accent hover:bg-brand/10 transition-colors"
+                  title="Edit"
+                >
+                  <Edit2 size={13} />
+                </button>
+                <button
+                  onClick={() => handleRetire(a)}
+                  className="p-1.5 rounded text-muted hover:text-danger hover:bg-danger/10 transition-colors"
+                  title="Retire"
+                >
+                  <Archive size={13} />
+                </button>
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
+    )
+  );
+
   return (
     <div className="max-w-4xl mx-auto space-y-5">
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-xl border border-divider bg-surface px-4 py-3">
           <p className="text-2xl font-bold text-content">{totalOwned}</p>
-          <p className="text-xs text-muted mt-0.5">Total Units Owned</p>
+          <p className="text-xs text-muted mt-0.5">Dumpsters Owned</p>
         </div>
         <div className="rounded-xl border border-success/30 bg-success/10 px-4 py-3">
-          <p className="text-2xl font-bold text-success">{totalAvailable}</p>
+          <p className="text-2xl font-bold text-success">{totalSellable}</p>
           <p className="text-xs text-success/80 mt-0.5">Available (excl. service)</p>
         </div>
         <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3">
           <p className="text-2xl font-bold text-warning">{totalInService}</p>
-          <p className="text-xs text-warning/80 mt-0.5">Needing Service</p>
+          <p className="text-xs text-warning/80 mt-0.5">Out of Service</p>
         </div>
       </div>
 
       <p className="text-xs text-muted px-1">
-        Availability for a specific date is calculated against active jobs on the Schedule page.
-        Units needing service are removed from availability until you set them back to zero.
+        Availability counts the dumpsters registered below. A unit marked <strong>out of service</strong> is
+        removed from availability until you set it back. Availability for a specific date also subtracts
+        jobs active on that date — see the Schedule page.
       </p>
 
-      {/* Pool table */}
+      {/* Fleet registry */}
       <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-divider flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Package size={16} className="text-muted" />
-            <h2 className="text-sm font-bold text-content">Inventory by Size ({pools.length})</h2>
+            <Truck size={16} className="text-muted" />
+            <h2 className="text-sm font-bold text-content">My Dumpsters ({activeAssets.length})</h2>
           </div>
-          {!showAdd && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 px-3 py-1.5 rounded-lg transition-colors"
+              onClick={() => setShowRetired(v => !v)}
+              className="text-xs text-muted hover:text-content px-2 py-1.5 rounded-lg transition-colors"
             >
-              <PlusCircle size={14} /> Add Size
+              {showRetired ? 'Hide retired' : 'Show retired'}
             </button>
-          )}
+            {!showAdd && (
+              <button
+                onClick={() => setShowAdd(true)}
+                className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <PlusCircle size={14} /> Add Dumpster
+              </button>
+            )}
+          </div>
         </div>
 
         {showAdd && (
           <div className="px-5 py-4 border-b border-divider bg-surface-2">
-            <p className="text-xs font-semibold text-muted mb-3">New Size</p>
-            <PoolForm onSave={handleAdd} onCancel={() => setShowAdd(false)} />
+            <p className="text-xs font-semibold text-muted mb-3">New Dumpster</p>
+            <AssetForm knownSizes={knownSizes} onSave={handleAdd} onCancel={() => setShowAdd(false)} />
           </div>
         )}
 
-        {pools.length === 0 ? (
+        {activeAssets.length === 0 && retiredAssets.length === 0 ? (
           <div className="px-5 py-10 text-center text-sm text-muted">
-            No sizes in inventory yet. Add your first one above.
+            No dumpsters registered yet. Add your first one above.
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-surface-2 border-b border-divider">
               <tr>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Size</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Owned</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Needing Service</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Available</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Unit</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Size</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Status</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Notes</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-divider">
-              {pools.map(p => (
-                editingId === p.id ? (
-                  <tr key={p.id} className="bg-surface-2">
-                    <td colSpan={6} className="px-5 py-4">
-                      <PoolForm
-                        initial={p}
-                        onSave={(form) => handleEdit(p.id, form)}
-                        onCancel={() => setEditingId(null)}
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={p.id} className="hover:bg-surface-2 transition-colors">
-                    <td className="px-5 py-3 font-semibold text-content">{p.size}</td>
-                    <td className="px-4 py-3 text-content">{p.quantity}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <Wrench size={13} className="text-warning" />
-                        <input
-                          type="number"
-                          min="0"
-                          max={p.quantity}
-                          value={p.units_in_service}
-                          onChange={e => adjustService(p, e.target.value)}
-                          className="w-16 text-sm border border-divider rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent"
-                        />
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-semibold text-success">
-                        {Math.max(0, p.quantity - p.units_in_service)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-muted text-xs max-w-[200px] truncate">{p.notes || '—'}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 justify-end">
-                        <button
-                          onClick={() => setEditingId(p.id)}
-                          className="p-1.5 rounded text-muted hover:text-accent hover:bg-brand/10 transition-colors"
-                          title="Edit"
-                        >
-                          <Edit2 size={13} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(p.id)}
-                          className="p-1.5 rounded text-muted hover:text-danger hover:bg-danger/10 transition-colors"
-                          title="Remove"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              ))}
+              {activeAssets.map(renderAssetRow)}
+              {showRetired && retiredAssets.map(renderAssetRow)}
             </tbody>
           </table>
         )}
       </div>
+
+      {/* Per-size rollup — derived from the fleet above */}
+      {bySize.length > 0 && (
+        <div className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-divider flex items-center gap-2">
+            <Package size={16} className="text-muted" />
+            <h2 className="text-sm font-bold text-content">By Size</h2>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-surface-2 border-b border-divider">
+              <tr>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Size</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Owned</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Out of Service</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Sellable</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-divider">
+              {bySize.map(s => (
+                <tr key={s.size} className="hover:bg-surface-2 transition-colors">
+                  <td className="px-5 py-3 font-semibold text-content">{s.size}</td>
+                  <td className="px-4 py-3 text-content">{s.quantity}</td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center gap-1.5 text-content">
+                      <Wrench size={13} className="text-warning" />
+                      {s.units_in_service}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-semibold text-success">
+                    {Math.max(0, s.quantity - s.units_in_service)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
