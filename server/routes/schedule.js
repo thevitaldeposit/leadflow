@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 const { addDaysToISO, getAvailabilityBySize } = require('../services/inventoryService');
+const { onSiteAssignmentsForLeads } = require('../services/assignmentService');
 const { ACTIVE_JOB_STATUSES } = require('../config/jobStatus');
 
 // Every schedule route is scoped to the authenticated business.
@@ -75,6 +76,10 @@ router.get('/calendar', (req, res) => {
         )
     `).all(req.business.id, ...ACTIVE_JOB_STATUSES, firstDay, lastDay, firstDay, lastDay, lastDay, firstDay);
 
+    // The unit(s) on site per job (Phase 2b), fetched in ONE query for the whole
+    // month so the day cards can show which dumpster is where without a call per job.
+    const onSiteByLead = onSiteAssignmentsForLeads(req.business.id, leads.map(l => l.id));
+
     // Build day-by-day map for the entire month
     const dayMap = {};
     const totalDays = lastDayDate.getDate();
@@ -103,6 +108,15 @@ router.get('/calendar', (req, res) => {
         unitsOut: lead.units_out == null ? null : lead.units_out,
         dumpTickets: Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [],
         overageNeedsRate: !!vd.overageNeedsRate,
+        // Physical unit(s) currently on this job — drives the "Unit 12" line on the
+        // day card and tells the drop/pickup card what it's starting from.
+        assignedUnits: (onSiteByLead.get(lead.id) || []).map(a => ({
+          assignmentId: a.id,
+          assetId: a.asset_id,
+          label: a.label,
+          size: a.size,
+          droppedAt: a.dropped_at,
+        })),
       };
 
       if (lead.delivery_date && dayMap[lead.delivery_date]) {

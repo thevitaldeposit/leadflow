@@ -722,6 +722,22 @@ function getCustomerDetail(businessId, customerId) {
       try { bvd = bookedLead && bookedLead.vertical_data ? JSON.parse(bookedLead.vertical_data) : {}; } catch { bvd = {}; }
       e.dump_tickets = Array.isArray(bvd.dumpTickets) ? bvd.dumpTickets : [];
       e.overage_needs_rate = !!bvd.overageNeedsRate;
+      // Which physical dumpster(s) are on this job right now (Phase 2b). Read from
+      // the BOOKED lead — the assignment hangs off the job, not a later follow-up
+      // call — so the profile shows the unit even when the representative call isn't
+      // the booked one. Display only.
+      try {
+        const { onSiteAssignments } = require('./assignmentService');
+        e.assigned_units = bookedLead
+          ? onSiteAssignments(businessId, bookedLead.id).map((a) => ({
+            assignmentId: a.id,
+            assetId: a.asset_id,
+            label: a.label,
+            size: a.size,
+            droppedAt: a.dropped_at,
+          }))
+          : [];
+      } catch { e.assigned_units = []; }
     }
   } catch { /* jobLifecycle unavailable — engagements omit the payment axis */ }
 

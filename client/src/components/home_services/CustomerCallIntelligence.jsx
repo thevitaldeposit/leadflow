@@ -91,6 +91,13 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
   // (schedule.address — booked job + customer corrections win), falling back to this
   // call's own stored address / delivery / property address. Read-only display.
   const schedAddress = schedule?.address ?? (lead.address || vd.deliveryAddress || vd.propertyAddress);
+  // The physical dumpster(s) on this job (Phase 2b). Same override order as above:
+  // the engagement's booked-job units win, falling back to this call's own (the lead
+  // GET carries assigned_units). Display only — assignment happens on the schedule.
+  const assignedUnits = schedule?.assigned_units ?? lead.assigned_units ?? [];
+  const unitLabel = assignedUnits.length
+    ? assignedUnits.map((u) => `Unit ${u.label}`).join(', ')
+    : null;
 
   // Compact mode (one call inside the engagement's collapsed Calls list): show ONLY
   // the call summary and the compact recording player. The structured fields,
@@ -136,6 +143,9 @@ export default function CustomerCallIntelligence({ jobId, compact = false, refre
         <ROField label={t.startDate} value={fmtDate(schedDelivery)} />
         <ROField label={t.endDate} value={fmtDate(schedPickup)} />
         <ROField label={t.startTime} value={formatTime12(schedTime)} />
+        {/* Which physical unit is on the ground — only once one has been captured at
+            drop, so jobs that predate unit capture don't grow an empty field. */}
+        {unitLabel && <ROField label="Unit on Site" value={unitLabel} />}
         {(isDumpster || schedAddress) && (
           <ROField label={t.addressLabel || 'Delivery Address'} value={schedAddress} className="col-span-2 sm:col-span-3" />
         )}

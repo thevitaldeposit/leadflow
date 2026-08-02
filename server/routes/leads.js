@@ -11,6 +11,7 @@ const { reconcileCustomersForBusiness, recomputeCustomerStatus, findOrCreateCust
 const { describeBooking } = require('../services/leadActivityText');
 const { sendToAll } = require('../services/apns');
 const { JOB_STATUS, LEGACY_STATUS, ACTIVE_JOB_STATUS_SET } = require('../config/jobStatus');
+const assignmentService = require('../services/assignmentService');
 
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
 // request to the caller's business when a token is present, else to Valley Binz.
@@ -367,7 +368,9 @@ router.get('/:id', (req, res) => {
   try {
     const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    res.json(lead);
+    // Additive (Phase 2b): the physical unit(s) currently on site for this job, so
+    // every view that already fetches a lead can show which dumpster is where.
+    res.json({ ...lead, assigned_units: assignmentService.onSiteAssignments(req.business.id, lead.id) });
   } catch (err) {
     console.error('GET /leads/:id error:', err);
     res.status(500).json({ error: 'Failed to retrieve lead' });
@@ -1066,6 +1069,65 @@ router.patch('/:id/dump-ticket/:index', requireAuth, (req, res) => {
   } catch (err) {
     console.error('PATCH /leads/:id/dump-ticket/:index error:', err);
     res.status(500).json({ error: 'Failed to update dump ticket' });
+  }
+});
+
+// ── Unit assignment (pickup rework, Phase 2b) ──────────────────────────────────
+// Which physical dumpster is on this job. Capture only: these endpoints never touch
+// overage, dump tickets, units_out, the swap markers, or the completion gate.
+
+// GET /api/leads/:id/units — what the drop/pickup card renders:
+//   { jobSize, onSite[], available[] (sizeMatches flagged), history[] }
+router.get('/:id/units', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    res.json(assignmentService.unitsForLead(businessId, lead));
+  } catch (err) {
+    console.error('GET /leads/:id/units error:', err);
+    res.status(500).json({ error: 'Failed to retrieve units for this job' });
+  }
+});
+
+// POST /api/leads/:id/units/drop — record the dumpster dropped at delivery. Body:
+//   { assetId, notes? }
+// Creates the assignment and flips the unit to 'out'. 409 when that unit is already
+// out somewhere — a unit can only be on one job at a time. Also the swap-replacement
+// drop: a job may hold several open assignments at once.
+router.post('/:id/units/drop', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const b = req.body || {};
+    res.json(assignmentService.dropUnit(businessId, lead, {
+      assetId: b.assetId,
+      notes: typeof b.notes === 'string' ? b.notes.trim() : null,
+    }));
+  } catch (err) {
+    if (err && err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /leads/:id/units/drop error:', err);
+    res.status(500).json({ error: 'Failed to assign the unit' });
+  }
+});
+
+// POST /api/leads/:id/units/pickup — record which dumpster came back. Body: { assetId }
+// Stamps that assignment's picked_up_at and sends the unit to 'at_yard'. The unit must
+// actually be on site for THIS job. Weight / dump-ticket entry is unchanged and stays
+// a separate step (POST /:id/dump-ticket).
+router.post('/:id/units/pickup', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    res.json(assignmentService.pickUpUnit(businessId, lead, { assetId: (req.body || {}).assetId }));
+  } catch (err) {
+    if (err && err.status) return res.status(err.status).json({ error: err.message });
+    console.error('POST /leads/:id/units/pickup error:', err);
+    res.status(500).json({ error: 'Failed to record the pickup' });
   }
 });
 

@@ -94,6 +94,25 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
     }),
+  // ── Unit assignment (which physical dumpster is on a job) ────────────────────
+  // getLeadUnits resolves to { jobSize, onSite[], available[], history[] }. Capture
+  // only — none of these touch weight, overage, or the job's completion.
+  getLeadUnits: (id) => request(`/leads/${id}/units`),
+  // Record the unit dropped at delivery. Body: { assetId, notes? }. Rejects a unit
+  // that's already out on another job.
+  dropUnit: (id, body) =>
+    request(`/leads/${id}/units/drop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    }),
+  // Record which unit came back. Body: { assetId } — must be on site for this job.
+  pickUpUnit: (id, body) =>
+    request(`/leads/${id}/units/pickup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    }),
   // Resolve a confirm-first cancellation cue. confirm=true → mark lost; false → keep.
   resolveCancel: (id, confirm) =>
     request(`/leads/${id}/cancel`, {

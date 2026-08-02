@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Calendar, Package, Phone, Navigation, Scale } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar, Package, Phone, Navigation, Scale, Truck } from 'lucide-react';
 import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
 import DumpTicketAction from '../components/home_services/DumpTicketAction';
+import { UnitDropAction, UnitPickupStep } from '../components/home_services/UnitAssignmentAction';
 
 // This page serves the Home Services dumpster-rental business; wording comes from
 // the shared terminology table so the same calendar can label other verticals.
@@ -194,9 +195,9 @@ function CalendarSection() {
 
   useEffect(() => { load(year, month); }, [year, month, load]);
 
-  // Re-pull the month after a pickup is recorded from a day card, so the ticket list,
-  // units-out and any completed job reflect immediately (a completed job leaves the
-  // calendar entirely).
+  // Re-pull the month after a drop or pickup is recorded from a day card, so the
+  // assigned unit, the ticket list, units-out and any completed job reflect
+  // immediately (a completed job leaves the calendar entirely).
   const reload = useCallback(() => load(year, month), [load, year, month]);
 
   function prevMonth() {
@@ -344,7 +345,7 @@ function CalendarSection() {
               ) : (
                 <div className="divide-y divide-divider">
                   {[...selectedData.deliveries].sort(byScheduledTime).map(job => (
-                    <DayJobRow key={`d-${job.id}`} job={job} type="delivery" navigate={navigate} />
+                    <DayJobRow key={`d-${job.id}`} job={job} type="delivery" navigate={navigate} onChanged={reload} />
                   ))}
                   {[...selectedData.pickups].sort(byScheduledTime).map(job => (
                     <DayJobRow key={`p-${job.id}`} job={job} type="pickup" navigate={navigate} onChanged={reload} />
@@ -368,12 +369,21 @@ function directionsUrl(address) {
   return address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}` : null;
 }
 
-// A pickup is a job to DO, so its row carries the three things the owner needs on site:
-// call the customer, navigate to the address, and record the weight — the same
-// DumpTicketAction the customer profile uses, opened right here. Deliveries and active
-// rentals stay informational (the card still opens the job).
+// Deliveries and pickups are jobs to DO, so both rows carry what the driver needs on
+// site: call the customer, navigate to the address, and record the unit —
+//   delivery → which dumpster went on the ground (required; also the swap replacement)
+//   pickup   → which of the job's on-site units came back (required), then the weight,
+//              the same DumpTicketAction the customer profile uses, unchanged.
+// Active rentals stay informational (the card still opens the job).
 function DayJobRow({ job, type, navigate, onChanged }) {
   const [showWeight, setShowWeight] = useState(false);
+  const [showDrop, setShowDrop] = useState(false);
+  // The unit step gates the weight entry only while a captured unit is still on site;
+  // a job delivered before unit capture existed (no assignment) falls straight through
+  // to the weight entry exactly as it did before. Holds the label just picked up so the
+  // step reads as "Unit 41 picked up" rather than reverting to the no-unit note.
+  const [pickedLabel, setPickedLabel] = useState(null);
+  const onSite = job.assignedUnits || [];
   const typeConfig = {
     delivery: { label: term.startBadge, bg: 'bg-success/10 text-success' },
     pickup: { label: term.endBadge, bg: 'bg-brand/10 text-brand' },
@@ -384,6 +394,7 @@ function DayJobRow({ job, type, navigate, onChanged }) {
   const timeLabel = type === 'active' ? null : (formatTime12(job.scheduledTime) || 'Flexible');
 
   const isPickup = type === 'pickup';
+  const isDelivery = type === 'delivery';
   const tel = job.phone ? `tel:${String(job.phone).replace(/[^\d+]/g, '')}` : null;
   const maps = directionsUrl(job.address);
   // units_out is only initialized once the delivery date lands, so treat "unknown"
@@ -411,10 +422,16 @@ function DayJobRow({ job, type, navigate, onChanged }) {
           </div>
           {job.dumpsterSize && <p className="text-xs text-muted">{job.dumpsterSize}</p>}
           {job.address && <p className="text-xs text-muted truncate">{job.address}</p>}
+          {/* Which physical dumpster is sitting on this job right now. */}
+          {onSite.length > 0 && (
+            <p className="text-xs font-semibold text-brand mt-0.5">
+              {onSite.map(u => `Unit ${u.label}`).join(', ')} on site
+            </p>
+          )}
         </div>
       </button>
 
-      {isPickup && (
+      {(isPickup || isDelivery) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-1">
           {tel ? (
             <a href={tel} className={`${actionClass} text-content bg-surface-2 hover:bg-divider`}>
@@ -434,6 +451,14 @@ function DayJobRow({ job, type, navigate, onChanged }) {
               <Navigation size={11} /> Navigate
             </span>
           )}
+          {isDelivery && (
+            <button
+              onClick={() => setShowDrop(v => !v)}
+              className={`${actionClass} ${showDrop ? 'text-white bg-brand' : 'text-brand bg-brand/10 hover:bg-brand/20'}`}
+            >
+              <Truck size={11} /> {showDrop ? 'Close' : (onSite.length > 0 ? 'Assign another unit' : 'Record drop')}
+            </button>
+          )}
           {canRecord && (
             <button
               onClick={() => setShowWeight(v => !v)}
@@ -445,16 +470,38 @@ function DayJobRow({ job, type, navigate, onChanged }) {
         </div>
       )}
 
-      {showWeight && (
+      {/* Drop: the unit number is required, so this is the whole step. */}
+      {showDrop && (
         <div className="mt-2.5 pl-1">
-          <DumpTicketAction
-            compact
+          <UnitDropAction
             leadId={job.id}
-            unitsOut={job.unitsOut}
-            dumpTickets={job.dumpTickets || []}
-            overageNeedsRate={job.overageNeedsRate}
+            jobSize={job.dumpsterSize}
             onDone={onChanged}
+            onCancel={() => setShowDrop(false)}
           />
+        </div>
+      )}
+
+      {/* Pickup: which unit came back (required while one is on site), then the
+          unchanged weight / dump-ticket entry. */}
+      {showWeight && (
+        <div className="mt-2.5 pl-1 space-y-3">
+          <UnitPickupStep
+            leadId={job.id}
+            onSite={onSite}
+            pickedLabel={pickedLabel}
+            onPicked={(res) => { setPickedLabel(res?.assignment?.label || '—'); onChanged?.(); }}
+          />
+          {(pickedLabel || onSite.length === 0) && (
+            <DumpTicketAction
+              compact
+              leadId={job.id}
+              unitsOut={job.unitsOut}
+              dumpTickets={job.dumpTickets || []}
+              overageNeedsRate={job.overageNeedsRate}
+              onDone={onChanged}
+            />
+          )}
         </div>
       )}
     </div>

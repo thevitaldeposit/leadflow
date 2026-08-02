@@ -990,6 +990,10 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
           // follow-up call's raw vd.deliveryAddress). Threaded like the size/date
           // overrides above so the Job Details grid shows where THIS job went.
           address: e.address,
+          // Physical unit(s) on site for THIS job — read off the booked lead's open
+          // assignments (Phase 2b), so the grid names the dumpster even when the
+          // representative call isn't the booked one.
+          assigned_units: e.assigned_units,
         }}
       />
       {/* Calls — ALL calls in this engagement, uniformly collapsed by default. Each
