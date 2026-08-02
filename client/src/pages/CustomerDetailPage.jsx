@@ -1040,6 +1040,11 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
               unitsOut={e.units_out}
               dumpTickets={e.dump_tickets || []}
               overageNeedsRate={e.overage_needs_rate}
+              // The can(s) on site for this job: the weight is attributed to whichever
+              // one came back (auto-selected when there's only one), so the overage
+              // prices against that unit's size and the unit leaves the yard queue
+              // instead of waiting to be weighed a second time.
+              units={e.assigned_units || []}
               onDone={() => onPaymentChange?.()}
             />
           )}

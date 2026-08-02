@@ -1,24 +1,32 @@
 const db = require('../db/database');
 const { getAsset, updateAsset } = require('./assetService');
 const { normalizeSize } = require('./inventoryService');
-const { sizeKeyMatches } = require('./sizeKey');
+const { sizeKeyMatches, normalizeSizeKey } = require('./sizeKey');
 const { logActivity } = require('./activityLog');
+const { emitToBusiness } = require('../socket');
 
-// ── Unit ↔ job assignments (pickup rework, Phase 2b) ─────────────────────────
+// ── Unit ↔ job assignments (pickup rework, Phase 2b + 2c) ────────────────────
 //
 // Which physical dumpster sat on which job. The `assignments` table was created
 // empty in 2a; this is the layer that fills it:
 //   drop    → new row (dropped_at = now), asset status 'out'
 //   pickup  → stamp picked_up_at on that row, asset status 'at_yard'
+//   weigh   → stamp weighed_at on that row, asset status 'available'  (2c)
 //
 // A job can hold several assignments over its life (a swap = the replacement is a
 // second row), which is why this is a link table and not a column on the lead.
 //
-// CAPTURE ONLY. This module deliberately does not touch overage, dump tickets,
-// units_out, the swap markers (pendingSwapOuts / swapOutsApplied), or the
-// completion gate — per-unit attribution is Phase 2c. It also doesn't feed
-// availability: 2a's math is a pure per-size count and must never require a unit
-// to be assigned, so `out` / `at_yard` stay location state only.
+// Phase 2c makes the assignment the ANCHOR for weight attribution: the row names
+// both the unit and the job, so a ticket bills the job the can actually sat on
+// rather than whichever lead the owner had open. This module still owns none of
+// that logic — it exposes the lookups (getAssignment, yardUnits) and the state
+// stamp (markWeighed); overage, dump tickets, units_out, the swap markers
+// (pendingSwapOuts / swapOutsApplied) and the completion gate all stay in
+// jobLifecycle, unchanged in how they decide anything.
+//
+// It also doesn't feed availability: 2a's math is a pure per-size count and must
+// never require a unit to be assigned, so `out` / `at_yard` / `available` stay
+// location state only.
 
 function nowIso() { return new Date().toISOString(); }
 
@@ -82,6 +90,85 @@ function onSiteAssignmentsForLeads(businessId, leadIds = []) {
   return map;
 }
 
+// One assignment by id, with its unit's label/size. The anchor Phase 2c weight
+// attribution resolves against: this row names the unit AND the job, so a ticket
+// carrying an assignment id bills that job no matter which screen it was entered from.
+function getAssignment(businessId, id) {
+  const n = Number(id);
+  if (!Number.isFinite(n)) return null;
+  return db.prepare(`${ASSIGNMENT_SELECT} WHERE asg.id = ? AND asg.business_id = ?`).get(n, businessId) || null;
+}
+
+// ── The YARD QUEUE (2c) ───────────────────────────────────────────────────────
+// Units that came back but whose weight hasn't been entered yet — picked up, not
+// weighed. This is the weekend case: several cans collected Saturday, weighed over
+// the following days, each still owing its ticket to its OWN job. Oldest pickup
+// first (the one that's been sitting longest is the one to clear).
+//
+// A row with no job is excluded — there'd be nothing to attribute its weight to.
+// Rows are joined to the lead so the queue can name the customer without a query
+// per unit.
+function yardUnits(businessId) {
+  const rows = db.prepare(`
+    SELECT asg.id AS assignment_id, asg.asset_id, asg.lead_id,
+           asg.dropped_at, asg.picked_up_at,
+           ast.label, ast.size,
+           l.customer_first_name, l.customer_last_name, l.vertical_data,
+           l.job_status, l.units_out
+    FROM assignments asg
+    JOIN assets ast ON ast.id = asg.asset_id
+    JOIN leads l ON l.id = asg.lead_id
+    WHERE asg.business_id = ?
+      AND asg.picked_up_at IS NOT NULL
+      AND asg.weighed_at IS NULL
+      AND (l.discarded = 0 OR l.discarded IS NULL)
+    ORDER BY asg.picked_up_at ASC, asg.id ASC
+  `).all(businessId);
+
+  return rows.map((r) => {
+    let vd = {};
+    try { vd = r.vertical_data ? JSON.parse(r.vertical_data) : {}; } catch { vd = {}; }
+    const name = [r.customer_first_name, r.customer_last_name].filter(Boolean).join(' ').trim();
+    return {
+      assignmentId: r.assignment_id,
+      assetId: r.asset_id,
+      leadId: r.lead_id,
+      label: r.label,
+      size: r.size,
+      droppedAt: r.dropped_at,
+      pickedUpAt: r.picked_up_at,
+      jobStatus: r.job_status,
+      unitsOut: r.units_out == null ? null : r.units_out,
+      jobSize: vd.dumpsterSize || null,
+      customerName: vd.customerName || name || `Job #${r.lead_id}`,
+      address: vd.deliveryAddress || null,
+    };
+  });
+}
+
+// Close the loop on a weighed unit: stamp weighed_at and put the can back in the
+// available pool. Called by jobLifecycle.recordDumpTicket once the ticket is written.
+//
+// A weight is only ever entered for a can that's off the job, so an assignment
+// weighed without a recorded pickup is stamped picked up at the same moment —
+// leaving it "on site" would keep offering it in the pickup picker forever and keep
+// its unit blocked from the next job.
+function markWeighed(businessId, assignmentId, at = nowIso()) {
+  const row = getAssignment(businessId, assignmentId);
+  if (!row) return null;
+  if (row.picked_up_at) {
+    db.prepare('UPDATE assignments SET weighed_at = ?, updated_at = ? WHERE id = ? AND business_id = ?')
+      .run(at, at, row.id, businessId);
+  } else {
+    db.prepare('UPDATE assignments SET picked_up_at = ?, weighed_at = ?, updated_at = ? WHERE id = ? AND business_id = ?')
+      .run(at, at, at, row.id, businessId);
+  }
+  // Location state only — availability counts neither 'at_yard' nor 'available'
+  // differently, so this is purely "the can is ready to go out again".
+  updateAsset(businessId, row.asset_id, { status: 'available' });
+  return getAssignment(businessId, assignmentId);
+}
+
 // The open assignment for a unit ANYWHERE in the business — the guard behind "a unit
 // can only be out on one job at a time". Carries the other job's name for the error.
 function openAssignmentForAsset(businessId, assetId) {
@@ -143,6 +230,36 @@ function unitsForLead(businessId, lead) {
   };
 }
 
+// ── Size write-back (2c) ──────────────────────────────────────────────────────
+// The job's `vd.dumpsterSize` is what availability counts against, what the pricing
+// resolver joins on and what the UI displays. When the can actually on the ground is
+// a different size — a swap to a bigger unit, or a substitution at delivery — that
+// field went stale and everything downstream resolved against a size that isn't
+// there. Dropping a unit is the moment we learn the truth, so write it back.
+//
+// The originally booked size is preserved once in `dumpsterSizeOriginal` (never
+// overwritten by a later swap), so the quote the customer was given is still on the
+// record. Refuses to write a size that isn't size-shaped ("Unspecified", a blank
+// label) — a junk asset size must never clobber a good job size.
+//
+// Returns true when the job was actually rewritten. Pricing already issued (the base
+// rental invoice) is untouched; this only changes what LATER math resolves against.
+function writeBackJobSize(businessId, lead, newSize, previousSize) {
+  if (normalizeSizeKey(newSize) == null) return false;
+  let vd = {};
+  try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+  if (!vd.dumpsterSizeOriginal && previousSize) vd.dumpsterSizeOriginal = previousSize;
+  vd.dumpsterSize = String(newSize).trim();
+
+  const at = nowIso();
+  db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(vd), at, lead.id);
+  lead.vertical_data = JSON.stringify(vd);
+  lead.updated_at = at;
+  try { emitToBusiness(businessId, 'lead_updated', lead); } catch { /* non-fatal */ }
+  return true;
+}
+
 // Record the DROP: this unit is now on this job. Required at delivery — the driver
 // picks the actual number off the can, and the same action drops a swap replacement
 // (a second open assignment on the same job).
@@ -173,15 +290,18 @@ function dropUnit(businessId, lead, { assetId, notes = null } = {}) {
   // neither 'out' nor 'at_yard' changes what availability counts.
   updateAsset(businessId, id, { status: 'out' });
 
-  // Note the size only when the driver substituted a different one than the job asked
-  // for — that's the detail worth reading back on the timeline.
+  // A different size than the job records is now the job's reality — write it back
+  // (see writeBackJobSize). This is the size-changing-swap bug: dropping a bigger can
+  // as the replacement never updated the job, so availability counted the old size and
+  // every later price resolved against it.
   let jobSize = null;
   try { jobSize = (lead.vertical_data ? JSON.parse(lead.vertical_data) : {}).dumpsterSize || null; } catch { /* ignore */ }
   const substituted = jobSize && !sizeKeyMatches(asset.size, jobSize);
+  const wroteBack = substituted && writeBackJobSize(businessId, lead, asset.size, jobSize);
   logActivity(
     lead.id,
     'note_added',
-    `Unit ${asset.label} dropped on site${substituted ? ` — ${asset.size} substituted for the ${jobSize} requested` : ''}`
+    `Unit ${asset.label} dropped on site${substituted ? ` — ${asset.size} substituted for the ${jobSize} requested${wroteBack ? `; job size updated to ${asset.size}` : ''}` : ''}`
   );
 
   return {
@@ -230,6 +350,9 @@ module.exports = {
   onSiteAssignments,
   onSiteAssignmentsForLeads,
   openAssignmentForAsset,
+  getAssignment,
+  yardUnits,
+  markWeighed,
   assignableAssets,
   unitsForLead,
   dropUnit,

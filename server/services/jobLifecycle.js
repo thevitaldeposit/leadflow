@@ -346,12 +346,41 @@ function overageLineItem(overage, size) {
 //       keeps a unit out, so the first of two tickets never completes the job.
 // The future photo-OCR feature calls this with the same shape (it just auto-fills what
 // the owner types now) — pass source:'ocr'.
-function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = false, unitsRemaining, note = null, source = 'manual' } = {}) {
-  const lead = loadLead(businessId, leadOrId);
+//
+// ── Phase 2c: the weight belongs to a UNIT, and the unit names the job ─────────
+// Pass `assignmentId` (the can that came back) and THAT assignment's job is what gets
+// billed and what advances — not whichever lead the owner happened to have open. Three
+// things follow from anchoring on the assignment, and nothing else changes:
+//   • the overage prices against the size of the unit ON THE GROUND (read off the
+//     asset), so a swap to a different size bills the right allowance/rate;
+//   • units_out, the swap markers and the completion gate run on the assignment's
+//     job — two concurrent jobs now settle independently. HOW completion is decided
+//     is untouched: still units_out reaching 0, still the same marker logic;
+//   • the assignment is stamped weighed_at and its unit returns to 'available'.
+// No assignmentId (a job delivered before unit capture existed, an older client, the
+// iOS app) → the by-lead path below is byte-identical to before.
+function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = false, unitsRemaining, note = null, source = 'manual', assignmentId = null } = {}) {
+  let assignment = null;
+  if (assignmentId !== null && assignmentId !== undefined && assignmentId !== '') {
+    assignment = require('./assignmentService').getAssignment(businessId, assignmentId);
+    if (!assignment) return { error: 'assignment_not_found' };
+    // One haul, one ticket. A second weight for the same unit would decrement units_out
+    // twice; corrections go through updateDumpTicketWeight instead.
+    if (assignment.weighed_at) return { error: 'already_weighed', unitLabel: assignment.label };
+    if (!assignment.lead_id) return { error: 'assignment_has_no_job', unitLabel: assignment.label };
+  }
+
+  const lead = loadLead(businessId, assignment ? assignment.lead_id : leadOrId);
   if (!lead) return { error: 'not_found' };
   const at = nowIso();
   const vd = parseVd(lead);
-  const size = vd.dumpsterSize || null;
+  // The job's booked size — still what a swap REPLACEMENT's rental is priced on
+  // (that charge is about the can going out, not the one coming back).
+  const jobSize = vd.dumpsterSize || null;
+  // The size the overage is priced against: the unit that actually came back. Falls
+  // back to the job's size when no unit was captured (legacy jobs), which is exactly
+  // what this used before.
+  const size = (assignment && assignment.size) || jobSize;
 
   // Overage is priced against THIS unit's size (allowance + $/ton from pricing_config).
   const overage = weightTons != null && weightTons !== '' ? computeOverage(businessId, weightTons, { size }) : null;
@@ -391,18 +420,18 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   // SKIP billing it here when a call-driven swap invoice was already sent/paid for this job
   // (swaps are now billed pay-in-advance from the call) — otherwise the swap is double-billed.
   let swapCharge = null;
-  const swapPreBilled = !!(swap && size) && swapAlreadyBilled(businessId, lead.id);
-  if (swap && size && !swapPreBilled) {
+  const swapPreBilled = !!(swap && jobSize) && swapAlreadyBilled(businessId, lead.id);
+  if (swap && jobSize && !swapPreBilled) {
     try {
       const pricingService = require('./pricingService');
       const customerRow = lead.customer_id
         ? db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(lead.customer_id, businessId)
         : null;
-      const sw = pricingService.resolveSwapPrice(businessId, { size, days: swapWindowDays(lead), customer: customerRow });
+      const sw = pricingService.resolveSwapPrice(businessId, { size: jobSize, days: swapWindowDays(lead), customer: customerRow });
       if (sw && sw.mode !== 'off' && sw.amount != null && sw.amount > 0) {
         swapCharge = sw.amount;
         lineItems.push({
-          description: `Swap replacement — ${size} (${swapWindowDays(lead)} day${swapWindowDays(lead) === 1 ? '' : 's'})`,
+          description: `Swap replacement — ${jobSize} (${swapWindowDays(lead)} day${swapWindowDays(lead) === 1 ? '' : 's'})`,
           quantity: 1,
           unit: null,
           unit_rate: sw.amount,
@@ -435,6 +464,13 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     swapOut: consumedSwapOut,   // this haul was the original unit pulled during a paid swap
     unitsOutAfter: after,
     invoiceId: overageInvoiceId,
+    // Which physical can this weight came off, and the size its overage was priced
+    // against — so a later correction re-prices against the SAME size (not the job's
+    // current one, which a swap may since have changed) and the timeline names the unit.
+    size,
+    assignmentId: assignment ? assignment.id : null,
+    assetId: assignment ? assignment.asset_id : null,
+    unitLabel: assignment ? assignment.label : null,
   };
   vd.dumpTickets = Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [];
   vd.dumpTickets.push(ticket);
@@ -448,14 +484,23 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     .run(after, JSON.stringify(vd), at, lead.id);
   lead.units_out = after; lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
 
+  // Close the unit out: weighed_at stamped, can back in the available pool, so it
+  // leaves the yard queue and can't be weighed onto a second job. Non-fatal — the
+  // ticket above is already the billing record of truth.
+  if (assignment) {
+    try { require('./assignmentService').markWeighed(businessId, assignment.id, at); }
+    catch (e) { console.error('[jobLifecycle] markWeighed failed:', e.message); }
+  }
+
   const wStr = describeWeight(overage ? overage.weightTons : null);
+  const unitStr = assignment ? ` · Unit ${assignment.label}` : '';
   const oStr = overage && overage.overTons > 0
     ? (overage.amount != null ? ` · overage ${overage.overTons}t ($${overage.amount})` : ` · overage ${overage.overTons}t (rate not configured)`)
     : '';
   const swapNote = swap
     ? (swapPreBilled ? ' · swap-out, unit still on site (swap already billed from the call)' : ' · swap-out, unit still on site')
     : (consumedSwapOut ? ' · swap-out haul (paid swap) — replacement still on site' : '');
-  logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${swapNote}${oStr}`);
+  logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${unitStr}${swapNote}${oStr}`);
 
   // Advance only when the LAST unit is back (swap-safe). Completion is gated on payment.
   let advancedTo = null;
@@ -504,7 +549,10 @@ function updateDumpTicketWeight(businessId, leadOrId, { index, weightTons = null
   const i = Math.round(Number(index));
   if (!Number.isInteger(i) || i < 0 || i >= tickets.length) return { error: 'ticket_not_found' };
   const ticket = tickets[i];
-  const size = vd.dumpsterSize || null;
+  // Re-price against the size THIS ticket was recorded for — the unit that came back
+  // (2c), not the job's current size, which a later swap may have changed. Tickets
+  // written before 2c carry no size and fall back to the job's, exactly as before.
+  const size = ticket.size || vd.dumpsterSize || null;
   const invoiceService = require('./invoiceService');
 
   // The live invoice this ticket billed to, if any (a voided one counts as gone).

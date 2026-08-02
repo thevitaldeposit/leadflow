@@ -5,6 +5,7 @@ import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
 import DumpTicketAction from '../components/home_services/DumpTicketAction';
 import { UnitDropAction, UnitPickupStep } from '../components/home_services/UnitAssignmentAction';
+import YardQueue from '../components/home_services/YardQueue';
 
 // This page serves the Home Services dumpster-rental business; wording comes from
 // the shared terminology table so the same calendar can label other verticals.
@@ -380,9 +381,10 @@ function DayJobRow({ job, type, navigate, onChanged }) {
   const [showDrop, setShowDrop] = useState(false);
   // The unit step gates the weight entry only while a captured unit is still on site;
   // a job delivered before unit capture existed (no assignment) falls straight through
-  // to the weight entry exactly as it did before. Holds the label just picked up so the
-  // step reads as "Unit 41 picked up" rather than reverting to the no-unit note.
-  const [pickedLabel, setPickedLabel] = useState(null);
+  // to the weight entry exactly as it did before. Holds the unit just picked up — its
+  // label so the step reads as "Unit 41 picked up", and its ASSIGNMENT so the weight
+  // entered next is attributed to that can and its job (Phase 2c).
+  const [picked, setPicked] = useState(null);
   const onSite = job.assignedUnits || [];
   const typeConfig = {
     delivery: { label: term.startBadge, bg: 'bg-success/10 text-success' },
@@ -489,16 +491,23 @@ function DayJobRow({ job, type, navigate, onChanged }) {
           <UnitPickupStep
             leadId={job.id}
             onSite={onSite}
-            pickedLabel={pickedLabel}
-            onPicked={(res) => { setPickedLabel(res?.assignment?.label || '—'); onChanged?.(); }}
+            pickedLabel={picked?.label}
+            onPicked={(res) => {
+              setPicked({ label: res?.assignment?.label || '—', assignmentId: res?.assignment?.id || null });
+              onChanged?.();
+            }}
           />
-          {(pickedLabel || onSite.length === 0) && (
+          {(picked || onSite.length === 0) && (
             <DumpTicketAction
               compact
               leadId={job.id}
               unitsOut={job.unitsOut}
               dumpTickets={job.dumpTickets || []}
               overageNeedsRate={job.overageNeedsRate}
+              // The can just picked up — its weight bills THIS job and prices against
+              // that unit's size. Null for a job delivered before unit capture.
+              assignmentId={picked?.assignmentId || null}
+              unitLabel={picked?.label || null}
               onDone={onChanged}
             />
           )}
@@ -513,6 +522,9 @@ function DayJobRow({ job, type, navigate, onChanged }) {
 export default function SchedulePage() {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      {/* Cans sitting at the yard still owing a weight — leads because it's work the
+          owner already owes; renders nothing when the yard is clear. */}
+      <YardQueue />
       <AvailabilitySection />
       <CalendarSection />
     </div>

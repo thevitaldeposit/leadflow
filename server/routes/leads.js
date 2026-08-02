@@ -991,10 +991,18 @@ function resolveWeightTons(body) {
 
 // POST /api/leads/:id/dump-ticket — manual weight / dump-ticket entry for a returned
 // unit (the OCR feature will call the SAME jobLifecycle path with source:'ocr'). Body:
-//   { weightLbs?, swap?, unitsRemaining?, note? }   (legacy `weightTons` still accepted)
+//   { weightLbs?, swap?, unitsRemaining?, note?, assignmentId? }
+//   (legacy `weightTons` still accepted)
 // Records the ticket + any overage (invoice when a rate is configured, else flagged),
 // then advances the lifecycle SWAP-SAFELY (only past active_rental once no unit is
 // still out). Web-dashboard only → hard auth.
+//
+// `assignmentId` (Phase 2c) names the physical unit the weight came off. The ticket is
+// then attributed to THAT assignment's job — the overage prices against the unit's own
+// size and units_out / completion run on the job the can actually sat on. The path's
+// :id is the caller's view of the job and stays the tenant guard; when the two point at
+// different leads the assignment wins, because it's the one that knows which can this
+// weight belongs to. Omit it and the behavior is exactly what it was before 2c.
 router.post('/:id/dump-ticket', requireAuth, (req, res) => {
   try {
     const businessId = req.business.id;
@@ -1010,12 +1018,28 @@ router.post('/:id/dump-ticket', requireAuth, (req, res) => {
       unitsRemaining: b.unitsRemaining,
       note: typeof b.note === 'string' ? b.note.trim() : null,
       source: 'manual',
+      assignmentId: b.assignmentId != null && b.assignmentId !== '' ? b.assignmentId : null,
     });
     if (result.error === 'not_found') return res.status(404).json({ error: 'Lead not found' });
+    if (result.error === 'assignment_not_found') {
+      return res.status(404).json({ error: 'That unit assignment no longer exists — reload and try again' });
+    }
+    if (result.error === 'already_weighed') {
+      return res.status(409).json({
+        error: `Unit ${result.unitLabel} has already been weighed for this haul — edit that dump ticket's weight instead.`,
+      });
+    }
+    if (result.error === 'assignment_has_no_job') {
+      return res.status(400).json({ error: `Unit ${result.unitLabel} isn't linked to a job, so its weight can't be billed` });
+    }
+    if (result.error) return res.status(500).json({ error: 'Failed to record dump ticket' });
 
-    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    // Re-read the lead the ticket actually landed on (the assignment's job, which may
+    // not be the :id in the path).
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(result.lead.id, businessId);
     res.json({
       lead: updated,
+      leadId: result.lead.id,
       overage: result.overage || null,
       advancedTo: result.advancedTo || null,
       unitsOut: result.unitsOut,

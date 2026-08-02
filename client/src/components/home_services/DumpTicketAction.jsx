@@ -16,6 +16,15 @@ import { api } from '../../utils/api';
 //
 // Rendered on the customer profile AND on the schedule's pickup card (compact — no
 // outer card chrome), so a pickup can be recorded from wherever the owner is standing.
+//
+// The weight belongs to a UNIT (Phase 2c). Callers name it one of two ways:
+//   • assignmentId — the unit is already settled (the schedule's pickup step just
+//     recorded which can came back), so this just passes it through.
+//   • units[]      — the job's on-site cans; the owner picks which one is being
+//     weighed (auto-selected when there's only one).
+// Either way the server attributes the ticket to that unit's job and prices the
+// overage on the unit's own size. Neither given (a job delivered before unit capture)
+// → the by-lead path, unchanged.
 
 const LBS_PER_TON = 2000;
 
@@ -68,6 +77,7 @@ function TicketRow({ leadId, ticket: t, index, onDone }) {
         <Check size={12} className="text-success flex-shrink-0 mt-0.5" />
         <span className="flex-1">
           {describeWeight(t.weightTons)}
+          {t.unitLabel ? ` · Unit ${t.unitLabel}` : ''}
           {t.editedAt ? ' · corrected' : ''}
           {t.swap ? ' · swap-out' : ''}
           {t.swapCharge != null ? ` · swap $${t.swapCharge}` : ''}
@@ -112,22 +122,42 @@ function TicketRow({ leadId, ticket: t, index, onDone }) {
   );
 }
 
-export default function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], overageNeedsRate, onDone, compact = false }) {
+export default function DumpTicketAction({
+  leadId, unitsOut, dumpTickets = [], overageNeedsRate, onDone, compact = false,
+  assignmentId = null, unitLabel = null, units = [],
+}) {
   const [open, setOpen] = useState(false);
   const [lbs, setLbs] = useState('');
   const [swap, setSwap] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [chosenId, setChosenId] = useState(null);
+
+  // Derived, not synced, so it self-corrects when the on-site list changes underneath
+  // (the other half of a swap just came back). A caller-supplied assignmentId always
+  // wins — that unit is already settled.
+  const pickable = assignmentId ? [] : units;
+  const chosen = pickable.find(u => u.assignmentId === chosenId)
+    || (pickable.length === 1 ? pickable[0] : null);
+  const effectiveAssignmentId = assignmentId || chosen?.assignmentId || null;
+  const effectiveUnitLabel = unitLabel || chosen?.label || null;
+  const needsUnitPick = pickable.length > 1 && !chosen;
 
   const submit = async () => {
     setBusy(true); setMsg(null);
     const entered = lbs === '' ? null : Number(lbs);
     try {
-      const res = await api.recordDumpTicket(leadId, { weightLbs: entered, swap });
+      const res = await api.recordDumpTicket(leadId, {
+        weightLbs: entered,
+        swap,
+        assignmentId: effectiveAssignmentId,
+      });
       const parts = [];
       // Echo back the pounds the owner actually typed, so a tons/lbs mix-up is obvious
       // immediately rather than three screens later on an invoice.
-      if (entered != null) parts.push(`Recorded ${fmtLbs(Math.round(entered))}.`);
+      if (entered != null) {
+        parts.push(`Recorded ${fmtLbs(Math.round(entered))}${effectiveUnitLabel ? ` for Unit ${effectiveUnitLabel}` : ''}.`);
+      }
       if (res.overage && res.overage.overTons > 0) {
         parts.push(res.overage.amount != null
           ? `Overage: ${res.overage.overTons}t ($${res.overage.amount})`
@@ -138,10 +168,12 @@ export default function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], o
       else if (res.advancedTo === 'awaiting_final_payment') parts.push('Awaiting final charges.');
       else parts.push(`${res.unitsOut} unit(s) still out.`);
       setMsg(parts.join(' '));
-      setLbs(''); setSwap(false); setOpen(false);
+      setLbs(''); setSwap(false); setOpen(false); setChosenId(null);
       onDone?.();
     } catch (e) {
-      setMsg('Failed to record — check server logs.');
+      // The server refuses a unit that's already been weighed (and says which) — show
+      // that verbatim rather than a generic failure.
+      setMsg(e.message || 'Failed to record — check server logs.');
       console.error('Dump ticket error:', e);
     } finally {
       setBusy(false);
@@ -171,6 +203,35 @@ export default function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], o
         </button>
       ) : (
         <div className="space-y-2.5">
+          {/* Which can this weight came off — it decides the overage allowance and,
+              on a shared screen, which job gets billed. */}
+          {pickable.length > 1 && (
+            <div>
+              <label className="text-xs font-medium text-muted uppercase tracking-wide mb-1 block">Which unit?</label>
+              <div className="flex flex-wrap gap-1.5">
+                {pickable.map(u => (
+                  <button
+                    key={u.assignmentId}
+                    type="button"
+                    onClick={() => setChosenId(u.assignmentId)}
+                    className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${
+                      chosen?.assignmentId === u.assignmentId
+                        ? 'border-brand bg-brand/10 text-brand'
+                        : 'border-divider bg-surface text-content hover:bg-surface-2'
+                    }`}
+                  >
+                    Unit {u.label}{u.size ? ` · ${u.size}` : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {effectiveUnitLabel && pickable.length <= 1 && (
+            <p className="text-[11px] text-muted">
+              Weighing <span className="font-semibold text-content">Unit {effectiveUnitLabel}</span>
+              {chosen?.size ? ` (${chosen.size})` : ''}
+            </p>
+          )}
           <div>
             <label className="text-xs font-medium text-muted uppercase tracking-wide mb-1 block">Weight (lbs)</label>
             <input
@@ -186,7 +247,7 @@ export default function DumpTicketAction({ leadId, unitsOut, dumpTickets = [], o
           </label>
           <div className="flex items-center gap-2">
             <button
-              onClick={submit} disabled={busy}
+              onClick={submit} disabled={busy || needsUnitPick}
               className="flex items-center gap-1.5 text-sm font-medium text-white bg-brand hover:opacity-90 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
             >
               <Check size={13} /> {busy ? 'Saving…' : 'Record ticket'}

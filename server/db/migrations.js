@@ -1100,6 +1100,35 @@ function runMigrations() {
     }
   }
 
+  // One-shot flags for migrations that must run EXACTLY once and can't be guarded on
+  // the shape of the data (a re-run would corrupt it). "Guard on an empty table" isn't
+  // enough for those: the table can legitimately still be empty on the next boot.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS migration_flags (
+      key TEXT PRIMARY KEY,
+      applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  const flagApplied = (key) => !!db.prepare('SELECT 1 FROM migration_flags WHERE key = ?').get(key);
+  const setFlag = (key) => db.prepare('INSERT OR IGNORE INTO migration_flags (key) VALUES (?)').run(key);
+
+  // Phase 2c gives `assignments.weighed_at` meaning: unstamped + picked up = "this can
+  // is at the yard still owing a weight" (the yard queue). Every assignment picked up
+  // BEFORE 2c shipped was weighed the old way (by lead, no unit), so stamp them closed
+  // at their pickup time — otherwise the queue would open full of already-handled cans.
+  // Must run exactly once: a unit picked up after this point and genuinely awaiting a
+  // weight would be wrongly closed by a second run.
+  if (!flagApplied('assignments_weighed_at_backfill_2c')) {
+    const info = db.prepare(`
+      UPDATE assignments SET weighed_at = picked_up_at, updated_at = CURRENT_TIMESTAMP
+      WHERE picked_up_at IS NOT NULL AND weighed_at IS NULL
+    `).run();
+    setFlag('assignments_weighed_at_backfill_2c');
+    if (info.changes > 0) {
+      console.log(`[migrations] Closed ${info.changes} pre-2c assignment(s) as already weighed`);
+    }
+  }
+
   console.log('Database migrations completed successfully.');
 }
 

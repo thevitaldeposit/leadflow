@@ -77,8 +77,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
   // Record a dump ticket / weight for a returned unit (swap-safe lifecycle advance).
-  // Body: { weightLbs?, swap?, unitsRemaining?, note? } — weight is entered in POUNDS
-  // and converted to the stored tons at the server boundary.
+  // Body: { weightLbs?, swap?, unitsRemaining?, note?, assignmentId? } — weight is
+  // entered in POUNDS and converted to the stored tons at the server boundary.
+  // assignmentId names the physical unit the weight came off, so the ticket bills the
+  // job that can actually sat on and prices the overage on the unit's own size.
   recordDumpTicket: (id, body) =>
     request(`/leads/${id}/dump-ticket`, {
       method: 'POST',
@@ -113,6 +115,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
     }),
+  // The yard queue: units picked up but not yet weighed, each with the job its weight
+  // belongs to → { units: [{ assignmentId, leadId, label, size, customerName, … }] }.
+  getYardUnits: () => request('/assets/yard'),
   // Resolve a confirm-first cancellation cue. confirm=true → mark lost; false → keep.
   resolveCancel: (id, confirm) =>
     request(`/leads/${id}/cancel`, {

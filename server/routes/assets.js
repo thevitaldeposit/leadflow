@@ -10,6 +10,7 @@ const {
   updateAsset,
   retireAsset,
 } = require('../services/assetService');
+const { yardUnits } = require('../services/assignmentService');
 
 // Fleet registry (pickup rework, Phase 2a): the owner's individual dumpsters.
 // Every route is scoped to the authenticated business.
@@ -37,6 +38,18 @@ router.get('/', (req, res) => {
     });
   } catch (err) {
     fail(res, err, 'Failed to retrieve fleet');
+  }
+});
+
+// GET /api/assets/yard — the YARD QUEUE (Phase 2c): units picked up but not yet
+// weighed, each carrying the job its weight belongs to. Several cans collected on a
+// Saturday get weighed over the following days from here, and each ticket lands on
+// its own customer. Declared before the /:id routes so 'yard' is never read as an id.
+router.get('/yard', (req, res) => {
+  try {
+    res.json({ units: yardUnits(req.business.id) });
+  } catch (err) {
+    fail(res, err, 'Failed to retrieve the yard queue');
   }
 });
 
