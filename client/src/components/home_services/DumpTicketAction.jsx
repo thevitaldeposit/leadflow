@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Briefcase, Check, Plus, X, Pencil } from 'lucide-react';
 import { api } from '../../utils/api';
+import { UnitDropAction } from './UnitAssignmentAction';
 
 // Manual dump-ticket / weight entry for a job with a dumpster still out. This is the
 // TRIGGER the future photo-OCR feature will reuse (same api.recordDumpTicket path —
@@ -25,6 +26,12 @@ import { api } from '../../utils/api';
 // Either way the server attributes the ticket to that unit's job and prices the
 // overage on the unit's own size. Neither given (a job delivered before unit capture)
 // → the by-lead path, unchanged.
+//
+// SWAPS: when the server reports the haul was a swap-out (a replacement can is on site),
+// this asks for that replacement's unit number right here — the drop is what turns the
+// replacement into a real assignment, without which it can never be picked up or weighed
+// like any other unit. `pendingSwapOuts` (a PAID swap the server is already tracking)
+// hides the manual swap checkbox, which is redundant in that case.
 
 const LBS_PER_TON = 2000;
 
@@ -124,7 +131,7 @@ function TicketRow({ leadId, ticket: t, index, onDone }) {
 
 export default function DumpTicketAction({
   leadId, unitsOut, dumpTickets = [], overageNeedsRate, onDone, compact = false,
-  assignmentId = null, unitLabel = null, units = [],
+  assignmentId = null, unitLabel = null, units = [], pendingSwapOuts = 0,
 }) {
   const [open, setOpen] = useState(false);
   const [lbs, setLbs] = useState('');
@@ -132,6 +139,10 @@ export default function DumpTicketAction({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [chosenId, setChosenId] = useState(null);
+  // The job whose replacement drop we're asking for, set from the server's swapOut flag.
+  const [replacementFor, setReplacementFor] = useState(null);
+  // A paid swap the server is already tracking — the checkbox would only restate it.
+  const swapPending = Number(pendingSwapOuts) > 0;
 
   // Derived, not synced, so it self-corrects when the on-site list changes underneath
   // (the other half of a swap just came back). A caller-supplied assignmentId always
@@ -167,6 +178,9 @@ export default function DumpTicketAction({
       if (res.advancedTo === 'completed') parts.push('Job completed.');
       else if (res.advancedTo === 'awaiting_final_payment') parts.push('Awaiting final charges.');
       else parts.push(`${res.unitsOut} unit(s) still out.`);
+      // A swap-out: the replacement can is on the ground but nothing has recorded WHICH
+      // one. Ask now — the ticket already landed, so this is purely the unit capture.
+      if (res.swapOut) setReplacementFor({ leadId: res.leadId || leadId });
       setMsg(parts.join(' '));
       setLbs(''); setSwap(false); setOpen(false); setChosenId(null);
       onDone?.();
@@ -241,10 +255,20 @@ export default function DumpTicketAction({
               className="w-full px-3 py-2 text-sm rounded-lg border border-divider bg-surface text-content focus:outline-none focus:ring-2 focus:ring-brand/30"
             />
           </div>
-          <label className="flex items-start gap-2 text-sm text-content">
-            <input type="checkbox" checked={swap} onChange={(e) => setSwap(e.target.checked)} className="rounded mt-0.5" />
-            Swap-out — a replacement dumpster was dropped (a unit is still on site)
-          </label>
+          {/* A paid swap is already tracked server-side: this haul IS the swap-out, so the
+              checkbox would only restate it (and used to double-arm the marker). Shown as a
+              note instead. The box stays for a manual swap that never had a paid invoice. */}
+          {swapPending ? (
+            <p className="text-[11px] text-muted bg-surface-2 px-2 py-1.5 rounded-lg">
+              A paid swap is pending — this haul is the swap-out. The replacement stays out and
+              the job stays open; you'll be asked which unit you dropped.
+            </p>
+          ) : (
+            <label className="flex items-start gap-2 text-sm text-content">
+              <input type="checkbox" checked={swap} onChange={(e) => setSwap(e.target.checked)} className="rounded mt-0.5" />
+              Swap-out — a replacement dumpster was dropped (a unit is still on site)
+            </label>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={submit} disabled={busy || needsUnitPick}
@@ -262,6 +286,32 @@ export default function DumpTicketAction({
         </div>
       )}
       {msg && <p className="text-xs text-content bg-surface-2 px-2 py-1.5 rounded-lg">{msg}</p>}
+
+      {/* The replacement can is on the ground — capture its number now. Skippable (the
+          ticket is already recorded), but skipping leaves the replacement with no
+          assignment, so it can't be picked up or weighed as itself later. */}
+      {replacementFor && (
+        <div className="border border-brand/30 bg-brand/5 rounded-lg p-2.5 space-y-1.5">
+          <p className="text-xs font-semibold text-content">
+            Swap-out recorded — which unit did you leave as the replacement?
+          </p>
+          <p className="text-[11px] text-muted">
+            Recording it is what lets that can be picked up and weighed later.
+          </p>
+          <UnitDropAction
+            leadId={replacementFor.leadId}
+            onDone={(res) => {
+              const label = res?.assignment?.label;
+              setReplacementFor(null);
+              setMsg(label
+                ? `Unit ${label} recorded as the replacement — it's now on this job.`
+                : 'Replacement unit recorded — it\'s now on this job.');
+              onDone?.();
+            }}
+            onCancel={() => setReplacementFor(null)}
+          />
+        </div>
+      )}
     </div>
   );
 

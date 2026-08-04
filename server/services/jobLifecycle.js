@@ -389,19 +389,35 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   // A PAID call-driven swap leaves an outstanding swap-out marker (vd.pendingSwapOuts, a
   // counter). The FIRST ordinary ticket after it is the swap-out haul — the original unit
   // pulled during the swap — so it keeps a unit out (the replacement) and consumes one
-  // marker, exactly like the manual `swap` checkbox does. The job then completes only when
-  // the replacement is finally picked up (the next ordinary ticket).
+  // marker. The job then completes only when the replacement is finally picked up (the
+  // next ticket).
+  //
+  // The MARKER IS AUTHORITATIVE: an outstanding swap-out is consumed by this haul whether
+  // or not the owner also ticked the `swap` checkbox. The checkbox used to be checked
+  // FIRST and short-circuited this branch, so ticking it on a paid swap (the natural thing
+  // to do — a replacement really was dropped) left the marker armed and silently demanded
+  // a phantom THIRD ticket before the job could complete. Checking the marker first makes
+  // the box a no-op when it's redundant and keeps completion at two tickets.
+  //
+  // A checked box with NO pending marker is the genuine manual swap — no paid swap invoice
+  // exists — and still holds the unit out and bills the replacement rental below, exactly
+  // as before.
   const pendingSwapOuts = Math.max(0, Math.round(Number(vd.pendingSwapOuts) || 0));
   const before = lead.units_out == null ? 1 : lead.units_out;
   let after;
   let consumedSwapOut = false;
+  // Whether this haul left a REPLACEMENT unit on site — i.e. the owner still owes us the
+  // drop of the can that took its place (drives the client's "record the replacement" prompt).
+  let heldForReplacement = false;
   if (unitsRemaining != null && Number.isFinite(Number(unitsRemaining))) {
     after = Math.max(0, Math.round(Number(unitsRemaining)));   // explicit owner/OCR override
-  } else if (swap) {
-    after = before;                                            // manual swap checkbox → replacement dropped, a unit is still out
   } else if (pendingSwapOuts > 0) {
     after = before;                                            // paid call-driven swap-out haul → replacement still out
     consumedSwapOut = true;
+    heldForReplacement = true;
+  } else if (swap) {
+    after = before;                                            // manual swap checkbox → replacement dropped, a unit is still out
+    heldForReplacement = true;
   } else {
     after = Math.max(0, before - 1);                           // final pickup for this unit
   }
@@ -497,9 +513,13 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   const oStr = overage && overage.overTons > 0
     ? (overage.amount != null ? ` · overage ${overage.overTons}t ($${overage.amount})` : ` · overage ${overage.overTons}t (rate not configured)`)
     : '';
-  const swapNote = swap
-    ? (swapPreBilled ? ' · swap-out, unit still on site (swap already billed from the call)' : ' · swap-out, unit still on site')
-    : (consumedSwapOut ? ' · swap-out haul (paid swap) — replacement still on site' : '');
+  // The marker wins the description too — a box ticked on top of a paid swap is the same
+  // haul, not a second one.
+  const swapNote = consumedSwapOut
+    ? ' · swap-out haul (paid swap) — replacement still on site'
+    : (swap
+      ? (swapPreBilled ? ' · swap-out, unit still on site (swap already billed from the call)' : ' · swap-out, unit still on site')
+      : '');
   logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${unitStr}${swapNote}${oStr}`);
 
   // Advance only when the LAST unit is back (swap-safe). Completion is gated on payment.
@@ -518,7 +538,18 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     bumpCustomer(lead);
   }
   emit(lead);
-  return { lead, overage, advancedTo, unitsOut: after, overageInvoiceId };
+  // `swapOut` tells the caller this haul left a REPLACEMENT can on site, so the UI can ask
+  // for that unit's drop right now (it's the only way the replacement becomes a real
+  // assignment and can later be picked up / weighed like any other unit).
+  return {
+    lead,
+    overage,
+    advancedTo,
+    unitsOut: after,
+    overageInvoiceId,
+    swapOut: heldForReplacement,
+    pendingSwapOuts: Math.max(0, Math.round(Number(vd.pendingSwapOuts) || 0)),
+  };
 }
 
 // ── Correct a recorded weight — the DUMP TICKET is the single source of truth ───
@@ -1011,6 +1042,17 @@ function applySwapOutOnPayment(businessId, invoice) {
   const lead = loadLead(businessId, invoice.lead_id);
   if (!lead) return null;
   const vd = parseVd(lead);
+
+  // A swap billed BY a dump ticket already HAPPENED — that ticket held the unit out when
+  // it was recorded. Paying its bill must not arm a marker for the same rotation, or the
+  // job silently demands one ticket more than there are cans (the manual-swap mirror of
+  // the checkbox double-arm). Only a call-driven swap, billed AHEAD of the haul, arms
+  // anything. Identified by the ticket that raised this very invoice.
+  const tickets = Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [];
+  if (tickets.some((t) => t && t.invoiceId != null && Number(t.invoiceId) === Number(invoice.id) && (t.swap || t.swapOut))) {
+    return null;
+  }
+
   vd.swapOutsApplied = Array.isArray(vd.swapOutsApplied) ? vd.swapOutsApplied : [];
   if (vd.swapOutsApplied.includes(invoice.id)) return null;   // already registered for this invoice
 

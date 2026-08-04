@@ -1044,6 +1044,11 @@ router.post('/:id/dump-ticket', requireAuth, (req, res) => {
       advancedTo: result.advancedTo || null,
       unitsOut: result.unitsOut,
       overageInvoiceId: result.overageInvoiceId || null,
+      // This haul was a swap-out: a REPLACEMENT can is on site and the client should ask
+      // which unit it is, so the replacement becomes a real assignment (and can then be
+      // picked up / weighed like any other). `pendingSwapOuts` is what's left armed.
+      swapOut: !!result.swapOut,
+      pendingSwapOuts: result.pendingSwapOuts || 0,
     });
   } catch (err) {
     console.error('POST /leads/:id/dump-ticket error:', err);

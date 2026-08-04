@@ -46,6 +46,10 @@ function YardRow({ unit, onWeighed }) {
       }
       if (res.advancedTo === 'completed') bits.push('Job completed.');
       else if (res.advancedTo === 'awaiting_final_payment') bits.push('Awaiting final payment.');
+      // A swap-out weighed days later at the yard: the replacement can is still on the
+      // job and nothing has recorded WHICH one. Point at the job — that's where the drop
+      // is recorded (this row has no room for a unit picker).
+      if (res.swapOut) bits.push('Swap-out — open the job to record which unit you left as the replacement.');
       onWeighed?.(bits.join(' '));
     } catch (e) {
       // The server names the unit when it's already been weighed — show that verbatim.

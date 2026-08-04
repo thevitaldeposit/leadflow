@@ -108,6 +108,10 @@ router.get('/calendar', (req, res) => {
         unitsOut: lead.units_out == null ? null : lead.units_out,
         dumpTickets: Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [],
         overageNeedsRate: !!vd.overageNeedsRate,
+        // A PAID swap still owed its swap-out haul. The weight form uses it to hide the
+        // manual swap checkbox — the server already knows a replacement is coming, so
+        // ticking it would be redundant.
+        pendingSwapOuts: Math.max(0, Math.round(Number(vd.pendingSwapOuts) || 0)),
         // Physical unit(s) currently on this job — drives the "Unit 12" line on the
         // day card and tells the drop/pickup card what it's starting from.
         assignedUnits: (onSiteByLead.get(lead.id) || []).map(a => ({

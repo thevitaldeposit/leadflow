@@ -4,7 +4,7 @@ import {
   ArrowLeft, Phone, PhoneMissed, PhoneOutgoing, MessageSquare, Voicemail,
   StickyNote, RefreshCw, MapPin, Mail, Edit2, Trash2, Check, X, FileText,
   DollarSign, Plus, ChevronDown, ChevronRight, Zap, Briefcase, Clock,
-  Activity, AlertCircle, CheckCircle2, ArrowUp,
+  Activity, AlertCircle, CheckCircle2, ArrowUp, Truck,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import {
@@ -16,6 +16,7 @@ import {
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
 import DumpTicketAction from '../components/home_services/DumpTicketAction';
+import { UnitDropAction } from '../components/home_services/UnitAssignmentAction';
 import VoicemailBadge from '../components/home_services/VoicemailBadge';
 import { CreateJobModal, EditJobDetailsModal } from '../components/home_services/HomeServicesStickyHeader';
 import { buildBookingUpdates } from '../utils/booking';
@@ -959,6 +960,9 @@ export default function CustomerDetailPage() {
 // Paid that completes the job (paid + pickup passed) reflects immediately.
 function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
   const [openCalls, setOpenCalls] = useState(() => new Set());
+  // Recording which physical can is on the job, from the profile — the mid-rental entry
+  // point for a SWAP replacement (the schedule's drop step lives on day cards).
+  const [showDrop, setShowDrop] = useState(false);
   const toggle = (cid) => setOpenCalls(prev => {
     const next = new Set(prev);
     if (next.has(cid)) next.delete(cid); else next.add(cid);
@@ -1045,8 +1049,35 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
               // prices against that unit's size and the unit leaves the yard queue
               // instead of waiting to be weighed a second time.
               units={e.assigned_units || []}
+              // A paid swap the server is already tracking — hides the redundant manual
+              // swap checkbox; the form then asks for the replacement's unit number.
+              pendingSwapOuts={e.pending_swap_outs || 0}
               onDone={() => onPaymentChange?.()}
             />
+          )}
+          {/* Record a can onto this job from here — the SWAP replacement case (dropped
+              mid-rental, so it never appears on a delivery day card), and the catch-up
+              for a delivery where the unit was never captured. Without an assignment the
+              replacement can't be picked up or weighed as itself. */}
+          {e.booked_lead_id && e.units_out != null && e.units_out > 0 && (
+            showDrop ? (
+              <div className="border border-divider rounded-lg p-2.5">
+                <UnitDropAction
+                  leadId={e.booked_lead_id}
+                  jobSize={e.dumpster_size}
+                  onDone={() => { setShowDrop(false); onPaymentChange?.(); }}
+                  onCancel={() => setShowDrop(false)}
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowDrop(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-brand bg-brand/10 hover:bg-brand/20 px-2.5 py-1.5 rounded-lg transition-colors"
+              >
+                <Truck size={12} />
+                {(e.assigned_units || []).length > 0 ? 'Record a replacement unit' : 'Record the unit on site'}
+              </button>
+            )
           )}
         </div>
       )}

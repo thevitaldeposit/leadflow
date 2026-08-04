@@ -722,6 +722,9 @@ function getCustomerDetail(businessId, customerId) {
       try { bvd = bookedLead && bookedLead.vertical_data ? JSON.parse(bookedLead.vertical_data) : {}; } catch { bvd = {}; }
       e.dump_tickets = Array.isArray(bvd.dumpTickets) ? bvd.dumpTickets : [];
       e.overage_needs_rate = !!bvd.overageNeedsRate;
+      // Outstanding PAID swap(s) still owed their swap-out haul — the weight form hides
+      // the manual swap checkbox when the server already knows a replacement is coming.
+      e.pending_swap_outs = Math.max(0, Math.round(Number(bvd.pendingSwapOuts) || 0));
       // Which physical dumpster(s) are on this job right now (Phase 2b). Read from
       // the BOOKED lead — the assignment hangs off the job, not a later follow-up
       // call — so the profile shows the unit even when the representative call isn't

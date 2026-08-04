@@ -375,7 +375,11 @@ function directionsUrl(address) {
 //   delivery → which dumpster went on the ground (required; also the swap replacement)
 //   pickup   → which of the job's on-site units came back (required), then the weight,
 //              the same DumpTicketAction the customer profile uses, unchanged.
-// Active rentals stay informational (the card still opens the job).
+//   active   → the same call/navigate/drop, because a SWAP happens mid-rental: the
+//              replacement can is dropped on a day that is neither the delivery nor the
+//              pickup, and until this the drop step only existed on the delivery card, so
+//              a swap replacement never became an assignment (and could never be picked
+//              up or weighed as itself). Weight entry stays pickup-only.
 function DayJobRow({ job, type, navigate, onChanged }) {
   const [showWeight, setShowWeight] = useState(false);
   const [showDrop, setShowDrop] = useState(false);
@@ -397,8 +401,15 @@ function DayJobRow({ job, type, navigate, onChanged }) {
 
   const isPickup = type === 'pickup';
   const isDelivery = type === 'delivery';
+  const isActive = type === 'active';
   const tel = job.phone ? `tel:${String(job.phone).replace(/[^\d+]/g, '')}` : null;
   const maps = directionsUrl(job.address);
+  // A drop is recordable whenever the job is live — at delivery, and mid-rental for the
+  // swap replacement. Named for what it is in context so the swap case is findable.
+  const canDrop = isDelivery || isActive;
+  const dropLabel = onSite.length === 0
+    ? 'Record drop'
+    : (isActive ? 'Record replacement' : 'Assign another unit');
   // units_out is only initialized once the delivery date lands, so treat "unknown"
   // (null) as still out — the server defaults it to 1 anyway. Hidden only when every
   // unit is explicitly back.
@@ -433,7 +444,7 @@ function DayJobRow({ job, type, navigate, onChanged }) {
         </div>
       </button>
 
-      {(isPickup || isDelivery) && (
+      {(isPickup || isDelivery || isActive) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-1">
           {tel ? (
             <a href={tel} className={`${actionClass} text-content bg-surface-2 hover:bg-divider`}>
@@ -453,12 +464,12 @@ function DayJobRow({ job, type, navigate, onChanged }) {
               <Navigation size={11} /> Navigate
             </span>
           )}
-          {isDelivery && (
+          {canDrop && (
             <button
               onClick={() => setShowDrop(v => !v)}
               className={`${actionClass} ${showDrop ? 'text-white bg-brand' : 'text-brand bg-brand/10 hover:bg-brand/20'}`}
             >
-              <Truck size={11} /> {showDrop ? 'Close' : (onSite.length > 0 ? 'Assign another unit' : 'Record drop')}
+              <Truck size={11} /> {showDrop ? 'Close' : dropLabel}
             </button>
           )}
           {canRecord && (
@@ -508,6 +519,9 @@ function DayJobRow({ job, type, navigate, onChanged }) {
               // that unit's size. Null for a job delivered before unit capture.
               assignmentId={picked?.assignmentId || null}
               unitLabel={picked?.label || null}
+              // A paid swap the server is already tracking — hides the redundant manual
+              // swap checkbox, and the form asks for the replacement's unit after the haul.
+              pendingSwapOuts={job.pendingSwapOuts || 0}
               onDone={onChanged}
             />
           )}
