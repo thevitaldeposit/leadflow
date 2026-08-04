@@ -247,19 +247,44 @@ function getOverageConfig(businessId, size = null) {
   return { includedTons: allowance, ratePerTon: rate };
 }
 
+// ── Does a SWAP REPLACEMENT's haul get its own weight allowance? (2d) ──────────
+// Business-level, because it's a billing policy rather than a property of a size:
+//   'full' (DEFAULT) — the replacement is a fresh rental and carries the size's normal
+//                      included tons. This is exactly what every job did before 2d, so
+//                      an unset business bills identically to before.
+//   'none'           — the replacement haul carries NO included tons (operators whose
+//                      swap fee already covers the dump; the customer's allowance was
+//                      spent on the first can).
+// Only ever consulted for a haul already identified as a swap replacement — the job's
+// ORIGINAL unit is never affected.
+const SWAP_ALLOWANCE_KEY = 'swapWeightAllowance';
+function getSwapAllowanceMode(businessId) {
+  const v = getSetting(SWAP_ALLOWANCE_KEY, businessId);
+  return String(v == null ? '' : v).trim().toLowerCase() === 'none' ? 'none' : 'full';
+}
+
 // Compute overage for a recorded weight against the size's configured allowance/rate.
 // Returns a descriptor; `needsRate`/`needsAllowance` flag missing config so the UI can
 // surface "set overage pricing" instead of a wrong dollar amount. `size` selects the
 // price row the allowance/rate come from.
-function computeOverage(businessId, weightTons, { size = null } = {}) {
+//
+// `replacementHaul` says this weight came off a SWAP REPLACEMENT (decided by the caller
+// — see isReplacementHaul). It's the ONE place the per-business swap-allowance toggle is
+// applied: on 'none' the included tons for this haul become 0 (and no allowance config is
+// "needed" — zero is the configured answer). getOverageConfig / getSizeWeightConfig stay
+// pure per-size resolvers.
+function computeOverage(businessId, weightTons, { size = null, replacementHaul = false } = {}) {
   const w = Number(weightTons);
   if (!Number.isFinite(w) || w < 0) return { weightTons: null, overTons: 0, amount: null, needsRate: false, needsAllowance: false };
-  const { includedTons, ratePerTon } = getOverageConfig(businessId, size);
-  if (includedTons == null) return { weightTons: w, includedTons: null, overTons: 0, amount: null, needsRate: false, needsAllowance: true };
+  const cfg = getOverageConfig(businessId, size);
+  const ratePerTon = cfg.ratePerTon;
+  const swapAllowance = replacementHaul ? getSwapAllowanceMode(businessId) : 'full';
+  const includedTons = (replacementHaul && swapAllowance === 'none') ? 0 : cfg.includedTons;
+  if (includedTons == null) return { weightTons: w, includedTons: null, overTons: 0, amount: null, needsRate: false, needsAllowance: true, replacementHaul };
   const overTons = round2(Math.max(0, w - includedTons));
-  if (overTons <= 0) return { weightTons: w, includedTons, overTons: 0, amount: 0, needsRate: false, needsAllowance: false };
-  if (ratePerTon == null) return { weightTons: w, includedTons, overTons, amount: null, needsRate: true, needsAllowance: false };
-  return { weightTons: w, includedTons, overTons, ratePerTon, amount: round2(overTons * ratePerTon), needsRate: false, needsAllowance: false };
+  if (overTons <= 0) return { weightTons: w, includedTons, overTons: 0, amount: 0, needsRate: false, needsAllowance: false, replacementHaul, swapAllowance };
+  if (ratePerTon == null) return { weightTons: w, includedTons, overTons, amount: null, needsRate: true, needsAllowance: false, replacementHaul, swapAllowance };
+  return { weightTons: w, includedTons, overTons, ratePerTon, amount: round2(overTons * ratePerTon), needsRate: false, needsAllowance: false, replacementHaul, swapAllowance };
 }
 
 // Whether a swap replacement has ALREADY been billed for this job on a REAL (non-draft)
@@ -280,6 +305,32 @@ function swapAlreadyBilled(businessId, leadId) {
       LIMIT 1
     `).get(businessId, leadId);
   } catch { return false; /* invoices tables absent / not migrated */ }
+}
+
+// ── Is THIS haul a swap replacement's? (2d) ───────────────────────────────────
+// Two conditions, both required:
+//   1. the job actually had a swap — a paid call-driven one (vd.swapOutsApplied), a
+//      manual/consumed one recorded on an earlier ticket (t.swap / t.swapOut), or a
+//      live swap line already billed for the job;
+//   2. the can this weight came off is NOT the FIRST unit the job ever held (earliest
+//      drop). The original unit's haul is always the original rental's.
+// Both together are what separates a genuine swap replacement from a DELIVERY-TIME
+// substitution (a different can dropped before anything was swapped — condition 1 fails)
+// and from the swap-OUT haul itself (the original can coming back — condition 2 fails).
+// No assignment (legacy jobs, iOS, pre-2b) → false, so those bill exactly as before.
+function isReplacementHaul(businessId, lead, vd, assignment) {
+  if (!assignment) return false;
+  const tickets = Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [];
+  const hadSwap = (Array.isArray(vd.swapOutsApplied) && vd.swapOutsApplied.length > 0)
+    || tickets.some((t) => t && (t.swap || t.swapOut))
+    || swapAlreadyBilled(businessId, lead.id);
+  if (!hadSwap) return false;
+  try {
+    // listAssignments is newest-drop first, so the job's first unit is the last row.
+    const all = require('./assignmentService').listAssignments(businessId, lead.id);
+    const first = all.length ? all[all.length - 1] : null;
+    return !!(first && Number(first.id) !== Number(assignment.id));
+  } catch { return false; /* assignments unavailable — bill as an ordinary haul */ }
 }
 
 // Bill a ticket's line items as ONE 'sent' invoice for the job: resolve a customer
@@ -337,6 +388,14 @@ function overageLineItem(overage, size) {
   };
 }
 
+// Names the swap-allowance policy in the timeline when it actually bit — it's the reason
+// the WHOLE weight billed rather than just the tons over the usual allowance.
+function noAllowanceNote(overage) {
+  return overage && overage.replacementHaul && overage.swapAllowance === 'none'
+    ? ' · swap replacement — no weight allowance'
+    : '';
+}
+
 // ── Manual dump-ticket / weight entry (the trigger; OCR reuses this SAME path) ──
 // The owner enters the weight for a returned unit. This:
 //   (a) records the ticket + computes any overage (generating a 'sent' overage invoice
@@ -382,8 +441,17 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
   // what this used before.
   const size = (assignment && assignment.size) || jobSize;
 
-  // Overage is priced against THIS unit's size (allowance + $/ton from pricing_config).
-  const overage = weightTons != null && weightTons !== '' ? computeOverage(businessId, weightTons, { size }) : null;
+  // Is this the haul of a SWAP REPLACEMENT (not the job's original can)? Decided here,
+  // from the assignment already in hand, and stored on the ticket below so a later weight
+  // correction reprices against the same allowance. Only matters when the business set
+  // the swap allowance to 'none'; on the default ('full') it changes nothing.
+  const replacementHaul = isReplacementHaul(businessId, lead, vd, assignment);
+
+  // Overage is priced against THIS unit's size (allowance + $/ton from pricing_config),
+  // with the swap-replacement allowance policy applied for a replacement haul.
+  const overage = weightTons != null && weightTons !== ''
+    ? computeOverage(businessId, weightTons, { size, replacementHaul })
+    : null;
 
   // Swap-safe units-out accounting. Default: one dumpster comes back per ticket.
   // A PAID call-driven swap leaves an outstanding swap-out marker (vd.pendingSwapOuts, a
@@ -487,6 +555,10 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     assignmentId: assignment ? assignment.id : null,
     assetId: assignment ? assignment.asset_id : null,
     unitLabel: assignment ? assignment.label : null,
+    // Whether this weight was a swap REPLACEMENT's haul — pinned so a weight correction
+    // re-prices against the same allowance basis instead of re-deriving it from a job
+    // whose assignments/markers have since moved on.
+    replacementHaul,
   };
   vd.dumpTickets = Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [];
   vd.dumpTickets.push(ticket);
@@ -520,7 +592,7 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     : (swap
       ? (swapPreBilled ? ' · swap-out, unit still on site (swap already billed from the call)' : ' · swap-out, unit still on site')
       : '');
-  logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${unitStr}${swapNote}${oStr}`);
+  logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${unitStr}${swapNote}${oStr}${noAllowanceNote(overage)}`);
 
   // Advance only when the LAST unit is back (swap-safe). Completion is gated on payment.
   let advancedTo = null;
@@ -597,7 +669,12 @@ function updateDumpTicketWeight(businessId, leadOrId, { index, weightTons = null
   }
 
   const prevTons = ticket.weightTons != null ? Number(ticket.weightTons) : null;
-  const overage = weightTons != null ? computeOverage(businessId, weightTons, { size }) : null;
+  // Same allowance basis the ticket was recorded on: its stored swap-replacement flag
+  // (like the stored size), so a correction can't silently switch the haul between the
+  // replacement policy and the normal one.
+  const overage = weightTons != null
+    ? computeOverage(businessId, weightTons, { size, replacementHaul: !!ticket.replacementHaul })
+    : null;
   const overLine = overageLineItem(overage, size);
 
   const at = nowIso();
@@ -663,7 +740,7 @@ function updateDumpTicketWeight(businessId, leadOrId, { index, weightTons = null
     : ' · no overage';
   logActivity(
     lead.id, 'note_added',
-    `Weight corrected — ${describeWeight(prevTons)} → ${describeWeight(overage ? overage.weightTons : null)}${oStr}${invoiceNote ? ` · ${invoiceNote}` : ''}`
+    `Weight corrected — ${describeWeight(prevTons)} → ${describeWeight(overage ? overage.weightTons : null)}${oStr}${noAllowanceNote(overage)}${invoiceNote ? ` · ${invoiceNote}` : ''}`
   );
 
   // The invoice total changed, so the payment rollup may have. Forward-only + gated:
@@ -1114,6 +1191,7 @@ module.exports = {
   applySwapOutOnPayment,
   advanceDueDeliveries,
   getOverageConfig,
+  getSwapAllowanceMode,
   computeOverage,
   recordDumpTicket,
   updateDumpTicketWeight,

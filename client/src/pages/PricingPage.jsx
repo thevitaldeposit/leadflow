@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  DollarSign, Percent, PlusCircle, Edit2, Trash2, X, Check, Truck, Ban, Package,
+  DollarSign, Percent, PlusCircle, Edit2, Trash2, X, Check, Truck, Ban, Package, Repeat,
 } from 'lucide-react';
 import { api } from '../utils/api';
 
@@ -346,6 +346,10 @@ export default function PricingPage() {
   const [fees, setFees] = useState([]);
   const [specialItems, setSpecialItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Business-wide swap policy (a settings key, not a per-size price): does the
+  // replacement dumpster get its own weight allowance? Defaults to 'full'.
+  const [swapAllowance, setSwapAllowance] = useState('full');
+  const [swapAllowanceError, setSwapAllowanceError] = useState(null);
 
   const [addingItem, setAddingItem] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -356,13 +360,28 @@ export default function PricingPage() {
   const [addingSpecial, setAddingSpecial] = useState(false);
   const [editingSpecial, setEditingSpecial] = useState(null);
 
-  const load = useCallback(() => api.getPricing().then((p) => {
-    setItems(p.items || []);
-    setGroups(p.groups || []);
-    setFees(p.fees || []);
-    setSpecialItems(p.special_items || []);
-  }), []);
+  const load = useCallback(() => Promise.all([
+    api.getPricing().then((p) => {
+      setItems(p.items || []);
+      setGroups(p.groups || []);
+      setFees(p.fees || []);
+      setSpecialItems(p.special_items || []);
+    }),
+    // Non-fatal: an unreadable settings call just leaves the default ('full') showing.
+    api.getSettings()
+      .then((s) => setSwapAllowance((s && s.swapWeightAllowance) === 'none' ? 'none' : 'full'))
+      .catch(() => {}),
+  ]), []);
   useEffect(() => { load().catch(console.error).finally(() => setLoading(false)); }, [load]);
+
+  // Saved optimistically; reverted with a message if the write fails, so the control
+  // never shows a policy the server isn't actually billing on.
+  const saveSwapAllowance = async (v) => {
+    const previous = swapAllowance;
+    setSwapAllowance(v); setSwapAllowanceError(null);
+    try { await api.updateSettings({ swapWeightAllowance: v }); }
+    catch (err) { setSwapAllowance(previous); setSwapAllowanceError(err.message || 'Could not save'); }
+  };
 
   const saveItem = async (form) => {
     if (editingItem) await api.updatePriceItem(editingItem, form);
@@ -440,6 +459,27 @@ export default function PricingPage() {
             ))}
           </div>
         )}
+      </Section>
+
+      {/* Swap weight allowance — business-wide, sits with the per-size Swap-out pricing above */}
+      <Section icon={<Repeat size={16} className="text-muted" />} title="Swap Weight Allowance">
+        <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <p className="text-xs text-muted max-w-md">
+            When you swap a full dumpster for an empty one, does the replacement come with its own weight
+            allowance? <span className="text-content font-medium">Full</span> treats it like a new rental — the
+            size's included tons apply again. <span className="text-content font-medium">None</span> bills every
+            ton on the replacement's load, for operators whose swap fee already covers that dump. The job's
+            original dumpster always gets its full allowance either way.
+          </p>
+          <div className="shrink-0">
+            <Segmented
+              value={swapAllowance}
+              onChange={saveSwapAllowance}
+              options={[{ value: 'full', label: 'Full allowance' }, { value: 'none', label: 'No allowance' }]}
+            />
+            {swapAllowanceError && <p className="text-xs text-danger mt-1.5 text-right">{swapAllowanceError}</p>}
+          </div>
+        </div>
       </Section>
 
       {/* Business fees */}

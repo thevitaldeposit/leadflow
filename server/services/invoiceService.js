@@ -809,15 +809,36 @@ function invoiceDumpsterSize(invoice) {
   return null;
 }
 
+// Was THIS invoice's weight billed with no allowance at all? A swap replacement's haul
+// under the business's "no allowance on swaps" policy (settings.swapWeightAllowance =
+// 'none') carries zero included tons, and its own line item says so ("… over 0
+// included") — so the standard "this rental includes N tons" disclosure would
+// contradict the bill it sits on. The dump ticket that raised the invoice is the
+// record of what was actually applied. Default ('full') tickets never match.
+function billedWithoutAllowance(invoice) {
+  if (!invoice || !invoice.lead_id) return false;
+  try {
+    const lead = db.prepare('SELECT vertical_data FROM leads WHERE id = ? AND business_id = ?')
+      .get(invoice.lead_id, invoice.business_id);
+    if (!lead || !lead.vertical_data) return false;
+    const tickets = JSON.parse(lead.vertical_data).dumpTickets;
+    if (!Array.isArray(tickets)) return false;
+    return tickets.some((t) => t && Number(t.invoiceId) === Number(invoice.id)
+      && t.replacementHaul && Number(t.includedTons) === 0);
+  } catch { return false; }
+}
+
 // The weight-allowance disclosure for this invoice's size, pulled LIVE from the
 // size's pricing_config — the SAME allowance + per-ton overage rate the Pricing page
 // edits and the weight-overage flow bills against, so it's correct per business and
 // updates when the business changes its fees. Returns null (note hidden) unless BOTH
 // the allowance and the rate are configured to a positive value — a business that
-// hasn't set overage pricing shows no note rather than a blank/$0 sentence.
+// hasn't set overage pricing shows no note rather than a blank/$0 sentence, or when
+// this particular bill was raised with no allowance at all (see above).
 function weightAllowanceFor(invoice) {
   const size = invoiceDumpsterSize(invoice);
   if (!size) return null;
+  if (billedWithoutAllowance(invoice)) return null;
   let cfg;
   try { cfg = getSizeWeightConfig(invoice.business_id, size); } catch { return null; }
   const allowance = Number(cfg && cfg.allowanceTons);
