@@ -16,6 +16,7 @@ import ManualBadge from './ManualBadge';
 import { api } from '../../utils/api';
 import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES, getTerminology, getSubVertical, formatTime12 } from '../../utils/verticalConfig';
 import { parseRentalDays, calcPickupFromDuration, buildBookingUpdates, buildJobDetailUpdates } from '../../utils/booking';
+import { isValidEmail } from '../../utils/email';
 
 function formatPickupDate(iso) {
   if (!iso) return null;
@@ -71,10 +72,27 @@ export function BookedModal({ lead, onConfirm, onClose }) {
   const [poolSizes, setPoolSizes] = useState([]);
   const [availability, setAvailability] = useState(null);
   const [loadingAvail, setLoadingAvail] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
 
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
+
+  // Booking an unpaid job emails the customer a payment link, which the server
+  // refuses when there's no address to send it to. Stay open and show the reason
+  // instead of closing as though the job were booked.
+  const confirm = async () => {
+    if (!isValid || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await onConfirm({ date, rentalDays: daysNum, size });
+    } catch (err) {
+      console.error('Confirm booking failed:', err);
+      setError(err?.message || 'Could not book this job. Please try again.');
+      setSaving(false);
+    }
+  };
 
   // Load the inventory pool sizes (one row per size) for the selector. Normalize
   // the extracted free-text size ("10 yard dumpster") to the matching pool label
@@ -178,15 +196,19 @@ export function BookedModal({ lead, onConfirm, onClose }) {
             )}
           </div>
         </div>
+        {error && (
+          <p className="mt-4 text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">{error}</p>
+        )}
+
         <div className="flex gap-3 mt-6">
           <button
-            onClick={() => onConfirm({ date, rentalDays: daysNum, size })}
-            disabled={!isValid}
+            onClick={confirm}
+            disabled={!isValid || saving}
             className="flex-1 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
           >
-            Confirm Booking
+            {saving ? 'Booking…' : 'Confirm Booking'}
           </button>
-          <button onClick={onClose} className="px-4 py-2.5 text-sm text-muted hover:text-content rounded-xl transition-colors">
+          <button onClick={onClose} disabled={saving} className="px-4 py-2.5 text-sm text-muted hover:text-content rounded-xl transition-colors disabled:opacity-50">
             Cancel
           </button>
         </div>
@@ -204,7 +226,7 @@ export function BookedModal({ lead, onConfirm, onClose }) {
 //     (the parent sends paid_at + book_without_payment).
 // Availability is advisory here too (owners may intentionally overbook) with a
 // next-available hint. Never re-runs extraction / booking-signal / auto-book logic.
-export function CreateJobModal({ lead, onSendPaymentLink, onMarkPaid, onClose }) {
+export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, onMarkPaid, onClose }) {
   const vd = parseVerticalData(lead);
   const t = getTerminology(lead.vertical, getSubVertical(lead));
   const extractedSize = vd.dumpsterSize || null;
@@ -217,10 +239,19 @@ export function CreateJobModal({ lead, onSendPaymentLink, onMarkPaid, onClose })
   const [poolSizes, setPoolSizes] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [confirmPaid, setConfirmPaid] = useState(false);
+  const [error, setError] = useState(null);
 
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
+
+  // Send Payment Link EMAILS a secure invoice link to this customer — with no address
+  // on file the send is a silent no-op, so the option is unavailable instead. The
+  // address is the customer's saved one (the profile that opened this), falling back
+  // to the call's own. Mark Paid emails nothing and is never gated. The server
+  // enforces the same rule on the booking write.
+  const payEmail = customerEmail || lead.email || null;
+  const canEmailPaymentLink = isValidEmail(payEmail);
 
   useEffect(() => {
     let cancelled = false;
@@ -245,10 +276,14 @@ export function CreateJobModal({ lead, onSendPaymentLink, onMarkPaid, onClose })
   const run = async (fn) => {
     if (!isValid || submitting) return;
     setSubmitting(true);
+    setError(null);
     try {
       await fn({ date, rentalDays: daysNum, size });
     } catch (err) {
       console.error('Create Job action failed:', err);
+      // Show what actually went wrong (e.g. the server's email-required refusal)
+      // rather than closing as if the booking went through.
+      setError(err?.message || 'Could not complete this action. Please try again.');
       setSubmitting(false);
     }
   };
@@ -299,11 +334,15 @@ export function CreateJobModal({ lead, onSendPaymentLink, onMarkPaid, onClose })
           </div>
         </div>
 
+        {error && (
+          <p className="mt-4 text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">{error}</p>
+        )}
+
         {!confirmPaid ? (
           <div className="mt-6 space-y-3">
             <button
               onClick={() => run(onSendPaymentLink)}
-              disabled={!isValid || submitting}
+              disabled={!isValid || submitting || !canEmailPaymentLink}
               className="w-full flex items-center gap-3 text-left text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-3 rounded-xl transition-colors"
             >
               <Send size={18} className="flex-shrink-0" />
@@ -312,6 +351,19 @@ export function CreateJobModal({ lead, onSendPaymentLink, onMarkPaid, onClose })
                 <span className="block text-xs opacity-90">Emails a secure link · books &amp; reserves when paid</span>
               </span>
             </button>
+            {/* Nowhere to send the link → the option is off, with the reason stated,
+                instead of booking the job and quietly emailing no one. */}
+            {!canEmailPaymentLink && (
+              <div className="flex items-start gap-2.5 bg-warning/5 border border-warning/30 rounded-xl px-4 py-3">
+                <AlertTriangle size={16} className="text-warning flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-content">
+                  {payEmail
+                    ? `"${payEmail}" isn't a valid email address, so the payment link can't be sent.`
+                    : 'Add an email address to this customer to send a payment link.'}
+                  {' '}Add one with Edit on their profile, or use Mark Paid if payment was collected outside Stream.
+                </p>
+              </div>
+            )}
             <button
               onClick={() => setConfirmPaid(true)}
               disabled={!isValid || submitting}
@@ -577,6 +629,11 @@ export function EditJobDetailsModal({ lead, onConfirm, onClose }) {
 
 export default function HomeServicesStickyHeader({ lead, onUpdate }) {
   const [showBooked, setShowBooked] = useState(false);
+  // Why the last header action didn't take. The server can REFUSE a status write —
+  // moving a job to Booked emails the customer a payment link, and it blocks that
+  // when there's no address to email — so a failure has to be visible here instead
+  // of leaving the owner looking at an unchanged status with no explanation.
+  const [actionError, setActionError] = useState(null);
   const vd = parseVerticalData(lead);
   const state = getLeadActionState(lead);
 
@@ -586,16 +643,23 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
   const jobStatusStyle = JOB_STATUS_STYLES[jobStatus] || 'bg-surface-2 text-muted';
 
   const applyUpdate = async (body) => {
+    setActionError(null);
     try {
       const updated = await api.updateLead(lead.id, body);
       onUpdate?.(updated);
     } catch (err) {
       console.error('Sticky action failed:', err);
+      setActionError(err?.message || 'Could not update this job. Please try again.');
     }
   };
 
+  // Booking goes straight to the API rather than through applyUpdate so a refusal
+  // (e.g. no email to send the payment link to) propagates to the modal, which stays
+  // open and shows it — the booking must not close as if it succeeded.
   const handleBookedConfirm = async ({ date, rentalDays, size }) => {
-    await applyUpdate(buildBookingUpdates({ date, rentalDays, size }));
+    setActionError(null);
+    const updated = await api.updateLead(lead.id, buildBookingUpdates({ date, rentalDays, size }));
+    onUpdate?.(updated);
     setShowBooked(false);
   };
 
@@ -664,6 +728,10 @@ export default function HomeServicesStickyHeader({ lead, onUpdate }) {
               ))}
             </select>
           </div>
+
+          {actionError && (
+            <p className="mt-3 text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">{actionError}</p>
+          )}
         </div>
       </div>
 

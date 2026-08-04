@@ -13,6 +13,16 @@ const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial
 const STREAM_BLUE = '#2563eb';
 const STREAM_BLUE_LIGHT = '#3b82f6';
 
+// One deliverability test for every "we are about to email this" decision. Same
+// shape as the signup/contact validators — an address must be non-blank and look
+// like one. Anything that fails here can NEVER be emailed, so a caller that would
+// have "sent" to it must block instead of silently no-op'ing.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmail(value) {
+  if (value === null || value === undefined) return false;
+  return EMAIL_RE.test(String(value).trim());
+}
+
 let _resend = null;
 function getResend() {
   const key = process.env.RESEND_API_KEY;
@@ -214,7 +224,8 @@ async function sendInvoiceEmail({ to, businessName, customerName, invoiceNumber,
 // deliver an auto-generated overage/swap bill. Best-effort: returns {sent, reason};
 // never throws into the caller. Never touches the call/recording/voice path.
 async function sendInvoiceLinkEmail(invoice) {
-  const to = invoice && invoice.bill_to_email ? String(invoice.bill_to_email).trim() : null;
+  const raw = invoice && invoice.bill_to_email ? String(invoice.bill_to_email).trim() : null;
+  const to = isValidEmail(raw) ? raw : null;
   if (!to) return { sent: false, reason: 'no_email' };
   if (!process.env.RESEND_API_KEY) return { sent: false, reason: 'no_email_provider' };
   const businessName = getDbSetting('businessName', invoice.business_id) || 'our team';
@@ -305,4 +316,4 @@ async function sendContactConfirmation({ name, email }) {
   });
 }
 
-module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail, sendInvoiceEmail, sendInvoiceLinkEmail, buildInvoiceEmailHtml };
+module.exports = { sendPasswordResetEmail, sendContactNotification, sendContactConfirmation, sendWelcomeEmail, sendInvoiceEmail, sendInvoiceLinkEmail, buildInvoiceEmailHtml, isValidEmail };

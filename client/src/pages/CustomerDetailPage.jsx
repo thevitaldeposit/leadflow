@@ -741,7 +741,7 @@ export default function CustomerDetailPage() {
 
           {/* Active Inquiry — the current active engagement, expanded by default */}
           {activeEngagement ? (
-            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} onClose={handleCloseEngagement} onSendPaymentLink={handleSendPaymentLink} onMarkPaid={handleMarkPaidBooking} onEdit={handleEditEngagement} onPaymentChange={handlePaymentChange} refreshKey={detailRefresh} />
+            <ActiveEngagement id="active-inquiry" engagement={activeEngagement} customerEmail={c.email} onClose={handleCloseEngagement} onSendPaymentLink={handleSendPaymentLink} onMarkPaid={handleMarkPaidBooking} onEdit={handleEditEngagement} onPaymentChange={handlePaymentChange} refreshKey={detailRefresh} />
           ) : (
             <Card id="active-inquiry" title="Active Inquiry" icon={MessageSquare}>
               <div className="px-5 py-8 text-center">
@@ -1091,7 +1091,7 @@ function EngagementBody({ engagement: e, refreshKey = 0, onPaymentChange }) {
 // header action. Create Job opens the booking flow (availability + Send Payment
 // Link / Mark Paid) on the engagement's representative call; it never re-runs
 // extraction or auto-book logic.
-function ActiveEngagement({ id, engagement: e, onClose, onSendPaymentLink, onMarkPaid, onEdit, onPaymentChange, refreshKey = 0 }) {
+function ActiveEngagement({ id, engagement: e, customerEmail = null, onClose, onSendPaymentLink, onMarkPaid, onEdit, onPaymentChange, refreshKey = 0 }) {
   const [closing, setClosing] = useState(false);
   // Create Job is offered only while the inquiry is still open (status 'inquiry');
   // once it's a booked Job or completed, the button is hidden.
@@ -1140,7 +1140,9 @@ function ActiveEngagement({ id, engagement: e, onClose, onSendPaymentLink, onMar
       setBookingLead(null);
     } catch (err) {
       console.error('Send payment link failed:', err);
-      alert('Could not send the payment link. Please try again.');
+      // Re-throw only: the modal stays open and shows the server's own reason (e.g.
+      // "add an email address to send a payment link"), which an alert would replace
+      // with something vaguer.
       throw err;
     }
   };
@@ -1256,6 +1258,7 @@ function ActiveEngagement({ id, engagement: e, onClose, onSendPaymentLink, onMar
       {bookingLead && (
         <CreateJobModal
           lead={bookingLead}
+          customerEmail={customerEmail}
           onSendPaymentLink={sendPaymentLink}
           onMarkPaid={markPaidBooking}
           onClose={() => setBookingLead(null)}

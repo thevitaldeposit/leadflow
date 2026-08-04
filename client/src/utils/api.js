@@ -312,11 +312,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: 'DELETE' }),
-  sendInvoice: (id, channel = 'both') =>
+  // requireEmail: for callers whose action IS "email this to the customer" (the
+  // review screen's Approve & Send). The server then refuses — instead of marking the
+  // invoice sent and delivering nothing — when there's no valid address on it.
+  sendInvoice: (id, channel = 'both', { requireEmail = false } = {}) =>
     request(`/invoices/${id}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel }),
+      body: JSON.stringify({ channel, requireEmail }),
     }),
   markInvoicePaid: (id, body = {}) =>
     request(`/invoices/${id}/mark-paid`, {

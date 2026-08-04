@@ -12,6 +12,38 @@ const { describeBooking } = require('../services/leadActivityText');
 const { sendToAll } = require('../services/apns');
 const { JOB_STATUS, LEGACY_STATUS, ACTIVE_JOB_STATUS_SET } = require('../config/jobStatus');
 const assignmentService = require('../services/assignmentService');
+const { isValidEmail } = require('../services/emailService');
+
+// The address a payment-link / invoice email would actually be delivered to: the
+// job's own email, else the saved email of the customer it bills — resolved the way
+// the invoice itself resolves bill_to_email (explicit link first, then the
+// phone match reconcile would attach it to). Returns null when there is nothing
+// deliverable, which is the signal to BLOCK an email-a-link action rather than let
+// it no-op silently. Read-only: creates and links nothing.
+function billingEmailFor(businessId, { email, customerId, phone }) {
+  if (isValidEmail(email)) return String(email).trim();
+  const pick = (row) => (row && isValidEmail(row.email) ? String(row.email).trim() : null);
+  try {
+    if (customerId) {
+      const hit = pick(db.prepare('SELECT email FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId));
+      if (hit) return hit;
+    }
+    const np = phone ? normalizePhone(phone) : null;
+    if (np) {
+      return pick(db.prepare('SELECT email FROM customers WHERE business_id = ? AND normalized_phone = ? AND deleted_at IS NULL').get(businessId, np));
+    }
+  } catch { /* customers table unavailable → treat as no address */ }
+  return null;
+}
+
+function billingEmailForLead(businessId, lead) {
+  if (!lead) return null;
+  return billingEmailFor(businessId, { email: lead.email, customerId: lead.customer_id, phone: lead.phone });
+}
+
+// One message for every blocked email-a-link action, so the owner always reads the
+// same instruction wherever they hit it.
+const EMAIL_REQUIRED_ERROR = 'Add an email address to send a payment link. Add one to this customer, or use Mark Paid if payment was collected outside Stream.';
 
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
 // request to the caller's business when a token is present, else to Valley Binz.
@@ -543,6 +575,19 @@ router.put('/:id', (req, res) => {
       }
     }
 
+    // ── Payment-link email guard ─────────────────────────────────────────────────
+    // This write would EMAIL the customer a payment link (ensureBaseInvoice
+    // emailLink:true below). With no deliverable address that email is a silent
+    // no-op: the job would sit in pending_payment and the timeline would claim the
+    // link was emailed, while the customer got nothing. Refuse the write instead —
+    // nothing is booked, nothing is logged, and the owner is told what's missing.
+    // Only this one branch is gated: Mark Paid / book_without_payment (already
+    // handled above, emailPaymentLink stays false) and every non-booking edit are
+    // untouched.
+    if (emailPaymentLink && !billingEmailForLead(businessId, existing)) {
+      return res.status(400).json({ error: EMAIL_REQUIRED_ERROR, code: 'email_required' });
+    }
+
     // A pure call-driven reschedule can arrive with NO other field updates (the guard
     // dropped the schedule change); still fall through to record it below. Only run the
     // main UPDATE when there's actually something to write.
@@ -835,6 +880,20 @@ router.post('/manual', requireAuth, (req, res) => {
         // same explicit link the book-from-profile path uses.
         if (namesDiffer) linkedCustomerId = existingCustomer.id;
       }
+    }
+
+    // ── Payment-link email guard ─────────────────────────────────────────────────
+    // An unpaid booking EMAILS the customer the payment link (ensureBaseInvoice
+    // emailLink:true below), so it needs somewhere to send it. Without a deliverable
+    // address that email silently no-ops and the owner walks away believing the
+    // customer was billed — so refuse before anything is created (no lead, no
+    // customer, no invoice). Checked against the address the invoice would bill: what
+    // was typed here, else the customer this job attaches to. Mark Paid (alreadyPaid)
+    // sends no link and "Save as inquiry" (!wantsBooked) sends nothing at all —
+    // neither is gated.
+    if (wantsBooked && !alreadyPaid
+        && !billingEmailFor(businessId, { email, customerId: linkedCustomerId, phone })) {
+      return res.status(400).json({ error: EMAIL_REQUIRED_ERROR, code: 'email_required' });
     }
 
     // No explicit price but we have a size → compute the suggested amount from the

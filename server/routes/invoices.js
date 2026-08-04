@@ -3,7 +3,7 @@ const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { logActivity } = require('../services/activityLog');
 const { emitToBusiness } = require('../socket');
-const { sendInvoiceEmail } = require('../services/emailService');
+const { sendInvoiceEmail, isValidEmail } = require('../services/emailService');
 const { sendInvoiceSms } = require('../services/smsService');
 const invoiceService = require('../services/invoiceService');
 const jobLifecycle = require('../services/jobLifecycle');
@@ -131,17 +131,34 @@ router.delete('/:id', (req, res) => {
 });
 
 // POST /api/invoices/:id/send — deliver the public link via email and/or SMS, and
-// mark the invoice sent. Body: { channel: 'email' | 'sms' | 'both' } (default both).
+// mark the invoice sent. Body: { channel: 'email' | 'sms' | 'both' } (default both),
+// { requireEmail } to hard-fail instead of delivering nothing (see the guard below).
 router.post('/:id/send', async (req, res) => {
   try {
     const invoice = invoiceService.getInvoice(req.business.id, req.params.id);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
 
     const channel = (req.body && req.body.channel) || 'both';
+    const hasEmail = isValidEmail(invoice.bill_to_email);
+
+    // Email-send guard. A caller that is EMAILING this invoice — an email-only send,
+    // or one that asked us to (requireEmail: the review screen's Approve & Send) —
+    // must not be told it went out when there's no address to send to. Refuse before
+    // markSent, so the invoice isn't stamped sent and the timeline never claims a
+    // delivery that didn't happen. A plain 'both' send is unchanged: it still
+    // delivers by whatever channel it can and reports honestly per channel.
+    const requireEmail = (req.body && req.body.requireEmail === true) || channel === 'email';
+    if (requireEmail && !hasEmail) {
+      return res.status(400).json({
+        error: 'Add an email address to send this invoice.',
+        code: 'email_required',
+      });
+    }
+
     const link = publicLink(req, invoice.public_token);
     const delivery = { email: null, sms: null };
 
-    if ((channel === 'email' || channel === 'both') && invoice.bill_to_email) {
+    if ((channel === 'email' || channel === 'both') && hasEmail) {
       try {
         await sendInvoiceEmail({
           to: invoice.bill_to_email,
@@ -155,6 +172,10 @@ router.post('/:id/send', async (req, res) => {
       } catch (e) {
         delivery.email = { sent: false, error: e.message };
       }
+    } else if ((channel === 'email' || channel === 'both') && invoice.bill_to_email) {
+      // An address is on file but isn't a deliverable one — say so instead of
+      // reporting the same "no address" as a blank field.
+      delivery.email = { sent: false, error: 'invalid email address' };
     }
 
     if ((channel === 'sms' || channel === 'both') && invoice.bill_to_phone) {

@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { ArrowLeft, Plus, Trash2, Check, X, ChevronDown, Send, AlertTriangle, Info } from 'lucide-react';
 import { api } from '../utils/api';
 import { INVOICE_LINE_TYPES } from '../utils/verticalConfig';
+import { isValidEmail } from '../utils/email';
 
 // A call-driven draft line whose description prefix is load-bearing: 'Swap replacement'
 // is what the dump-ticket double-bill dedup (swapAlreadyBilled) matches, and 'Rental
@@ -197,6 +198,10 @@ export default function InvoiceEditorPage() {
     }));
   };
 
+  // Approve & Send emails the invoice to this address, so a missing/malformed one
+  // makes that action impossible — never a silent no-op. Saving a draft is unaffected.
+  const canEmailInvoice = isValidEmail(form.bill_to_email);
+
   // Live totals (display only; server is authoritative).
   const subtotal = lines.reduce((s, l) => s + num(l.quantity, 0) * num(l.unit_rate, 0), 0);
   const taxAmount = subtotal * (num(form.tax_rate, 0) / 100);
@@ -239,11 +244,26 @@ export default function InvoiceEditorPage() {
   // pending-review marker so the Action Queue item drops. The customer signs + pays on the
   // normal public invoice page — no net-new customer-side code.
   const approveAndSend = async () => {
+    // Approve & Send DELIVERS this invoice by email — with no address it would mark
+    // the invoice sent and deliver nothing, so block it here (and the server refuses
+    // it too via requireEmail). The Bill To email field above is the fix.
+    if (!canEmailInvoice) {
+      setError('Add an email address (Bill To, above) to send this invoice.');
+      return;
+    }
     setSaving(true); setError(null);
     try {
       await api.updateInvoice(id, buildPayload());
-      await api.sendInvoice(id, 'both');
+      const res = await api.sendInvoice(id, 'both', { requireEmail: true });
       try { await api.resolveInvoiceReview(reviewLeadId, 'sent'); } catch { /* marker clear is best-effort */ }
+      // The address was valid but delivery still failed (provider error). The invoice
+      // IS sent server-side, so don't pretend otherwise — but stay here and say the
+      // email didn't land, rather than navigating away as if the customer has it.
+      if (res?.delivery?.email && !res.delivery.email.sent) {
+        setError(`Invoice saved and marked sent, but the email could not be delivered${res.delivery.email.error ? `: ${res.delivery.email.error}` : ''}. Open the invoice to copy the link.`);
+        setSaving(false);
+        return;
+      }
       navigate(`/invoices/${id}`);
     } catch (e) {
       setError(e.message || 'Send failed');
@@ -555,15 +575,29 @@ export default function InvoiceEditorPage() {
       {error && <p className="text-sm text-danger">{error}</p>}
 
       {reviewMode ? (
-        <div className="flex items-center gap-2 pb-4">
-          <button onClick={discardDraft} disabled={saving || reviewBusy} className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-danger disabled:opacity-50 px-3 py-2 rounded-lg"><Trash2 size={14} /> Discard draft</button>
-          <div className="ml-auto flex items-center gap-2">
-            <button onClick={save} disabled={saving || reviewBusy} className="flex items-center gap-1.5 text-sm font-medium text-content bg-surface-2 hover:bg-surface-2 disabled:opacity-50 px-4 py-2 rounded-lg"><Check size={14} /> Save draft</button>
-            <button onClick={approveAndSend} disabled={saving || reviewBusy} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 px-5 py-2 rounded-lg">
-              <Send size={14} /> {saving ? 'Sending…' : 'Approve & Send'}
-            </button>
+        <>
+          {/* Approve & Send has nowhere to deliver to — say so where the button is,
+              instead of letting it "send" to no one. Discard / Save draft still work. */}
+          {!canEmailInvoice && (
+            <div className="flex items-start gap-2.5 bg-warning/5 border border-warning/30 rounded-xl px-4 py-3 mb-3">
+              <AlertTriangle size={16} className="text-warning flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-content">
+                {form.bill_to_email.trim()
+                  ? `"${form.bill_to_email.trim()}" isn't a valid email address, so this invoice can't be sent.`
+                  : 'Add an email address in Bill To above to send this invoice.'}
+              </p>
+            </div>
+          )}
+          <div className="flex items-center gap-2 pb-4">
+            <button onClick={discardDraft} disabled={saving || reviewBusy} className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-danger disabled:opacity-50 px-3 py-2 rounded-lg"><Trash2 size={14} /> Discard draft</button>
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={save} disabled={saving || reviewBusy} className="flex items-center gap-1.5 text-sm font-medium text-content bg-surface-2 hover:bg-surface-2 disabled:opacity-50 px-4 py-2 rounded-lg"><Check size={14} /> Save draft</button>
+              <button onClick={approveAndSend} disabled={saving || reviewBusy || !canEmailInvoice} className="flex items-center gap-1.5 text-sm font-medium text-content bg-accent hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2 rounded-lg">
+                <Send size={14} /> {saving ? 'Sending…' : 'Approve & Send'}
+              </button>
+            </div>
           </div>
-        </div>
+        </>
       ) : (
         <div className="flex justify-end gap-2 pb-4">
           <button onClick={() => navigate(backLink)} className="flex items-center gap-1.5 text-sm text-muted hover:text-content px-4 py-2 rounded-lg"><X size={14} /> Cancel</button>

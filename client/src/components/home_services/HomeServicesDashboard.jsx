@@ -1084,11 +1084,28 @@ function BookedModal({ lead, onConfirm, onClose }) {
   const [poolSizes, setPoolSizes] = useState([]);
   const [availability, setAvailability] = useState(null);
   const [loadingAvail, setLoadingAvail] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
   const name = getLeadName(lead);
 
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
+
+  // Booking an unpaid job emails the customer a payment link, and the server refuses
+  // that when there's no address to send it to. Surface the refusal here rather than
+  // closing the modal as though the job were booked.
+  const confirm = async () => {
+    if (!isValid || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await onConfirm({ date, rentalDays: daysNum, size });
+    } catch (err) {
+      console.error('Confirm booking failed:', err);
+      setError(err?.message || 'Could not book this job. Please try again.');
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1184,17 +1201,21 @@ function BookedModal({ lead, onConfirm, onClose }) {
             )}
           </div>
         </div>
+        {error && (
+          <p className="mt-4 text-sm text-danger bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">{error}</p>
+        )}
         <div className="flex gap-3 mt-6">
           <button
-            onClick={() => onConfirm({ date, rentalDays: daysNum, size })}
-            disabled={!isValid}
+            onClick={confirm}
+            disabled={!isValid || saving}
             className="flex-1 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
           >
-            Confirm Booking
+            {saving ? 'Booking…' : 'Confirm Booking'}
           </button>
           <button
             onClick={onClose}
-            className="px-4 py-2.5 text-sm text-muted hover:text-content rounded-xl transition-colors"
+            disabled={saving}
+            className="px-4 py-2.5 text-sm text-muted hover:text-content rounded-xl transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
@@ -1552,7 +1573,12 @@ export default function HomeServicesDashboard() {
       const updated = await api.updateLead(bookingLead.id, updates);
       setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
       setBookingLead(null);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      // Re-throw so the modal stays open and shows why (the server refuses to book a
+      // job into "payment link emailed" when there's no email to send it to).
+      throw e;
+    }
   }, [bookingLead]);
 
   const { needsAttention, toExpire, todaysSchedule, operationalLeads, metrics } = useMemo(() => {

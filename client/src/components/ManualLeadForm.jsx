@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
+import { isValidEmail } from '../utils/email';
 import AvailabilityCheck from './home_services/AvailabilityCheck';
 
 const DUMPSTER_SIZES = ['10 yard', '15 yard', '20 yard'];
@@ -200,6 +201,12 @@ export default function ManualLeadForm() {
   const isValid = form.firstName.trim() && form.phone.trim();
   const fullName = [form.firstName, form.lastName].map(s => s.trim()).filter(Boolean).join(' ');
 
+  // Send Payment Link EMAILS a secure invoice link, so it needs a real address to
+  // send to — without one the send is a silent no-op and the owner believes the
+  // customer was billed. Gate that one action on a valid email (the server refuses
+  // it too); Mark Paid and Save-as-inquiry send nothing and stay ungated.
+  const canEmailPaymentLink = isValidEmail(form.email);
+
   // Open the same-phone / different-name merge confirm as a BACKSTOP: if a booking is
   // submitted without a merge id and the phone still belongs to a different-named
   // customer, the server refuses (409, creates nothing) and we open the same modal.
@@ -265,6 +272,13 @@ export default function ManualLeadForm() {
   // which also bypasses the confirm gate.
   const submit = async (mode, mergeIdOverride = null) => {
     if (!isValid || submitting) return;
+    // Backstop for the disabled Send Payment Link button (a merge re-submit routes
+    // back through here): never fire the email path with nowhere to send it.
+    if (mode === 'link' && !canEmailPaymentLink) {
+      setError('Add an email address to send a payment link.');
+      setStep(1);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     const linkCustomerId = mergeIdOverride || mergeCustomerId || customerId;
@@ -378,6 +392,9 @@ export default function ManualLeadForm() {
           <div className="px-4 py-2">
             <SummaryRow label="Customer" value={fullName} />
             <SummaryRow label="Phone" value={form.phone} />
+            {/* Shown here because Send Payment Link emails THIS address — a blank
+                row is the reason that option is unavailable below. */}
+            <SummaryRow label="Email" value={form.email} />
             <SummaryRow label={t.sizeLabel} value={form.dumpsterSize} />
             <SummaryRow label={t.startDate} value={formatDay(form.deliveryDate)} />
             <SummaryRow label={t.startTime} value={formatTime12(form.scheduledTime)} />
@@ -402,8 +419,8 @@ export default function ManualLeadForm() {
           <div className="space-y-3">
             <button
               onClick={() => submit('link')}
-              disabled={submitting}
-              className="w-full flex items-center gap-3 text-left text-background bg-success hover:bg-success/90 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-3 rounded-xl transition-colors"
+              disabled={submitting || !canEmailPaymentLink}
+              className="w-full flex items-center gap-3 text-left text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-3 rounded-xl transition-colors"
             >
               <Send size={18} className="flex-shrink-0" />
               <span>
@@ -411,6 +428,25 @@ export default function ManualLeadForm() {
                 <span className="block text-xs opacity-90">Emails a secure link · books &amp; reserves when the customer pays</span>
               </span>
             </button>
+            {/* There is nowhere to send the link, so the option is off rather than
+                quietly doing nothing. The other two paths email nothing and stay on. */}
+            {!canEmailPaymentLink && (
+              <div className="flex items-start gap-2.5 bg-warning/5 border border-warning/30 rounded-xl px-4 py-3">
+                <AlertTriangle size={16} className="text-warning flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-content">
+                  {form.email.trim()
+                    ? `"${form.email.trim()}" isn't a valid email address, so the payment link can't be sent.`
+                    : 'Add an email address to send a payment link.'}{' '}
+                  <button
+                    onClick={() => { setError(null); setConfirmPaid(false); setStep(1); }}
+                    className="font-semibold text-accent hover:underline"
+                  >
+                    {form.email.trim() ? 'Fix the email' : 'Add an email'}
+                  </button>
+                  , or use one of the options below.
+                </p>
+              </div>
+            )}
             <button
               onClick={() => setConfirmPaid(true)}
               disabled={submitting}

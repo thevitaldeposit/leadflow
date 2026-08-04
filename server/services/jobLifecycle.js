@@ -333,6 +333,28 @@ function isReplacementHaul(businessId, lead, vd, assignment) {
   } catch { return false; /* assignments unavailable — bill as an ordinary haul */ }
 }
 
+// Email an invoice's public link to the customer, fire-and-forget. The system-driven
+// bills route through here (the auto-book payment link, the weight/overage + swap
+// bill) — nobody is sitting in front of a screen to be told it failed, so a bill we
+// COULDN'T deliver is written to the job's timeline instead of only the server log.
+// Otherwise an invoice with no address on file reads as "created" and looks sent.
+// Owner-initiated sends never reach here: those are blocked up front by the
+// email-required guards on the booking + invoice-send routes.
+function emailInvoiceLink(businessId, inv, leadId) {
+  require('./emailService').sendInvoiceLinkEmail({ ...inv, business_id: businessId })
+    .then((r) => {
+      if (r && r.sent) return;
+      const reason = (r && r.reason) || 'unknown';
+      console.log(`[jobLifecycle] invoice email not sent (inv ${inv.id}): ${reason}`);
+      if (!leadId) return;
+      const why = reason === 'no_email'
+        ? 'no email address on file'
+        : reason === 'no_email_provider' ? 'email is not configured' : reason;
+      logActivity(leadId, 'note_added', `Invoice ${inv.invoice_number} could NOT be emailed — ${why}. Send it from the invoice once an address is added.`);
+    })
+    .catch((e) => console.error('[jobLifecycle] invoice email error:', e.message));
+}
+
 // Bill a ticket's line items as ONE 'sent' invoice for the job: resolve a customer
 // (a booked job is linked by reconcile-on-read, but resolve one defensively so a bill
 // never silently vanishes), create, mark sent, log, and email it. Shared by the
@@ -357,9 +379,7 @@ function createTicketInvoice(businessId, lead, lineItems, bits = '') {
     invoiceService.markSent(businessId, inv.id);
     logActivity(lead.id, 'invoice_created', `Invoice ${inv.invoice_number} created${bits ? ` (${bits})` : ''}`);
     // Email the bill to the customer (same Resend path as the payment link).
-    require('./emailService').sendInvoiceLinkEmail({ ...inv, business_id: businessId })
-      .then((r) => { if (r && !r.sent) console.log(`[jobLifecycle] invoice email not sent (inv ${inv.id}): ${r.reason}`); })
-      .catch((e) => console.error('[jobLifecycle] invoice email error:', e.message));
+    emailInvoiceLink(businessId, inv, lead.id);
     return inv;
   } catch (e) {
     console.error('[jobLifecycle] ticket invoice failed:', e.message);
@@ -841,9 +861,7 @@ function ensureBaseInvoice(businessId, leadOrId, { emailLink = false, markPaidNo
       } catch (e) { console.error('[jobLifecycle] base invoice mark-paid failed:', e.message); }
     } else if (emailLink) {
       // Same Resend path as the overage bill + the payment link.
-      require('./emailService').sendInvoiceLinkEmail({ ...inv, business_id: businessId })
-        .then((r) => { if (r && !r.sent) console.log(`[jobLifecycle] base invoice email not sent (inv ${inv.id}): ${r.reason}`); })
-        .catch((e) => console.error('[jobLifecycle] base invoice email error:', e.message));
+      emailInvoiceLink(businessId, inv, lead.id);
     }
 
     try { emitToBusiness(businessId, 'invoice_updated', { id: inv.id }); } catch { /* non-fatal */ }
