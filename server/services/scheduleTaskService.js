@@ -1,5 +1,6 @@
 const db = require('../db/database');
 const { onSiteAssignmentsForLeads, assignmentTaskStateForLeads } = require('./assignmentService');
+const { listAssets } = require('./assetService');
 
 // ── The job TASK summary ──────────────────────────────────────────────────────
 //
@@ -19,13 +20,40 @@ const TASK_LEAD_COLUMNS = `
   id, customer_first_name, customer_last_name, vertical_data, sub_vertical,
   job_status, delivery_date, scheduled_time, pickup_date, estimated_revenue,
   phone, caller_number, caller_phone_raw, units_out,
-  delivery_done_at, pickup_done_at
+  delivery_done_at, pickup_done_at, created_at
 `;
+
+// ── Does this business track physical units at all? ───────────────────────────
+// A job always has ZERO assignment rows before its own drop is recorded, so
+// per-job `hasAssignments` can never answer "does this owner have a fleet". A
+// business that owns even one active asset must capture the unit at the drop —
+// the "just mark it delivered" bypass is for the owner who tracks nothing.
+//
+// `oldestAssetAt` is the narrow legacy escape hatch: a job created BEFORE the
+// first asset was ever registered was genuinely in flight pre-fleet and has no
+// unit to record, so it keeps the bypass. Read-only, computed once per batch.
+function fleetContext(businessId) {
+  let assets = [];
+  try { assets = listAssets(businessId); } catch { assets = []; }
+  let oldest = null;
+  for (const a of assets) {
+    const t = a.created_at ? String(a.created_at) : null;
+    if (t && (oldest === null || t < oldest)) oldest = t;
+  }
+  return { hasFleet: assets.length > 0, oldestAssetAt: oldest };
+}
+
+// Is this job old enough to predate the fleet (→ keeps the mark-done bypass)?
+function isPreFleetJob(lead, fleet) {
+  if (!fleet || !fleet.hasFleet) return true;          // nothing tracked at all
+  if (!fleet.oldestAssetAt || !lead.created_at) return false;
+  return String(lead.created_at) < String(fleet.oldestAssetAt);
+}
 
 // Build one summary from a lead row plus its already-fetched assignment state.
 // `onSite` = that job's open assignments; `task` = its derived done-ness (or null
 // for a job with no assignment rows at all).
-function buildJobTaskSummary(lead, { onSite = [], task = null } = {}) {
+function buildJobTaskSummary(lead, { onSite = [], task = null, fleet = null } = {}) {
   let vd = {};
   try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { /* malformed vertical_data */ }
   const state = task || { hasAssignments: false, dropRecorded: false, pickupSettled: false };
@@ -71,6 +99,11 @@ function buildJobTaskSummary(lead, { onSite = [], task = null } = {}) {
     // Which basis the two booleans above came from, so the client can offer the
     // explicit "mark done" fallback only where there's nothing to derive from.
     hasAssignments: state.hasAssignments,
+    // Does the OWNER track units at all (≥1 active asset)? The mark-done bypass is
+    // gated on this, not on per-job assignments — a job has none until it's dropped.
+    hasFleet: fleet ? !!fleet.hasFleet : false,
+    // …with the narrow exception of a job that predates the fleet entirely.
+    preFleetJob: isPreFleetJob(lead, fleet),
   };
 }
 
@@ -80,9 +113,11 @@ function summariesForLeadRows(businessId, leads) {
   const ids = leads.map(l => l.id);
   const onSiteByLead = onSiteAssignmentsForLeads(businessId, ids);
   const taskStateByLead = assignmentTaskStateForLeads(businessId, ids);
+  const fleet = fleetContext(businessId);
   return leads.map(lead => buildJobTaskSummary(lead, {
     onSite: onSiteByLead.get(lead.id) || [],
     task: taskStateByLead.get(lead.id) || null,
+    fleet,
   }));
 }
 
@@ -110,6 +145,8 @@ function jobTaskSummary(businessId, leadId) {
 
 module.exports = {
   TASK_LEAD_COLUMNS,
+  fleetContext,
+  isPreFleetJob,
   buildJobTaskSummary,
   summariesForLeadRows,
   jobTaskSummariesByIds,

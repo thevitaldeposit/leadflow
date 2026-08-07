@@ -16,6 +16,8 @@ import {
 } from '../utils/verticalConfig';
 import CustomerCallIntelligence from '../components/home_services/CustomerCallIntelligence';
 import VoicemailBadge from '../components/home_services/VoicemailBadge';
+import ManualBadge from '../components/home_services/ManualBadge';
+import ActiveRentalActions from '../components/home_services/ActiveRentalActions';
 import { CreateJobModal, EditJobDetailsModal } from '../components/home_services/HomeServicesStickyHeader';
 import { buildBookingUpdates } from '../utils/booking';
 
@@ -963,6 +965,7 @@ function EngagementBody({ engagement: e, refreshKey = 0 }) {
     return next;
   });
   const calls = e.calls || []; // newest-first; calls[0] is the representative
+  const realCallCount = calls.filter(c => c.source !== 'manual').length;
 
   return (
     <>
@@ -999,10 +1002,31 @@ function EngagementBody({ engagement: e, refreshKey = 0 }) {
       {calls.length > 0 && (
         <div className="px-5 pb-4">
           <p className="text-[11px] font-semibold text-muted uppercase tracking-wide mb-1.5">
-            Calls ({calls.length})
+            {/* A manually entered job has no calls at all — don't label its one
+                "created by owner" row as a call. */}
+            {realCallCount > 0 ? `Calls (${realCallCount})` : 'Job Record'}
           </p>
           <div className="border border-divider rounded-lg divide-y divide-divider overflow-hidden">
             {calls.map(call => {
+              // A manually created job is NOT a call: there's no recording, no
+              // transcript and no summary, so expanding it only ever showed an empty
+              // panel. It still belongs in this list as the record of WHEN the job was
+              // entered — rendered as a plain, un-expandable row instead.
+              if (call.source === 'manual') {
+                return (
+                  <div key={call.id} className="w-full flex items-center justify-between px-3 py-2">
+                    <span className="flex items-center gap-2 text-sm text-content">
+                      <span className="w-[13px] flex-shrink-0" />
+                      {fmtDateTime(call.created_at) || fmtDate(call.created_at)}
+                      <span className="text-xs text-muted">Created manually by owner</span>
+                    </span>
+                    <span className="flex items-center gap-2 text-xs text-muted">
+                      <ManualBadge />
+                      {call.service}
+                    </span>
+                  </div>
+                );
+              }
               const open = openCalls.has(call.id);
               return (
                 <Fragment key={call.id}>
@@ -1147,6 +1171,12 @@ function ActiveEngagement({ id, engagement: e, customerEmail = null, onClose, on
   // on the top contact card). It only leaves this slot when the job completes.
   const headerTitle = e.status === ENGAGEMENT_STATUS.BOOKED ? 'Open Job' : 'Active Inquiry';
 
+  // Swap-out is offered only while the can is actually out at the customer
+  // (delivered / active rental) on a booked job with a payable lead behind it.
+  const canSwap = e.status === ENGAGEMENT_STATUS.BOOKED
+    && !!e.booked_lead_id
+    && (e.job_stage === 'delivered' || e.job_stage === 'active_rental');
+
   return (
     <Card
       id={id}
@@ -1161,6 +1191,17 @@ function ActiveEngagement({ id, engagement: e, customerEmail = null, onClose, on
       ) : null}
       action={(
         <div className="flex items-center gap-2">
+          {/* A job whose can is physically out can be swapped on demand — the same
+              flow a customer's call produces, just started by the owner. Pickup isn't
+              offered here: that's driver work, launched from the schedule. */}
+          {canSwap && (
+            <ActiveRentalActions
+              leadId={e.booked_lead_id}
+              size={e.dumpster_size || null}
+              compact
+              showPickup={false}
+            />
+          )}
           <button
             onClick={openEdit}
             disabled={loadingEdit}

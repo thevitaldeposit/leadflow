@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Calendar, Check, Package, ExternalLink } fro
 import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
 import YardQueue from '../components/home_services/YardQueue';
+import ActiveRentalActions from '../components/home_services/ActiveRentalActions';
 
 // This page serves the Home Services dumpster-rental business; wording comes from
 // the shared terminology table so the same calendar can label other verticals.
@@ -445,6 +446,12 @@ function DayJobRow({ job, type }) {
             )}
           </div>
         </button>
+        {/* An out-at-customer rental isn't waiting on a dated task, so its card carries
+            the two on-demand actions instead: pick it up ahead of schedule, or draft a
+            swap. Both reuse the existing flows (see ActiveRentalActions). */}
+        {type === 'active' && (
+          <ActiveRentalActions leadId={job.id} size={job.dumpsterSize} compact className="flex-shrink-0" />
+        )}
         {/* The customer profile, now an explicit affordance instead of what tapping
             the card does. */}
         <Link

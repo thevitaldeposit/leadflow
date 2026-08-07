@@ -230,6 +230,10 @@ function toJob(lead) {
     job_status: lead.job_status || JOB_STATUS.INQUIRY,
     status: lead.status || LEGACY_STATUS.NEW,
     call_type: lead.call_type || null,
+    // How this record came into being ('manual' when the owner typed it in). A
+    // manual lead is NOT a call: the profile's Calls list renders it as a plain
+    // "created manually" row rather than an empty, un-expandable call.
+    source: lead.source || null,
     vertical: lead.vertical || null,
     sub_vertical: lead.sub_vertical || null,
     service: leadServiceSummary(lead),

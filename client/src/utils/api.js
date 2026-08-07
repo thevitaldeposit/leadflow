@@ -130,6 +130,17 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task }),
     }),
+  // Ask for a swap on an active rental from the dashboard (rather than the customer
+  // asking on a call). Body: { size? }. Server-side this is a thin wrapper over the
+  // SAME call-driven producer: it drafts the priced swap invoice and raises the
+  // Action Queue review item — nothing about swap billing or the unit rotation is
+  // different, only the "manual" label.
+  requestSwap: (id, size = null) =>
+    request(`/leads/${id}/swap-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(size ? { size } : {}),
+    }),
   // Resolve a confirm-first cancellation cue. confirm=true → mark lost; false → keep.
   resolveCancel: (id, confirm) =>
     request(`/leads/${id}/cancel`, {

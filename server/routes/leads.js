@@ -12,6 +12,7 @@ const { describeBooking } = require('../services/leadActivityText');
 const { sendToAll } = require('../services/apns');
 const { JOB_STATUS, LEGACY_STATUS, ACTIVE_JOB_STATUS_SET } = require('../config/jobStatus');
 const assignmentService = require('../services/assignmentService');
+const { fleetContext, isPreFleetJob } = require('../services/scheduleTaskService');
 const { isValidEmail } = require('../services/emailService');
 
 // The address a payment-link / invoice email would actually be delivered to: the
@@ -1257,6 +1258,20 @@ router.post('/:id/task-done', requireAuth, (req, res) => {
       });
     }
 
+    // A business that OWNS a fleet must capture the unit — a job simply has no
+    // assignment rows until its drop is recorded, so the check above can't catch
+    // this on its own (which is what let the bypass show on every un-dropped
+    // delivery). Refused server-side so the client's gate isn't merely cosmetic.
+    // The one exception stays narrow: a job created before the first asset was
+    // ever registered was genuinely in flight pre-fleet and has nothing to record.
+    const fleet = fleetContext(businessId);
+    if (fleet.hasFleet && !isPreFleetJob(lead, fleet)) {
+      return res.status(400).json({
+        error: 'You track your dumpsters by unit — record which unit was dropped or picked up instead.',
+        code: 'has_fleet',
+      });
+    }
+
     const at = new Date().toISOString();
     const column = task === 'delivery' ? 'delivery_done_at' : 'pickup_done_at';
     // Idempotent: re-marking an already-done task is a no-op, not a re-stamp.
@@ -1273,6 +1288,65 @@ router.post('/:id/task-done', requireAuth, (req, res) => {
   } catch (err) {
     console.error('POST /leads/:id/task-done error:', err);
     res.status(500).json({ error: 'Failed to mark the task done' });
+  }
+});
+
+// POST /api/leads/:id/swap-request — the OWNER asks for a swap on an active rental
+// (from the dashboard's Active Rentals row or the customer profile's Open Job),
+// instead of the customer asking for one on a call. Body: { size? } — defaults to
+// the job's own size.
+//
+// Deliberately thin: it calls the SAME producer the call-intent classifier calls
+// (jobLifecycle.ensureCallDrivenReviewInvoice) with source:'manual' and does nothing
+// else. There is no second swap path — the priced DRAFT invoice, the
+// vd.pendingInvoiceReview marker, the Action Queue review item, the invoice editor's
+// swap-date recompute, the pay hook that arms vd.pendingSwapOuts, the dump ticket
+// that consumes it and the later replacement-drop prompt are all the existing
+// machinery, untouched. 'manual' only changes the wording. Web dashboard → hard auth.
+router.post('/:id/swap-request', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const raw = (req.body || {}).size;
+    const size = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+
+    const outcome = jobLifecycle.ensureCallDrivenReviewInvoice(businessId, lead, {
+      swap: { size },
+      source: 'manual',
+    });
+
+    if (outcome && outcome.created) {
+      return res.json({
+        success: true,
+        invoiceId: outcome.invoice.id,
+        kind: outcome.kind,
+        amount: outcome.amount,
+      });
+    }
+    if (outcome && outcome.skipped === 'exists') {
+      return res.status(409).json({
+        error: 'A draft invoice is already waiting for your review on this job.',
+        code: 'exists',
+      });
+    }
+    if (outcome && outcome.skipped === 'no_size') {
+      return res.status(400).json({ error: 'This job has no dumpster size, so a swap cannot be priced.', code: 'no_size' });
+    }
+    if (outcome && outcome.skipped === 'no_charge') {
+      return res.status(400).json({
+        error: 'Swaps are not priced for this size — set a swap price on the Pricing page first.',
+        code: 'no_charge',
+      });
+    }
+    return res.status(400).json({
+      error: 'Could not draft the swap invoice.',
+      code: (outcome && (outcome.skipped || outcome.error)) || 'unknown',
+    });
+  } catch (err) {
+    console.error('POST /leads/:id/swap-request error:', err);
+    res.status(500).json({ error: 'Failed to request the swap' });
   }
 });
 

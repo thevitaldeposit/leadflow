@@ -12,6 +12,7 @@ import IntentBadge from './IntentBadge';
 import CriticalBadge from './CriticalBadge';
 import VoicemailBadge from './VoicemailBadge';
 import MissedCallBadge from './MissedCallBadge';
+import ActiveRentalActions from './ActiveRentalActions';
 import { getSettings, saveSettings } from '../../utils/settings';
 import { Link, useNavigate } from 'react-router-dom';
 import OnboardingBanner from '../OnboardingBanner';
@@ -52,6 +53,15 @@ function dayKey(value) {
   if (!value) return null;
   const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(value));
   return m ? m[1] : null;
+}
+
+// A stored date as a short human day ("Aug 12"), read in local-calendar space so it
+// never slips a day. Falls back to the raw value when it isn't a date we recognize.
+function fmtDayLabel(value) {
+  const key = dayKey(value);
+  if (!key) return value ? String(value) : '';
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 // Best-effort parse of a schedule time ("8:00 AM", "14:30", "9am") to minutes
@@ -313,7 +323,10 @@ function bookedAttentionReason(lead, vd, now) {
   if (vd.pendingInvoiceReview && vd.pendingInvoiceReview.invoiceId) {
     const k = vd.pendingInvoiceReview.kind;
     const what = k === 'swap_extension' ? 'Swap + extension' : k === 'extension' ? 'Extension' : 'Swap';
-    return `${what} invoice ready — review & send`;
+    // Same item, same actions — the label just says where the request came from.
+    return vd.pendingInvoiceReview.source === 'manual'
+      ? `Manual ${what.toLowerCase()} invoice ready — review & send`
+      : `${what} invoice ready — review & send`;
   }
 
   // (3) Pending-payment SALES nudge: booking initiated but unpaid by the next
@@ -959,6 +972,98 @@ function TodaysSchedule({ items }) {
         >
           View full schedule <ArrowRight size={13} />
         </button>
+      </div>
+    </section>
+  );
+}
+
+// ── Active Rentals ────────────────────────────────────────────────────────────
+// The cans that are out at a customer right now. Today's Schedule only shows what
+// happens TODAY, so an ongoing rental lives nowhere on this page — and it's the job
+// the phone rings about ("come get it early", "I need another one"). Each row names
+// the customer, the size, the unit actually on the ground and when it's due back,
+// with the two on-demand actions and a tap-through to the job's task screen.
+//
+// Display + navigation only: the unit line comes from the same read-only task summary
+// Today's Schedule uses, and the actions reuse the existing pickup task / swap flow.
+function ActiveRentals({ items }) {
+  const navigate = useNavigate();
+  // Which physical unit is on each job — server-side knowledge, same batch endpoint
+  // Today's Schedule uses. A failure just leaves the rows without the unit line.
+  const [tasks, setTasks] = useState({});
+  const idKey = items.map(it => it.lead.id).join(',');
+
+  useEffect(() => {
+    const ids = [...new Set(idKey.split(',').filter(Boolean))];
+    if (ids.length === 0) return undefined;
+    let alive = true;
+    api.getJobTasks(ids)
+      .then(d => {
+        if (!alive) return;
+        setTasks(Object.fromEntries((d.tasks || []).map(t => [String(t.id), t])));
+      })
+      .catch(() => { if (alive) setTasks({}); });
+    return () => { alive = false; };
+  }, [idKey]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <section className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-divider flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Truck size={15} className="text-warning" />
+          <h2 className="text-sm font-bold text-content">Active Rentals</h2>
+        </div>
+        <span className="text-xs text-muted">{items.length} out</span>
+      </div>
+
+      <div className="divide-y divide-divider max-h-[360px] overflow-y-auto scrollbar-subtle">
+        {items.map(({ lead, vd }) => {
+          const task = tasks[String(lead.id)];
+          const onSiteUnits = task?.assignedUnits || [];
+          const size = formatSize(vd.dumpsterSize);
+          const pickup = lead.pickup_date || vd.pickupDate || null;
+          return (
+            <div
+              key={lead.id}
+              onClick={() => navigate(`/task/${lead.id}?type=active`)}
+              className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-surface-2 transition-colors"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-sm font-semibold text-content truncate">{getLeadName(lead)}</span>
+                  {size && <span className="text-xs text-muted flex-shrink-0">{size}</span>}
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-muted truncate">
+                  {onSiteUnits.length > 0 && (
+                    <span className="font-semibold text-brand flex-shrink-0">
+                      {onSiteUnits.map(u => `Unit ${u.label}`).join(', ')}
+                    </span>
+                  )}
+                  <span className="truncate">
+                    {onSiteUnits.length > 0 ? '· ' : ''}
+                    {pickup ? `Pickup ${fmtDayLabel(pickup)}` : 'No pickup date set'}
+                  </span>
+                </div>
+              </div>
+              <ActiveRentalActions
+                leadId={lead.id}
+                size={vd.dumpsterSize || null}
+                compact
+                className="flex-shrink-0"
+              />
+              <Link
+                to={`/leads/${lead.id}`}
+                onClick={(e) => e.stopPropagation()}
+                title="Open customer profile"
+                className="p-1.5 rounded-lg text-muted hover:bg-surface-2 hover:text-content transition-colors flex-shrink-0"
+              >
+                <ExternalLink size={13} />
+              </Link>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -1640,7 +1745,7 @@ export default function HomeServicesDashboard() {
     }
   }, [bookingLead]);
 
-  const { needsAttention, toExpire, todaysSchedule, operationalLeads, metrics } = useMemo(() => {
+  const { needsAttention, toExpire, todaysSchedule, activeRentals, operationalLeads, metrics } = useMemo(() => {
     const now = new Date();
     const enriched = leads.map(l => ({ lead: l, state: getLeadActionState(l, now), vd: parseVerticalData(l) }));
 
@@ -1706,6 +1811,25 @@ export default function HomeServicesDashboard() {
       return (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9);
     });
 
+    // ── Active rentals ────────────────────────────────────────────────────────
+    // The jobs that are physically out at a customer right now. Today's Schedule
+    // deliberately shows only what HAPPENS today, so an ongoing rental with neither
+    // date landing today appears nowhere — which is exactly the job you need when
+    // the customer calls to have it picked up early or swapped. Anything already on
+    // today's schedule is left there rather than listed twice.
+    const onScheduleToday = new Set(todaysSchedule.map(it => it.lead.id));
+    const activeRentals = enriched
+      .filter(({ lead }) => (
+        (lead.job_status === JOB_STATUS.DELIVERED || lead.job_status === JOB_STATUS.ACTIVE_RENTAL)
+        && !onScheduleToday.has(lead.id)
+      ))
+      .sort((a, b) => {
+        // Soonest pickup first; a rental with no pickup date sits at the end.
+        const pa = dayKey(a.lead.pickup_date || a.vd.pickupDate) || '9999-99-99';
+        const pb = dayKey(b.lead.pickup_date || b.vd.pickupDate) || '9999-99-99';
+        return pa.localeCompare(pb);
+      });
+
     // ── Metrics ────────────────────────────────────────────────────────────────
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const weekStart = new Date(now); weekStart.setDate(weekStart.getDate() - 7);
@@ -1760,6 +1884,7 @@ export default function HomeServicesDashboard() {
       needsAttention,
       toExpire,
       todaysSchedule,
+      activeRentals,
       operationalLeads,
       metrics: {
         needsAttentionCount, newLeads7d, bookedThisWeek, onSchedule, completedMonth,
@@ -1884,6 +2009,10 @@ export default function HomeServicesDashboard() {
         {/* Today's Schedule */}
         <TodaysSchedule items={todaysSchedule} />
       </div>
+
+      {/* Active Rentals — what's out at a customer right now (renders nothing when
+          nothing is out). Today's Schedule above shows only what happens today. */}
+      <ActiveRentals items={activeRentals} />
 
       {/* Revenue & Reporting (~60%) | Quick Availability Check (~40%) */}
       <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-5 items-start">

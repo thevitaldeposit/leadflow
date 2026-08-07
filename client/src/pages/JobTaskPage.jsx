@@ -6,6 +6,7 @@ import {
 import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
 import DumpTicketAction from '../components/home_services/DumpTicketAction';
+import ActiveRentalActions from '../components/home_services/ActiveRentalActions';
 import { UnitDropAction, UnitPickupStep } from '../components/home_services/UnitAssignmentAction';
 
 const term = getTerminology('home_services', 'dumpster_rental');
@@ -30,6 +31,14 @@ const term = getTerminology('home_services', 'dumpster_rental');
 // (UnitDropAction, UnitPickupStep, DumpTicketAction) against the existing endpoints;
 // this file only sequences them and carries the picked unit + chosen dump site from
 // one step to the next. The customer profile is one tap away in the header.
+
+// The screen is a direct flex child of #root (h-screen flex, with html/body locked to
+// overflow:hidden). So it has to claim the row's width itself (flex-1) and own its own
+// scroll — a plain min-h-screen block sat shrink-to-fit against the left edge and had
+// its lower half, the weight step included, clipped off with nowhere to scroll.
+const SCREEN = 'flex-1 min-w-0 h-screen overflow-y-auto bg-app-bg';
+// One centred column for the header and the body, wide enough to read at arm's length.
+const COLUMN = 'mx-auto w-full max-w-3xl px-4 sm:px-6';
 
 function directionsUrl(address) {
   return address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}` : null;
@@ -249,7 +258,7 @@ export default function JobTaskPage() {
 
   if (loadErr) {
     return (
-      <div className="min-h-screen bg-app-bg flex flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className={`${SCREEN} flex flex-col items-center justify-center gap-4 px-6 text-center`}>
         <p className="text-base text-content">{loadErr}</p>
         <button onClick={goBack} className="text-sm font-semibold text-brand hover:underline">Go back</button>
       </div>
@@ -258,7 +267,7 @@ export default function JobTaskPage() {
 
   if (!job) {
     return (
-      <div className="min-h-screen bg-app-bg flex items-center justify-center">
+      <div className={`${SCREEN} flex items-center justify-center`}>
         <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -267,10 +276,17 @@ export default function JobTaskPage() {
   const onSite = job.assignedUnits || [];
   const { label, bg } = TYPE_CONFIG[type];
   const timeLabel = type === 'active' ? null : (formatTime12(job.scheduledTime) || 'Flexible');
-  // A job with no unit assignments at all is the legacy case — there is nothing to
-  // derive "done" from, so it gets the explicit stamp instead (server-guarded: it
-  // refuses this the moment the job does track units).
-  const isLegacy = job.hasAssignments === false && onSite.length === 0;
+  // The mark-it-done bypass is for an owner who tracks NO units. It keys on the
+  // business's fleet, not on this job's assignments — a job has zero assignment rows
+  // until its drop is recorded, so keying on those showed the bypass on every
+  // un-dropped delivery and made the unit ID optional for a full fleet. The one
+  // exception is a job that predates the fleet entirely (nothing to record against);
+  // the server enforces exactly the same rule.
+  const isLegacy = job.hasFleet === false || job.preFleetJob === true;
+  // A swap replacement is only owed when a PAID swap actually armed one. Without
+  // that, an active rental has nothing to drop — it gets the on-demand actions
+  // (pick up early / swap out) instead of a live drop picker over the whole fleet.
+  const swapPending = (job.pendingSwapOuts || 0) > 0;
   const totalSteps = isPickup ? 3 : 1;
   // A delivery whose drop is already recorded opens as DONE, not as a picker. The
   // swap-replacement task ('active') deliberately drops a second unit on a job that
@@ -279,11 +295,11 @@ export default function JobTaskPage() {
   const pickupAlreadyDone = isPickup && job.pickupSettled && !picked;
 
   return (
-    // Full-bleed on a phone; a centered card from sm up. The page itself is the only
-    // thing that scrolls.
-    <div className="min-h-screen bg-app-bg">
+    // Full-bleed on a phone; a centered, comfortably wide column from sm up. The
+    // screen itself is the only thing that scrolls.
+    <div className={SCREEN}>
       <header className="sticky top-0 z-10 bg-surface border-b border-divider">
-        <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 py-3">
+        <div className={`${COLUMN} py-3`}>
           <div className="flex items-center gap-3">
             <button
               onClick={goBack}
@@ -306,7 +322,7 @@ export default function JobTaskPage() {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 py-5 space-y-6">
+      <div className={`${COLUMN} py-5 space-y-6`}>
         {/* Who and where — the card's own content, so opening the task never loses
             context. */}
         <div>
@@ -323,8 +339,19 @@ export default function JobTaskPage() {
 
         <ContactRow job={job} />
 
-        {/* ── DELIVERY / ACTIVE: capture the unit on the ground ───────────────── */}
-        {!isPickup && (
+        {/* ── ACTIVE rental with nothing pending: the on-demand actions ───────── */}
+        {type === 'active' && !swapPending && (
+          <Step n={1} of={1} title="This rental is out — what do you need to do?">
+            <ActiveRentalActions
+              leadId={job.id}
+              size={job.dumpsterSize}
+              onSwapped={load}
+            />
+          </Step>
+        )}
+
+        {/* ── DELIVERY / ACTIVE-with-swap: capture the unit on the ground ─────── */}
+        {!isPickup && !(type === 'active' && !swapPending) && (
           <Step
             n={1}
             of={1}

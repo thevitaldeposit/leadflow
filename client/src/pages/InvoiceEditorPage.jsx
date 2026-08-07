@@ -374,7 +374,11 @@ export default function InvoiceEditorPage() {
 
       {reviewMode && (
         <div className="bg-brand/5 border border-brand/30 rounded-xl px-5 py-4 space-y-2.5">
-          <p className="text-sm font-semibold text-content">Drafted from a customer call — review, then approve &amp; send.</p>
+          <p className="text-sm font-semibold text-content">
+            {reviewInfo?.pendingInvoiceReview?.source === 'manual'
+              ? 'Drafted from a manual swap request — review, then approve & send.'
+              : 'Drafted from a customer call — review, then approve & send.'}
+          </p>
           <p className="text-xs text-muted">
             This swap / extension invoice was drafted automatically and has <span className="font-semibold">not</span> been sent.
             Adjust the price or lines if needed, then <span className="font-semibold">Approve &amp; Send</span> to deliver it for

@@ -915,7 +915,13 @@ function pendingReviewDraftExists(businessId, vd) {
   } catch { return false; }
 }
 
-function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { swap = null, extension = null } = {}) {
+// `source` is a LABEL ONLY — 'call' (the classifier) or 'manual' (the owner tapped
+// Swap out on an active rental). It changes the activity-log wording and the marker
+// so the review screen can say where the draft came from; the pricing, the draft, the
+// marker's idempotency, the review item and every payment hook behave identically.
+function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { swap = null, extension = null, source = 'call' } = {}) {
+  const isManual = source === 'manual';
+  const originPhrase = isManual ? 'from a manual swap request' : 'from call';
   const lead = loadLead(businessId, bookedLeadOrId);
   if (!lead) return { error: 'not_found' };
   const wantSwap = !!swap;
@@ -1025,12 +1031,12 @@ function ensureCallDrivenReviewInvoice(businessId, bookedLeadOrId, { swap = null
       line_items: lineItems,
     });
     const at = nowIso();
-    vd.pendingInvoiceReview = { invoiceId: inv.id, kind, amount, size: jobSize, parts, requestedAt: at, swapDeliveryDate: parts.includes('swap') ? swapDeliveryDate : null };
+    vd.pendingInvoiceReview = { invoiceId: inv.id, kind, amount, size: jobSize, parts, requestedAt: at, swapDeliveryDate: parts.includes('swap') ? swapDeliveryDate : null, source: isManual ? 'manual' : 'call' };
     if (extensionNeedsRate) vd.extensionNeedsRate = { size: jobSize, extraDays: extraDaysN, at };
     db.prepare('UPDATE leads SET vertical_data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vd), at, lead.id);
     lead.vertical_data = JSON.stringify(vd); lead.updated_at = at;
     const label = kind === 'swap_extension' ? 'swap + extension' : kind;
-    logActivity(lead.id, 'invoice_created', `Draft ${label} invoice ${inv.invoice_number} created from call — review before sending ($${amount})`);
+    logActivity(lead.id, 'invoice_created', `Draft ${label} invoice ${inv.invoice_number} created ${originPhrase} — review before sending ($${amount})`);
     if (extensionNeedsRate) {
       logActivity(lead.id, 'note', `Customer also asked to EXTEND ${extraDaysN} more day(s) — set a day rate for ${jobSize} on the Pricing page to add the extension to this invoice.`.slice(0, 500));
     }
