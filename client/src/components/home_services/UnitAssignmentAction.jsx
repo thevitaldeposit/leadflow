@@ -19,29 +19,54 @@ function UnitOption({ unit, selected, onSelect, sublabel }) {
     <button
       type="button"
       onClick={() => onSelect(unit)}
-      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-left transition-colors ${
+      className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl border text-left transition-colors ${
         selected
           ? 'border-brand bg-brand/10'
           : 'border-divider bg-surface hover:bg-surface-2'
       }`}
     >
-      <span className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${
+      <span className={`w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 ${
         selected ? 'border-brand bg-brand' : 'border-divider'
       }`}>
-        {selected && <Check size={10} className="text-white" />}
+        {selected && <Check size={12} className="text-white" />}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-content truncate">Unit {unit.label}</span>
-        <span className="block text-[11px] text-muted truncate">{[unit.size, sublabel].filter(Boolean).join(' · ')}</span>
+        <span className="block text-base font-semibold text-content truncate">Unit {unit.label}</span>
+        <span className="block text-sm text-muted truncate">{[unit.size, sublabel].filter(Boolean).join(' · ')}</span>
       </span>
     </button>
   );
 }
 
+// The step once a unit is actually on the ground. This exists because the picker
+// used to stay on screen after a successful drop and silently repopulate — see
+// `showingAll` below.
+function DroppedConfirmation({ label, note }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-success/30 bg-success/10 px-3.5 py-3">
+      <span className="w-6 h-6 rounded-full bg-success flex items-center justify-center flex-shrink-0">
+        <Check size={14} className="text-white" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-base font-semibold text-content">Unit {label} is on the ground</p>
+        {note && <p className="text-sm text-muted mt-0.5">{note}</p>}
+      </div>
+    </div>
+  );
+}
+
 // ── Drop ──────────────────────────────────────────────────────────────────────
-// Units of the job's size are offered first; "Show all sizes" opens the rest of the
-// free fleet for a substitution. Confirm is disabled until a unit is chosen — there
-// is no skip, capturing the number IS the point of the step.
+// Units of the job's size are offered; "Different size (substitute)" opens the rest
+// of the free fleet. Confirm is disabled until a unit is chosen — there is no skip,
+// capturing the number IS the point of the step.
+//
+// After a successful drop the step SETTLES: it shows which unit went on the ground
+// and stops rendering a picker. It used to re-fetch the fleet and stay open, and
+// because the unit just dropped is no longer assignable, a job whose last free
+// matching unit had just gone out fell through the old
+// `matching.length === 0 → show everything` fallback and repainted with the entire
+// fleet under "which unit is going on the ground?". The all-sizes list is now an
+// explicit choice only — never a consequence of an empty filtered list.
 export function UnitDropAction({ leadId, jobSize, onDone, onCancel }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -49,7 +74,8 @@ export function UnitDropAction({ leadId, jobSize, onDone, onCancel }) {
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [msg, setMsg] = useState(null);
+  // The unit this step put on the ground, once it's recorded. Set → the step is done.
+  const [dropped, setDropped] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -64,20 +90,24 @@ export function UnitDropAction({ leadId, jobSize, onDone, onCancel }) {
   const size = jobSize || data?.jobSize || null;
   const available = data?.available || [];
   const matching = available.filter(u => u.sizeMatches);
-  // Fall back to the whole free fleet when nothing matches (or the job never captured
-  // a size) so the driver is never stuck with an empty list.
-  const showingAll = allSizes || matching.length === 0 || !size;
+  // EXPLICIT only: the owner asked for other sizes, or the job never recorded one.
+  const showingAll = allSizes || !size;
   const options = showingAll ? available : matching;
+  const otherSizesFree = available.length > matching.length;
 
   const confirm = async () => {
     if (!selected) return;
     setBusy(true); setErr(null);
     try {
       const res = await api.dropUnit(leadId, { assetId: selected.id });
-      setMsg(`Unit ${res.assignment?.label || selected.label} is now on this job.`);
+      // Settle the step rather than re-opening a picker against a fleet this drop
+      // just changed.
+      setDropped({
+        label: res.assignment?.label || selected.label,
+        size: res.assignment?.size || selected.size || null,
+      });
       setSelected(null);
       onDone?.(res);
-      load();
     } catch (e) {
       // The server refuses a unit that's already out on another job and says which —
       // show that verbatim.
@@ -87,27 +117,54 @@ export function UnitDropAction({ leadId, jobSize, onDone, onCancel }) {
     }
   };
 
-  if (loading && !data) return <p className="text-xs text-muted">Loading units…</p>;
+  if (dropped) {
+    return (
+      <DroppedConfirmation
+        label={dropped.label}
+        note={dropped.size && size && dropped.size !== size
+          ? `${dropped.size} substituted for the ${size} on the job — the job now reads ${dropped.size}.`
+          : null}
+      />
+    );
+  }
+
+  if (loading && !data) return <p className="text-sm text-muted">Loading units…</p>;
 
   return (
-    <div className="space-y-2">
-      <p className="text-[11px] font-semibold text-muted uppercase tracking-wide">
+    <div className="space-y-3">
+      <p className="text-sm font-semibold text-muted">
         Which unit is going on the ground?
       </p>
 
       {data?.onSite?.length > 0 && (
-        <p className="text-[11px] text-muted">
+        <p className="text-sm text-muted">
           Already on site: {data.onSite.map(u => `Unit ${u.label}`).join(', ')}
         </p>
       )}
 
       {options.length === 0 ? (
-        <p className="text-xs text-warning bg-warning/10 px-2 py-1.5 rounded-lg">
-          No units are free — every dumpster is out on a job or out of service. Add or
-          free one on the Inventory page.
-        </p>
+        // Two different empty states. "No unit of THIS size is free" is not the same
+        // as "the whole fleet is out", and only the first one has a way forward.
+        otherSizesFree ? (
+          <div className="space-y-2.5">
+            <p className="text-sm text-warning bg-warning/10 px-3 py-2.5 rounded-xl">
+              No {size} is free right now — every one is out on a job or out of service.
+            </p>
+            <button
+              onClick={() => setAllSizes(true)}
+              className="text-sm font-semibold text-brand hover:underline"
+            >
+              Drop a different size instead →
+            </button>
+          </div>
+        ) : (
+          <p className="text-sm text-warning bg-warning/10 px-3 py-2.5 rounded-xl">
+            No units are free — every dumpster is out on a job or out of service. Add or
+            free one on the Inventory page.
+          </p>
+        )
       ) : (
-        <div className="space-y-1.5 max-h-52 overflow-y-auto">
+        <div className="space-y-2">
           {options.map(u => (
             <UnitOption
               key={u.id}
@@ -120,10 +177,10 @@ export function UnitDropAction({ leadId, jobSize, onDone, onCancel }) {
         </div>
       )}
 
-      {!showingAll && (
+      {!showingAll && otherSizesFree && options.length > 0 && (
         <button
           onClick={() => setAllSizes(true)}
-          className="text-[11px] font-medium text-brand hover:underline"
+          className="text-sm font-medium text-brand hover:underline"
         >
           Different size (substitute) →
         </button>
@@ -131,32 +188,31 @@ export function UnitDropAction({ leadId, jobSize, onDone, onCancel }) {
       {showingAll && size && matching.length > 0 && (
         <button
           onClick={() => setAllSizes(false)}
-          className="text-[11px] font-medium text-muted hover:underline"
+          className="text-sm font-medium text-muted hover:underline"
         >
           ← Only {size}
         </button>
       )}
 
-      <div className="flex items-center gap-2 pt-0.5">
+      <div className="flex items-center gap-2 pt-1">
         <button
           onClick={confirm}
           disabled={!selected || busy}
-          className="flex items-center gap-1.5 text-xs font-semibold text-white bg-brand hover:opacity-90 disabled:opacity-40 px-2.5 py-1.5 rounded-lg transition-colors"
+          className="flex items-center gap-2 text-sm font-semibold text-white bg-brand hover:opacity-90 disabled:opacity-40 px-4 py-2.5 rounded-xl transition-colors"
         >
-          <Truck size={12} /> {busy ? 'Saving…' : 'Confirm drop'}
+          <Truck size={15} /> {busy ? 'Saving…' : 'Confirm drop'}
         </button>
         {onCancel && (
           <button
             onClick={onCancel}
-            className="flex items-center gap-1.5 text-xs font-medium text-muted bg-surface-2 hover:bg-divider px-2.5 py-1.5 rounded-lg transition-colors"
+            className="flex items-center gap-2 text-sm font-medium text-muted bg-surface-2 hover:bg-divider px-4 py-2.5 rounded-xl transition-colors"
           >
-            <X size={12} /> Cancel
+            <X size={15} /> Cancel
           </button>
         )}
       </div>
 
-      {err && <p className="text-[11px] text-danger">{err}</p>}
-      {msg && <p className="text-[11px] text-success">{msg}</p>}
+      {err && <p className="text-sm text-danger">{err}</p>}
     </div>
   );
 }
@@ -179,11 +235,14 @@ export function UnitPickupStep({ leadId, onSite = [], pickedLabel = null, onPick
 
   if (onSite.length === 0) {
     return pickedLabel ? (
-      <p className="text-[11px] text-success bg-success/10 px-2 py-1.5 rounded-lg">
-        Unit {pickedLabel} picked up — back at the yard.
-      </p>
+      <div className="flex items-start gap-3 rounded-xl border border-success/30 bg-success/10 px-3.5 py-3">
+        <span className="w-6 h-6 rounded-full bg-success flex items-center justify-center flex-shrink-0">
+          <Check size={14} className="text-white" />
+        </span>
+        <p className="text-base font-semibold text-content">Unit {pickedLabel} picked up — back at the yard</p>
+      </div>
     ) : (
-      <p className="text-[11px] text-muted bg-surface-2 px-2 py-1.5 rounded-lg">
+      <p className="text-sm text-muted bg-surface-2 px-3 py-2.5 rounded-xl">
         No unit was recorded when this job was delivered — record the weight below as usual.
       </p>
     );
@@ -203,11 +262,11 @@ export function UnitPickupStep({ leadId, onSite = [], pickedLabel = null, onPick
   };
 
   return (
-    <div className="space-y-2">
-      <p className="text-[11px] font-semibold text-muted uppercase tracking-wide">
+    <div className="space-y-3">
+      <p className="text-sm font-semibold text-muted">
         Which unit are you picking up?
       </p>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {onSite.map(u => (
           <UnitOption
             key={u.assetId}
@@ -221,11 +280,11 @@ export function UnitPickupStep({ leadId, onSite = [], pickedLabel = null, onPick
       <button
         onClick={confirm}
         disabled={!selected || busy}
-        className="flex items-center gap-1.5 text-xs font-semibold text-white bg-brand hover:opacity-90 disabled:opacity-40 px-2.5 py-1.5 rounded-lg transition-colors"
+        className="flex items-center gap-2 text-sm font-semibold text-white bg-brand hover:opacity-90 disabled:opacity-40 px-4 py-2.5 rounded-xl transition-colors"
       >
-        <Check size={12} /> {busy ? 'Saving…' : 'Confirm pickup'}
+        <Check size={15} /> {busy ? 'Saving…' : 'Confirm pickup'}
       </button>
-      {err && <p className="text-[11px] text-danger">{err}</p>}
+      {err && <p className="text-sm text-danger">{err}</p>}
     </div>
   );
 }

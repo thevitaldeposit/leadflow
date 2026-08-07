@@ -483,6 +483,13 @@ export const api = {
   // Schedule
   getAvailability: (deliveryDate, rentalDuration) =>
     request(`/schedule/availability?delivery_date=${encodeURIComponent(deliveryDate)}&rental_duration=${encodeURIComponent(rentalDuration)}`),
+  // One job's TASK summary — what the /task/:leadId screen loads: who/where, the
+  // unit(s) on site, whether the drop/pickup is already done, plus what the weight
+  // step needs. Same shape the calendar embeds per day.
+  getJobTask: (leadId) => request(`/schedule/task/${leadId}`),
+  // The same summaries for a set of jobs, so the dashboard's Today's Schedule can
+  // show the assigned unit and the Done state it can't derive from a plain lead.
+  getJobTasks: (ids) => request(`/schedule/tasks?ids=${ids.join(',')}`),
   getCalendar: (year, month) =>
     request(`/schedule/calendar?year=${year}&month=${month}`),
 

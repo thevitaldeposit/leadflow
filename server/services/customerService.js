@@ -6,6 +6,9 @@ const {
   LEGACY_STATUS,
   ENGAGEMENT_STATUS,
 } = require('../config/jobStatus');
+// Binning a customer also has to hand its dumpsters back to the fleet — see
+// softDeleteCustomer step 3.
+const { releaseUnitsForLead } = require('./assignmentService');
 
 // ── Customers: the person-level layer over the per-call `leads` table ──────────
 // `leads` remains the per-call/per-inquiry record the Twilio pipeline inserts
@@ -870,10 +873,24 @@ function softDeleteCustomer(businessId, customerId) {
   //    stamp trashed_at as the restore marker + purge clock. customer_id is KEPT
   //    intact. Leads that were ALREADY discarded (junk) are left untouched and get NO
   //    trashed_at, so restore never revives them. Payments/Stripe/invoices untouched.
+  // The leads about to be binned, captured BEFORE the update so their still-open
+  // unit assignments can be released (step 3).
+  const binned = db.prepare(
+    'SELECT id FROM leads WHERE customer_id = ? AND business_id = ? AND (discarded = 0 OR discarded IS NULL)'
+  ).all(customerId, businessId);
   const info = db.prepare(
     'UPDATE leads SET discarded = 1, trashed_at = ? WHERE customer_id = ? AND business_id = ? AND (discarded = 0 OR discarded IS NULL)'
   ).run(now, customerId, businessId);
-  return { binnedLeads: Number(info.changes) };
+  // 3) Send any dumpster still out on a binned job back to the fleet. Binning already
+  //    removes the job from the availability count, but the OPEN assignment was left
+  //    behind — so the drop picker kept hiding that can for the full 30 days. Closing
+  //    it here keeps the two views in agreement. Nothing else moves: units_out, the
+  //    completion gate, the swap markers and every recorded ticket are untouched.
+  const releasedUnits = [];
+  for (const lead of binned) {
+    releasedUnits.push(...releaseUnitsForLead(businessId, lead.id, { log: true }));
+  }
+  return { binnedLeads: Number(info.changes), releasedUnits };
 }
 
 // Restore a binned customer from the Trash. Clears its bin marker and un-bins ONLY

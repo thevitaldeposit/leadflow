@@ -1662,8 +1662,13 @@ router.delete('/:id', (req, res) => {
     const existing = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, req.business.id);
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
 
+    // Any dumpster still out on this job goes back to the fleet BEFORE the row (and
+    // its cascading assignments) disappears — otherwise the asset is stranded on
+    // status 'out' and the drop picker keeps hiding a can with nowhere to be.
+    const released = assignmentService.releaseUnitsForLead(req.business.id, existing.id);
+
     db.prepare('DELETE FROM leads WHERE id = ? AND business_id = ?').run(req.params.id, req.business.id);
-    res.json({ success: true });
+    res.json({ success: true, releasedUnits: released });
   } catch (err) {
     console.error('DELETE /leads/:id error:', err);
     res.status(500).json({ error: 'Failed to delete lead' });

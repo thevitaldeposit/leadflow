@@ -3,7 +3,9 @@ const router = express.Router();
 const db = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 const { addDaysToISO, getAvailabilityBySize } = require('../services/inventoryService');
-const { onSiteAssignmentsForLeads, assignmentTaskStateForLeads } = require('../services/assignmentService');
+const {
+  TASK_LEAD_COLUMNS, summariesForLeadRows, jobTaskSummariesByIds, jobTaskSummary,
+} = require('../services/scheduleTaskService');
 const { ACTIVE_JOB_STATUSES } = require('../config/jobStatus');
 
 // Every schedule route is scoped to the authenticated business.
@@ -61,10 +63,7 @@ router.get('/calendar', (req, res) => {
     // - pickup_date in month, OR
     // - active rental spanning into the month (delivery before month-end, pickup after month-start or null)
     const leads = db.prepare(`
-      SELECT id, customer_first_name, customer_last_name, vertical_data, sub_vertical,
-             job_status, delivery_date, scheduled_time, pickup_date, estimated_revenue,
-             phone, caller_number, caller_phone_raw, units_out,
-             delivery_done_at, pickup_done_at
+      SELECT ${TASK_LEAD_COLUMNS}
       FROM leads
       WHERE vertical = 'home_services'
         AND business_id = ?
@@ -77,17 +76,14 @@ router.get('/calendar', (req, res) => {
         )
     `).all(req.business.id, ...ACTIVE_JOB_STATUSES, firstDay, lastDay, firstDay, lastDay, lastDay, firstDay);
 
-    // The unit(s) on site per job (Phase 2b), fetched in ONE query for the whole
-    // month so the day cards can show which dumpster is where without a call per job.
-    const onSiteByLead = onSiteAssignmentsForLeads(req.business.id, leads.map(l => l.id));
-
-    // Whether each job's delivery / pickup is actually DONE, derived from the same
-    // assignments (guided drop/pickup flow) — one grouped query for the month. This is
-    // display state only: nothing here is written, and units_out, the completion gate
-    // and the swap markers are untouched. A job with no assignments derives nothing and
-    // falls back to its own delivery_done_at / pickup_done_at stamps, so a legacy job
-    // is never hidden just for lacking a unit record.
-    const taskStateByLead = assignmentTaskStateForLeads(req.business.id, leads.map(l => l.id));
+    // One task summary per job — the SAME shape the task screen and the dashboard's
+    // Today's Schedule read (services/scheduleTaskService.js), with the on-site units
+    // and the derived done-ness batched into one query each for the whole month.
+    // Display state only: nothing is written, and units_out, the completion gate and
+    // the swap markers are untouched.
+    const summaryByLead = new Map(
+      summariesForLeadRows(req.business.id, leads).map(s => [s.id, s])
+    );
 
     // Build day-by-day map for the entire month
     const dayMap = {};
@@ -99,51 +95,8 @@ router.get('/calendar', (req, res) => {
     }
 
     for (const lead of leads) {
-      let vd = {};
-      try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch {}
-      const task = taskStateByLead.get(lead.id) || { hasAssignments: false, dropRecorded: false, pickupSettled: false };
-      const summary = {
-        id: lead.id,
-        customerName: vd.customerName || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown',
-        dumpsterSize: vd.dumpsterSize || null,
-        address: vd.deliveryAddress || null,
-        jobStatus: lead.job_status,
-        deliveryDate: lead.delivery_date,
-        scheduledTime: lead.scheduled_time || null,
-        pickupDate: lead.pickup_date,
-        // Everything the day panel's actionable pickup card needs, so recording a
-        // pickup never means hunting through the customer profile. Same phone
-        // resolution order the customer identity layer uses.
-        phone: lead.phone || lead.caller_number || lead.caller_phone_raw || null,
-        unitsOut: lead.units_out == null ? null : lead.units_out,
-        dumpTickets: Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [],
-        overageNeedsRate: !!vd.overageNeedsRate,
-        // A PAID swap still owed its swap-out haul. The weight form uses it to hide the
-        // manual swap checkbox — the server already knows a replacement is coming, so
-        // ticking it would be redundant.
-        pendingSwapOuts: Math.max(0, Math.round(Number(vd.pendingSwapOuts) || 0)),
-        // Physical unit(s) currently on this job — drives the "Unit 12" line on the
-        // day card and tells the drop/pickup card what it's starting from.
-        assignedUnits: (onSiteByLead.get(lead.id) || []).map(a => ({
-          assignmentId: a.id,
-          assetId: a.asset_id,
-          label: a.label,
-          size: a.size,
-          droppedAt: a.dropped_at,
-        })),
-        // ── Is this day's task done? (read-time only) ────────────────────────
-        // dropRecorded  — a unit has been put on the ground for this job
-        // pickupSettled — assignments EXIST and every one has been picked up
-        // The "exist" clause is what keeps a legacy / no-assignment job VISIBLE:
-        // zero rows derives nothing (an empty `every()` would be vacuously true and
-        // silently hide real work), so those jobs fall back to the owner's explicit
-        // delivery_done_at / pickup_done_at stamp instead.
-        dropRecorded: task.hasAssignments ? task.dropRecorded : !!lead.delivery_done_at,
-        pickupSettled: task.hasAssignments ? task.pickupSettled : !!lead.pickup_done_at,
-        // Which basis the two booleans above came from, so the client can offer the
-        // explicit "mark done" fallback only where there's nothing to derive from.
-        hasAssignments: task.hasAssignments,
-      };
+      const summary = summaryByLead.get(lead.id);
+      if (!summary) continue;
 
       if (lead.delivery_date && dayMap[lead.delivery_date]) {
         dayMap[lead.delivery_date].deliveries.push(summary);
@@ -167,6 +120,39 @@ router.get('/calendar', (req, res) => {
   } catch (err) {
     console.error('GET /schedule/calendar error:', err);
     res.status(500).json({ error: 'Failed to fetch calendar' });
+  }
+});
+
+// ── GET /api/schedule/tasks?ids=1,2,3 ─────────────────────────────────────────
+// The same task summaries the calendar embeds, for an arbitrary set of jobs. The
+// dashboard's Today's Schedule picks its own rows out of the leads it already has
+// and uses this to fill in the parts only the server can know (which unit is on
+// site, whether the drop/pickup is done). Read-only; unknown ids are simply absent.
+router.get('/tasks', (req, res) => {
+  try {
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (ids.length === 0) return res.json({ tasks: [] });
+    res.json({ tasks: jobTaskSummariesByIds(req.business.id, ids) });
+  } catch (err) {
+    console.error('GET /schedule/tasks error:', err);
+    res.status(500).json({ error: 'Failed to fetch tasks' });
+  }
+});
+
+// ── GET /api/schedule/task/:leadId ────────────────────────────────────────────
+// One job's task summary — what the /task/:leadId screen loads. Declared after
+// /tasks so neither path can shadow the other.
+router.get('/task/:leadId', (req, res) => {
+  try {
+    const task = jobTaskSummary(req.business.id, req.params.leadId);
+    if (!task) return res.status(404).json({ error: 'Job not found' });
+    res.json({ task });
+  } catch (err) {
+    console.error('GET /schedule/task/:leadId error:', err);
+    res.status(500).json({ error: 'Failed to fetch the job' });
   }
 });
 

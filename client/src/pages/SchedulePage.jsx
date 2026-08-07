@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Calendar, Check, Package, ExternalLink } from 'lucide-react';
 import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
-import JobTaskModal from '../components/home_services/JobTaskModal';
 import YardQueue from '../components/home_services/YardQueue';
 
 // This page serves the Home Services dumpster-rental business; wording comes from
@@ -215,12 +214,10 @@ function CalendarSection() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Re-pulled on every mount, which is also every return from a task screen (the
+  // task is its own route), so the assigned unit, the ticket list, units-out and any
+  // completed job reflect immediately — a completed job leaves the calendar entirely.
   useEffect(() => { load(year, month); }, [year, month, load]);
-
-  // Re-pull the month after a drop or pickup is recorded from a day card, so the
-  // assigned unit, the ticket list, units-out and any completed job reflect
-  // immediately (a completed job leaves the calendar entirely).
-  const reload = useCallback(() => load(year, month), [load, year, month]);
 
   function prevMonth() {
     if (month === 1) { setYear(y => y - 1); setMonth(12); }
@@ -371,13 +368,13 @@ function CalendarSection() {
               ) : (
                 <div className="divide-y divide-divider">
                   {[...selectedData.deliveries].sort(byDoneThenTime('delivery')).map(job => (
-                    <DayJobRow key={`d-${job.id}`} job={job} type="delivery" onChanged={reload} />
+                    <DayJobRow key={`d-${job.id}`} job={job} type="delivery" />
                   ))}
                   {[...selectedData.pickups].sort(byDoneThenTime('pickup')).map(job => (
-                    <DayJobRow key={`p-${job.id}`} job={job} type="pickup" onChanged={reload} />
+                    <DayJobRow key={`p-${job.id}`} job={job} type="pickup" />
                   ))}
                   {selectedData.activeRentals.map(job => (
-                    <DayJobRow key={`a-${job.id}`} job={job} type="active" onChanged={reload} />
+                    <DayJobRow key={`a-${job.id}`} job={job} type="active" />
                   ))}
                 </div>
               )}
@@ -389,10 +386,11 @@ function CalendarSection() {
   );
 }
 
-// A day card is a JOB TO DO, and tapping it opens the guided flow for that job —
-// the whole task, in order, in one place (JobTaskModal). It used to navigate to the
-// customer profile and leave the driver to find the right button among several; the
-// profile is now a small explicit affordance on the card and inside the modal.
+// A day card is a JOB TO DO, and tapping it opens the guided task SCREEN for that
+// job — /task/:leadId, the whole task in order, the same screen the dashboard's
+// Today's Schedule launches. It used to navigate to the customer profile and leave
+// the driver to find the right button among several; the profile is now a small
+// explicit affordance on the card and in the task header.
 //
 //   delivery → confirm the drop, capture the unit that went on the ground
 //   pickup   → capture the unit that came back, pick the dump site, enter the weight
@@ -401,8 +399,8 @@ function CalendarSection() {
 //
 // A task the assignments say is already handled greys out and carries a Done chip
 // rather than disappearing, so the day still reads as a complete record.
-function DayJobRow({ job, type, onChanged }) {
-  const [open, setOpen] = useState(false);
+function DayJobRow({ job, type }) {
+  const navigate = useNavigate();
   const onSite = job.assignedUnits || [];
   const typeConfig = {
     delivery: { label: term.startBadge, bg: 'bg-success/10 text-success' },
@@ -417,8 +415,11 @@ function DayJobRow({ job, type, onChanged }) {
   return (
     <div className={`px-4 py-3 transition-colors ${done ? 'opacity-55' : 'hover:bg-surface-2'}`}>
       <div className="flex items-start gap-2">
-        {/* The whole card is the task — tapping it starts the guided flow. */}
-        <button onClick={() => setOpen(true)} className="flex-1 flex items-start gap-3 text-left min-w-0">
+        {/* The whole card is the task — tapping it opens the task screen. */}
+        <button
+          onClick={() => navigate(`/task/${job.id}?type=${type}`)}
+          className="flex-1 flex items-start gap-3 text-left min-w-0"
+        >
           <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${bg}`}>
             {label}
           </span>
@@ -455,15 +456,6 @@ function DayJobRow({ job, type, onChanged }) {
           <ExternalLink size={13} />
         </Link>
       </div>
-
-      {open && (
-        <JobTaskModal
-          job={job}
-          type={type}
-          onClose={() => setOpen(false)}
-          onChanged={onChanged}
-        />
-      )}
     </div>
   );
 }

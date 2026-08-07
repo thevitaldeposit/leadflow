@@ -387,6 +387,50 @@ function pickUpUnit(businessId, lead, { assetId } = {}) {
   };
 }
 
+// ── Releasing a deleted job's units ───────────────────────────────────────────
+// Deleting a job (hard delete) or binning a customer (30-day Trash) used to leave
+// the job's OPEN assignments untouched, so the dumpster that was out on it stayed
+// invisible to `assignableAssets` — the drop picker kept hiding a can that has
+// nowhere to be — and the asset sat on status 'out' forever. The date-window
+// availability math already ignores deleted jobs (it counts leads, not units), so
+// the two surfaces disagreed until the 30-day purge cascaded the rows away.
+//
+// Closing the assignment here is the fleet's view of the same fact: the job is gone,
+// so the can is not on it. The open row is stamped picked up and the asset returns to
+// 'available' (not 'at_yard' — there is no haul to weigh, and the yard queue excludes
+// binned jobs anyway). Nothing else moves: units_out, the completion gate, the swap
+// markers and every ticket already written are untouched, and a weighed/picked-up
+// assignment stays exactly as it is so the job's unit history survives.
+//
+// Returns the labels of the units released.
+function releaseUnitsForLead(businessId, leadId, { log = false } = {}) {
+  const open = db.prepare(`
+    SELECT asg.id, asg.asset_id, ast.label
+    FROM assignments asg
+    JOIN assets ast ON ast.id = asg.asset_id
+    WHERE asg.business_id = ? AND asg.lead_id = ? AND asg.picked_up_at IS NULL
+  `).all(businessId, leadId);
+  if (open.length === 0) return [];
+
+  const at = nowIso();
+  for (const row of open) {
+    db.prepare('UPDATE assignments SET picked_up_at = ?, updated_at = ? WHERE id = ?')
+      .run(at, at, row.id);
+    updateAsset(businessId, row.asset_id, { status: 'available' });
+  }
+
+  // Only worth a timeline entry when the lead survives the release (a binned
+  // customer can be restored); a hard-deleted lead takes its timeline with it.
+  if (log) {
+    logActivity(
+      leadId,
+      'note_added',
+      `Job deleted — ${open.map(r => `Unit ${r.label}`).join(', ')} released back to the fleet`
+    );
+  }
+  return open.map(r => r.label);
+}
+
 module.exports = {
   listAssignments,
   onSiteAssignments,
@@ -400,4 +444,5 @@ module.exports = {
   unitsForLead,
   dropUnit,
   pickUpUnit,
+  releaseUnitsForLead,
 };

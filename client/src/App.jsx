@@ -19,6 +19,7 @@ import InventoryPage from './pages/InventoryPage';
 import DumpSitesPage from './pages/DumpSitesPage';
 import FilteredLeadsPage from './pages/FilteredLeadsPage';
 import SchedulePage from './pages/SchedulePage';
+import JobTaskPage from './pages/JobTaskPage';
 import InsightsPage from './pages/InsightsPage';
 import AllLeadsPage from './pages/AllLeadsPage';
 import AdminPage from './pages/AdminPage';
@@ -81,6 +82,11 @@ function AppRoutes() {
               <Route path="/billing" element={<BillingPage />} />
             </Route>
             <Route element={<SubscriptionGate />}>
+              {/* The drop/pickup task is a screen, not a page inside the dashboard
+                  chrome: a driver standing at the truck gets the whole viewport,
+                  and the sidebar would eat a third of a phone. Launched from both
+                  Today's Schedule and the Schedule page. */}
+              <Route path="/task/:leadId" element={<JobTaskPage />} />
               <Route element={<DashboardLayout />}>
                 <Route path="/" element={<DashboardPage />} />
                 {/* Stripe checkout success_url lands here — alias of the dashboard home. */}

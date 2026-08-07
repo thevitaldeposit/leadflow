@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   AlertTriangle, UserPlus, CalendarCheck2, Truck, CheckCircle2, DollarSign,
   Phone, CalendarSearch, Calendar, Sparkles, X, Check, ArrowRight, ArrowUpRight,
-  ArrowDownRight, FileText, Briefcase, AlertCircle, Plus,
+  ArrowDownRight, FileText, Briefcase, AlertCircle, Plus, ExternalLink,
 } from 'lucide-react';
 import { api } from '../../utils/api';
 import socket from '../../socket';
@@ -13,7 +13,7 @@ import CriticalBadge from './CriticalBadge';
 import VoicemailBadge from './VoicemailBadge';
 import MissedCallBadge from './MissedCallBadge';
 import { getSettings, saveSettings } from '../../utils/settings';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import OnboardingBanner from '../OnboardingBanner';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -841,14 +841,25 @@ const SCHEDULE_TYPE_BADGE = {
   PICK: 'bg-brand/10 text-brand',
 };
 
-function ScheduleItem({ item, onClick }) {
+// DROP/PICK is this widget's own vocabulary; the task screen speaks the schedule's.
+const SCHEDULE_TASK_TYPE = { DROP: 'delivery', PICK: 'pickup' };
+
+function ScheduleItem({ item, task, onClick }) {
   const { lead, vd, type, label, time } = item;
   const name = getLeadName(lead);
   const size = formatSize(vd.dumpsterSize);
   const address = vd.deliveryAddress || null;
+  // Assignment-derived state, from the same summary the Schedule page uses. Absent
+  // until it loads (and for a job the server doesn't return), in which case the row
+  // reads exactly as it always did.
+  const onSiteUnits = task?.assignedUnits || [];
+  const done = task ? (type === 'DROP' ? !!task.dropRecorded : !!task.pickupSettled) : false;
 
   return (
-    <div onClick={onClick} className="px-4 py-3 hover:bg-surface-2 cursor-pointer transition-colors">
+    <div
+      onClick={onClick}
+      className={`px-4 py-3 cursor-pointer transition-colors ${done ? 'opacity-55' : 'hover:bg-surface-2'}`}
+    >
       <div className="flex items-center gap-3">
         <div className={`w-20 flex-shrink-0 text-xs font-semibold ${time ? 'text-content' : 'text-muted'}`}>{time ? formatTime12(time) : 'Flexible'}</div>
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 ${SCHEDULE_TYPE_BADGE[type]}`}>
@@ -858,12 +869,34 @@ function ScheduleItem({ item, onClick }) {
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-semibold text-content truncate">{name}</span>
             {size && <span className="text-xs text-muted flex-shrink-0">{size}</span>}
+            {done && (
+              <span className="inline-flex items-center gap-1 flex-shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/10 text-success">
+                <Check size={10} /> Done
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted truncate">
             {lead.phone && <span className="flex-shrink-0">{lead.phone}</span>}
             {address && <span className="truncate">{lead.phone ? '· ' : ''}{address}</span>}
           </div>
+          {/* Which physical dumpster is sitting on this job right now — the same line
+              the Schedule page's day cards carry. */}
+          {onSiteUnits.length > 0 && (
+            <p className="text-xs font-semibold text-brand mt-0.5 truncate">
+              {onSiteUnits.map(u => `Unit ${u.label}`).join(', ')} on site
+            </p>
+          )}
         </div>
+        {/* The customer profile, now an explicit affordance instead of what tapping
+            the row does. */}
+        <Link
+          to={`/leads/${lead.id}`}
+          onClick={(e) => e.stopPropagation()}
+          title="Open customer profile"
+          className="p-1.5 rounded-lg text-muted hover:bg-surface-2 hover:text-content transition-colors flex-shrink-0"
+        >
+          <ExternalLink size={13} />
+        </Link>
       </div>
     </div>
   );
@@ -872,6 +905,26 @@ function ScheduleItem({ item, onClick }) {
 function TodaysSchedule({ items }) {
   const navigate = useNavigate();
   const todayLabel = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  // The assignment-derived half of each row (which unit is on site, is the task done)
+  // exists only server-side, so it's fetched for the rows on screen. One request for
+  // the whole list; a failure just leaves the rows in their plain form.
+  const [tasks, setTasks] = useState({});
+  const idKey = items.map(it => it.lead.id).join(',');
+
+  useEffect(() => {
+    const ids = [...new Set(idKey.split(',').filter(Boolean))];
+    // Nothing to enrich. Any previously-loaded entries are keyed by id and simply
+    // stop being looked up, so there's nothing to clear.
+    if (ids.length === 0) return undefined;
+    let alive = true;
+    api.getJobTasks(ids)
+      .then(d => {
+        if (!alive) return;
+        setTasks(Object.fromEntries((d.tasks || []).map(t => [String(t.id), t])));
+      })
+      .catch(() => { if (alive) setTasks({}); });
+    return () => { alive = false; };
+  }, [idKey]);
 
   return (
     <section className="bg-surface rounded-xl border border-divider shadow-sm overflow-hidden flex flex-col min-h-[440px]">
@@ -888,7 +941,13 @@ function TodaysSchedule({ items }) {
       ) : (
         <div className="divide-y divide-divider overflow-y-auto max-h-[360px] scrollbar-subtle">
           {items.map((it, i) => (
-            <ScheduleItem key={`${it.lead.id}-${it.type}-${i}`} item={it} onClick={() => navigate(`/leads/${it.lead.id}`)} />
+            <ScheduleItem
+              key={`${it.lead.id}-${it.type}-${i}`}
+              item={it}
+              task={tasks[String(it.lead.id)]}
+              // The card IS the task: same guided screen the Schedule page opens.
+              onClick={() => navigate(`/task/${it.lead.id}?type=${SCHEDULE_TASK_TYPE[it.type] || 'delivery'}`)}
+            />
           ))}
         </div>
       )}
