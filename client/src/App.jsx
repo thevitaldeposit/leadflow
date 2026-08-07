@@ -16,6 +16,7 @@ import PublicInvoicePage from './pages/PublicInvoicePage';
 import SettingsPage from './pages/SettingsPage';
 import BillingPage from './pages/BillingPage';
 import InventoryPage from './pages/InventoryPage';
+import DumpSitesPage from './pages/DumpSitesPage';
 import FilteredLeadsPage from './pages/FilteredLeadsPage';
 import SchedulePage from './pages/SchedulePage';
 import InsightsPage from './pages/InsightsPage';
@@ -102,6 +103,7 @@ function AppRoutes() {
                 <Route path="/leads/:id" element={<LeadRedirect />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
+                <Route path="/dump-sites" element={<DumpSitesPage />} />
                 <Route path="/action-queue" element={<FilteredLeadsPage mode="action_queue" />} />
                 <Route path="/opportunities" element={<FilteredLeadsPage mode="opportunities" />} />
                 <Route path="/booked" element={<FilteredLeadsPage mode="booked" />} />

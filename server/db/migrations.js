@@ -68,6 +68,14 @@ const NEW_COLUMNS = [
   // an already junk-`discarded` lead. NULL = not in the bin. The 30-day purge ages
   // a lead off this timestamp, and restore un-discards only trashed_at-stamped leads.
   'ALTER TABLE leads ADD COLUMN trashed_at TEXT',
+  // Guided drop/pickup flow: the LEGACY fallback for "this task is done".
+  // Completion on today's schedule is normally DERIVED from `assignments` (a unit
+  // dropped / every unit picked up) — see routes/schedule.js. A job that predates
+  // unit capture, or a business with no fleet registered, has no assignment to
+  // derive from, so the guided modal stamps these instead. Display state ONLY:
+  // nothing here touches units_out, the completion gate, or the swap markers.
+  'ALTER TABLE leads ADD COLUMN delivery_done_at TEXT',
+  'ALTER TABLE leads ADD COLUMN pickup_done_at TEXT',
 ];
 
 // ── Multi-tenancy: per-business unique constraints ──────────────────────────
@@ -1062,6 +1070,26 @@ function runMigrations() {
   `);
   db.exec('CREATE INDEX IF NOT EXISTS idx_assignments_lead ON assignments(lead_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_assignments_asset ON assignments(asset_id)');
+
+  // `dump_sites` — the landfills / transfer stations this business hauls to. Pure
+  // reference data for the guided pickup flow: the driver picks the site they're
+  // driving to and gets directions to it. It is NOT priced, NOT geocoded, and has
+  // no bearing on the mileage fee or on any weight/overage math — the chosen site
+  // is recorded on the dump ticket as a note only.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dump_sites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_id INTEGER NOT NULL REFERENCES businesses(id),
+      name TEXT NOT NULL,
+      address TEXT,
+      notes TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_dump_sites_business ON dump_sites(business_id, active)');
 
   // Seed the fleet from the existing pool counts so availability is unchanged the
   // moment this ships: for each size create `quantity` assets and flag the first

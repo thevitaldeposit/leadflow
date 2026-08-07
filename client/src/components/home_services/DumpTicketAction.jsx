@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Briefcase, Check, Plus, X, Pencil } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Briefcase, Camera, Check, Image as ImageIcon, Plus, X, Pencil } from 'lucide-react';
 import { api } from '../../utils/api';
 import { UnitDropAction } from './UnitAssignmentAction';
 
@@ -26,6 +26,13 @@ import { UnitDropAction } from './UnitAssignmentAction';
 // Either way the server attributes the ticket to that unit's job and prices the
 // overage on the unit's own size. Neither given (a job delivered before unit capture)
 // → the by-lead path, unchanged.
+//
+// THE CAMERA IS A SHORTCUT, NOT A SECOND PATH. The pounds box is always shown and
+// always typeable; the camera icon beside it photographs the scale ticket, uploads it,
+// and PRE-FILLS that same box with what the reader saw (naming the line it read, e.g.
+// "NET 7,240 lb", so the owner can check it against the paper in their hand). Nothing
+// is ever auto-submitted, and a failed read leaves the box exactly as it was. The photo
+// itself is kept as evidence for a disputed overage and rides along on the ticket.
 //
 // SWAPS: when the server reports the haul was a swap-out (a replacement can is on site),
 // this asks for that replacement's unit number right here — the drop is what turns the
@@ -85,10 +92,20 @@ function TicketRow({ leadId, ticket: t, index, onDone }) {
         <span className="flex-1">
           {describeWeight(t.weightTons)}
           {t.unitLabel ? ` · Unit ${t.unitLabel}` : ''}
+          {t.dumpSite?.name ? ` · ${t.dumpSite.name}` : ''}
           {t.editedAt ? ' · corrected' : ''}
           {t.swap ? ' · swap-out' : ''}
           {t.swapCharge != null ? ` · swap $${t.swapCharge}` : ''}
           {t.overageTons > 0 ? (t.overageAmount != null ? ` · overage $${t.overageAmount}` : ' · overage (rate needed)') : ''}
+          {/* The scale ticket the weight came off — the evidence behind a disputed overage. */}
+          {t.photoPath && (
+            <>
+              {' · '}
+              <a href={t.photoPath} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+                ticket photo
+              </a>
+            </>
+          )}
         </span>
         {!editing && (
           <button
@@ -132,13 +149,28 @@ function TicketRow({ leadId, ticket: t, index, onDone }) {
 export default function DumpTicketAction({
   leadId, unitsOut, dumpTickets = [], overageNeedsRate, onDone, compact = false,
   assignmentId = null, unitLabel = null, units = [], pendingSwapOuts = 0,
+  // Where this load was taken (guided pickup flow). Record-keeping only — it rides
+  // along on the ticket and touches no pricing.
+  dumpSite = null,
+  // Open the weight form immediately instead of behind an "Enter weight" button —
+  // the guided flow has already navigated the owner to this step, so a second click
+  // to reveal it would be a dead tap.
+  autoOpen = false,
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(autoOpen);
   const [lbs, setLbs] = useState('');
   const [swap, setSwap] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [chosenId, setChosenId] = useState(null);
+  // The photographed scale ticket: where it was stored (the persistent volume) and
+  // what the reader saw. `reading` is display-only — the value it produced already
+  // went into `lbs`, which the owner is free to overwrite.
+  const [photo, setPhoto] = useState(null);
+  const [reading, setReading] = useState(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoErr, setPhotoErr] = useState(null);
+  const fileRef = useRef(null);
   // The job whose replacement drop we're asking for, set from the server's swapOut flag.
   const [replacementFor, setReplacementFor] = useState(null);
   // A paid swap the server is already tracking — the checkbox would only restate it.
@@ -154,6 +186,32 @@ export default function DumpTicketAction({
   const effectiveUnitLabel = unitLabel || chosen?.label || null;
   const needsUnitPick = pickable.length > 1 && !chosen;
 
+  // Camera → upload → PRE-FILL. The owner still confirms and submits; this never
+  // records anything on its own. A read that fails (or comes back with nothing
+  // legible) keeps the photo — it's still the evidence — and leaves the box for
+  // manual entry, which is why this never blocks the form.
+  const onPhoto = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    // Reset the input so re-photographing the same ticket fires change again.
+    e.target.value = '';
+    if (!file) return;
+    setPhotoBusy(true); setPhotoErr(null); setReading(null);
+    try {
+      const res = await api.readScaleTicket(file);
+      setPhoto({ path: res.photoPath });
+      if (res.reading && res.reading.weightLbs != null) {
+        setReading(res.reading);
+        setLbs(String(res.reading.weightLbs));
+      } else {
+        setPhotoErr(res.readError || 'Photo saved, but no weight could be read — type it in.');
+      }
+    } catch (err) {
+      setPhotoErr(err.message || 'Could not upload the photo — type the weight in.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
   const submit = async () => {
     setBusy(true); setMsg(null);
     const entered = lbs === '' ? null : Number(lbs);
@@ -162,6 +220,9 @@ export default function DumpTicketAction({
         weightLbs: entered,
         swap,
         assignmentId: effectiveAssignmentId,
+        // Evidence + logistics; neither is read by any pricing or lifecycle decision.
+        photoPath: photo?.path || null,
+        dumpSite: dumpSite ? { id: dumpSite.id, name: dumpSite.name, address: dumpSite.address } : null,
       });
       const parts = [];
       // Echo back the pounds the owner actually typed, so a tons/lbs mix-up is obvious
@@ -183,6 +244,7 @@ export default function DumpTicketAction({
       if (res.swapOut) setReplacementFor({ leadId: res.leadId || leadId });
       setMsg(parts.join(' '));
       setLbs(''); setSwap(false); setOpen(false); setChosenId(null);
+      setPhoto(null); setReading(null); setPhotoErr(null);
       onDone?.();
     } catch (e) {
       // The server refuses a unit that's already been weighed (and says which) — show
@@ -248,13 +310,66 @@ export default function DumpTicketAction({
           )}
           <div>
             <label className="text-xs font-medium text-muted uppercase tracking-wide mb-1 block">Weight (lbs)</label>
-            <input
-              type="number" min="0" step="1" value={lbs}
-              onChange={(e) => setLbs(e.target.value)}
-              placeholder="e.g. 7000"
-              className="w-full px-3 py-2 text-sm rounded-lg border border-divider bg-surface text-content focus:outline-none focus:ring-2 focus:ring-brand/30"
-            />
+            {/* The box is ALWAYS here and always typeable. The camera beside it is a
+                shortcut into the same box — neither is required. */}
+            <div className="flex items-center gap-2">
+              <input
+                type="number" min="0" step="1" value={lbs}
+                onChange={(e) => setLbs(e.target.value)}
+                placeholder="e.g. 7000"
+                className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-divider bg-surface text-content focus:outline-none focus:ring-2 focus:ring-brand/30"
+              />
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={onPhoto}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={photoBusy}
+                title="Photograph the scale ticket to fill this in"
+                className="flex items-center gap-1.5 flex-shrink-0 text-xs font-semibold text-brand bg-brand/10 hover:bg-brand/20 disabled:opacity-50 px-3 py-2 rounded-lg transition-colors"
+              >
+                <Camera size={14} />
+                {photoBusy ? 'Reading…' : (photo ? 'Retake' : 'Photo')}
+              </button>
+            </div>
+            {/* What the reader saw, and off which line — scale tickets print gross,
+                tare and net, so naming the line is what makes the number checkable. */}
+            {reading && (
+              <p className="text-[11px] text-content bg-brand/5 border border-brand/20 rounded-lg px-2 py-1.5 mt-1.5">
+                Read {reading.label ? <span className="font-semibold">{reading.label}</span> : 'the ticket'}
+                {reading.confidence != null ? ` · ${reading.confidence}% confident` : ''} — check it against
+                the paper before saving.
+              </p>
+            )}
+            {photoErr && <p className="text-[11px] text-warning mt-1.5">{photoErr}</p>}
+            {photo && (
+              <p className="text-[11px] text-muted mt-1.5 flex items-center gap-1.5">
+                <ImageIcon size={11} className="flex-shrink-0" />
+                <a href={photo.path} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+                  Ticket photo attached
+                </a>
+                <button
+                  type="button"
+                  onClick={() => { setPhoto(null); setReading(null); setPhotoErr(null); }}
+                  className="text-muted hover:text-content"
+                >
+                  remove
+                </button>
+              </p>
+            )}
           </div>
+          {/* Where this load went — chosen a step earlier in the guided flow. */}
+          {dumpSite?.name && (
+            <p className="text-[11px] text-muted">
+              Dumping at <span className="font-semibold text-content">{dumpSite.name}</span>
+            </p>
+          )}
           {/* A paid swap is already tracked server-side: this haul IS the swap-out, so the
               checkbox would only restate it (and used to double-arm the marker). Shown as a
               note instead. The box stays for a manual swap that never had a paid invoice. */}

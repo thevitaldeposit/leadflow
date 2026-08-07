@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 const { addDaysToISO, getAvailabilityBySize } = require('../services/inventoryService');
-const { onSiteAssignmentsForLeads } = require('../services/assignmentService');
+const { onSiteAssignmentsForLeads, assignmentTaskStateForLeads } = require('../services/assignmentService');
 const { ACTIVE_JOB_STATUSES } = require('../config/jobStatus');
 
 // Every schedule route is scoped to the authenticated business.
@@ -63,7 +63,8 @@ router.get('/calendar', (req, res) => {
     const leads = db.prepare(`
       SELECT id, customer_first_name, customer_last_name, vertical_data, sub_vertical,
              job_status, delivery_date, scheduled_time, pickup_date, estimated_revenue,
-             phone, caller_number, caller_phone_raw, units_out
+             phone, caller_number, caller_phone_raw, units_out,
+             delivery_done_at, pickup_done_at
       FROM leads
       WHERE vertical = 'home_services'
         AND business_id = ?
@@ -80,6 +81,14 @@ router.get('/calendar', (req, res) => {
     // month so the day cards can show which dumpster is where without a call per job.
     const onSiteByLead = onSiteAssignmentsForLeads(req.business.id, leads.map(l => l.id));
 
+    // Whether each job's delivery / pickup is actually DONE, derived from the same
+    // assignments (guided drop/pickup flow) — one grouped query for the month. This is
+    // display state only: nothing here is written, and units_out, the completion gate
+    // and the swap markers are untouched. A job with no assignments derives nothing and
+    // falls back to its own delivery_done_at / pickup_done_at stamps, so a legacy job
+    // is never hidden just for lacking a unit record.
+    const taskStateByLead = assignmentTaskStateForLeads(req.business.id, leads.map(l => l.id));
+
     // Build day-by-day map for the entire month
     const dayMap = {};
     const totalDays = lastDayDate.getDate();
@@ -92,6 +101,7 @@ router.get('/calendar', (req, res) => {
     for (const lead of leads) {
       let vd = {};
       try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch {}
+      const task = taskStateByLead.get(lead.id) || { hasAssignments: false, dropRecorded: false, pickupSettled: false };
       const summary = {
         id: lead.id,
         customerName: vd.customerName || [lead.customer_first_name, lead.customer_last_name].filter(Boolean).join(' ') || 'Unknown',
@@ -121,6 +131,18 @@ router.get('/calendar', (req, res) => {
           size: a.size,
           droppedAt: a.dropped_at,
         })),
+        // ── Is this day's task done? (read-time only) ────────────────────────
+        // dropRecorded  — a unit has been put on the ground for this job
+        // pickupSettled — assignments EXIST and every one has been picked up
+        // The "exist" clause is what keeps a legacy / no-assignment job VISIBLE:
+        // zero rows derives nothing (an empty `every()` would be vacuously true and
+        // silently hide real work), so those jobs fall back to the owner's explicit
+        // delivery_done_at / pickup_done_at stamp instead.
+        dropRecorded: task.hasAssignments ? task.dropRecorded : !!lead.delivery_done_at,
+        pickupSettled: task.hasAssignments ? task.pickupSettled : !!lead.pickup_done_at,
+        // Which basis the two booleans above came from, so the client can offer the
+        // explicit "mark done" fallback only where there's nothing to derive from.
+        hasAssignments: task.hasAssignments,
       };
 
       if (lead.delivery_date && dayMap[lead.delivery_date]) {

@@ -77,10 +77,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
   // Record a dump ticket / weight for a returned unit (swap-safe lifecycle advance).
-  // Body: { weightLbs?, swap?, unitsRemaining?, note?, assignmentId? } — weight is
-  // entered in POUNDS and converted to the stored tons at the server boundary.
-  // assignmentId names the physical unit the weight came off, so the ticket bills the
-  // job that can actually sat on and prices the overage on the unit's own size.
+  // Body: { weightLbs?, swap?, unitsRemaining?, note?, assignmentId?, photoPath?,
+  // dumpSite? } — weight is entered in POUNDS and converted to the stored tons at the
+  // server boundary. assignmentId names the physical unit the weight came off, so the
+  // ticket bills the job that can actually sat on and prices the overage on the unit's
+  // own size. photoPath (the scale-ticket photo) and dumpSite are record-keeping only:
+  // they're stored on the ticket and never read by any pricing or lifecycle decision.
   recordDumpTicket: (id, body) =>
     request(`/leads/${id}/dump-ticket`, {
       method: 'POST',
@@ -118,6 +120,16 @@ export const api = {
   // The yard queue: units picked up but not yet weighed, each with the job its weight
   // belongs to → { units: [{ assignmentId, leadId, label, size, customerName, … }] }.
   getYardUnits: () => request('/assets/yard'),
+  // Mark a delivery/pickup done for a job that has NO unit assignments to derive it
+  // from (a legacy job, or a business with no fleet registered). Display state only —
+  // the server refuses this when the job does track its units, and it never touches
+  // units_out, the completion gate, or any invoice. Body: { task: 'delivery'|'pickup' }.
+  markTaskDone: (id, task) =>
+    request(`/leads/${id}/task-done`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task }),
+    }),
   // Resolve a confirm-first cancellation cue. confirm=true → mark lost; false → keep.
   resolveCancel: (id, confirm) =>
     request(`/leads/${id}/cancel`, {
@@ -428,6 +440,37 @@ export const api = {
       body: JSON.stringify(body),
     }),
   retireAsset: (id) => request(`/assets/${id}`, { method: 'DELETE' }),
+
+  // Dump sites — the landfills / transfer stations the business hauls to. Reference
+  // data only: the guided pickup flow lists them and opens directions to the address.
+  // Nothing here is priced, geocoded, or wired to the mileage fee.
+  getDumpSites: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/dump-sites${qs ? `?${qs}` : ''}`);
+  },
+  createDumpSite: (body) =>
+    request('/dump-sites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateDumpSite: (id, body) =>
+    request(`/dump-sites/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  retireDumpSite: (id) => request(`/dump-sites/${id}`, { method: 'DELETE' }),
+
+  // Upload a photographed scale ticket → { photoPath, reading: { weightLbs, label,
+  // confidence } | null, readError? }. The reading only PRE-FILLS the weight box —
+  // nothing is submitted until the owner confirms it, and a failed read still returns
+  // the stored photoPath so the photo stays attached as overage evidence.
+  readScaleTicket: (file) => {
+    const form = new FormData();
+    form.append('photo', file);
+    return request('/scale-tickets/read', { method: 'POST', body: form });
+  },
 
   // Earliest delivery date after the requested one with a free unit of `size` for
   // the same rental length (the "Next available: …" hint when a window is full).

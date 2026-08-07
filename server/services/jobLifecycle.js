@@ -438,7 +438,11 @@ function noAllowanceNote(overage) {
 //   • the assignment is stamped weighed_at and its unit returns to 'available'.
 // No assignmentId (a job delivered before unit capture existed, an older client, the
 // iOS app) → the by-lead path below is byte-identical to before.
-function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = false, unitsRemaining, note = null, source = 'manual', assignmentId = null } = {}) {
+// `photoPath` and `dumpSite` are RECORD-KEEPING ONLY (guided pickup flow): the
+// photographed scale ticket kept as evidence for a disputed overage, and which
+// landfill the load went to. Neither is read by any pricing, allowance, units_out,
+// swap or completion decision — they are written onto the ticket and nowhere else.
+function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = false, unitsRemaining, note = null, source = 'manual', assignmentId = null, photoPath = null, dumpSite = null } = {}) {
   let assignment = null;
   if (assignmentId !== null && assignmentId !== undefined && assignmentId !== '') {
     assignment = require('./assignmentService').getAssignment(businessId, assignmentId);
@@ -579,6 +583,12 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     // re-prices against the same allowance basis instead of re-deriving it from a job
     // whose assignments/markers have since moved on.
     replacementHaul,
+    // Evidence + logistics, not inputs: the photographed scale ticket behind this
+    // weight (stored on the persistent volume) and the dump site the load went to.
+    photoPath: photoPath ? String(photoPath) : null,
+    dumpSite: dumpSite && dumpSite.name
+      ? { id: dumpSite.id ?? null, name: String(dumpSite.name), address: dumpSite.address || null }
+      : null,
   };
   vd.dumpTickets = Array.isArray(vd.dumpTickets) ? vd.dumpTickets : [];
   vd.dumpTickets.push(ticket);
@@ -612,7 +622,8 @@ function recordDumpTicket(businessId, leadOrId, { weightTons = null, swap = fals
     : (swap
       ? (swapPreBilled ? ' · swap-out, unit still on site (swap already billed from the call)' : ' · swap-out, unit still on site')
       : '');
-  logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${unitStr}${swapNote}${oStr}${noAllowanceNote(overage)}`);
+  const siteStr = ticket.dumpSite ? ` · ${ticket.dumpSite.name}` : '';
+  logActivity(lead.id, 'note_added', `Dump ticket recorded (${wStr})${unitStr}${siteStr}${swapNote}${oStr}${noAllowanceNote(overage)}`);
 
   // Advance only when the LAST unit is back (swap-safe). Completion is gated on payment.
   let advancedTo = null;

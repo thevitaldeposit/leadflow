@@ -1078,6 +1078,11 @@ router.post('/:id/dump-ticket', requireAuth, (req, res) => {
       note: typeof b.note === 'string' ? b.note.trim() : null,
       source: 'manual',
       assignmentId: b.assignmentId != null && b.assignmentId !== '' ? b.assignmentId : null,
+      // Record-keeping the guided pickup flow collects alongside the weight: the
+      // photographed scale ticket (evidence for a disputed overage) and which dump
+      // site the load went to. Neither influences pricing or the lifecycle.
+      photoPath: typeof b.photoPath === 'string' && b.photoPath.trim() ? b.photoPath.trim() : null,
+      dumpSite: b.dumpSite && typeof b.dumpSite === 'object' ? b.dumpSite : null,
     });
     if (result.error === 'not_found') return res.status(404).json({ error: 'Lead not found' });
     if (result.error === 'assignment_not_found') {
@@ -1216,6 +1221,58 @@ router.post('/:id/units/pickup', requireAuth, (req, res) => {
     if (err && err.status) return res.status(err.status).json({ error: err.message });
     console.error('POST /leads/:id/units/pickup error:', err);
     res.status(500).json({ error: 'Failed to record the pickup' });
+  }
+});
+
+// POST /api/leads/:id/task-done — the LEGACY fallback for "this delivery/pickup is
+// handled", so it stops sitting on today's schedule. Body: { task: 'delivery'|'pickup' }
+//
+// Completion on the schedule is normally DERIVED from `assignments` — a unit dropped
+// clears the delivery, every unit picked up clears the pickup — and that derivation is
+// the real path. This exists only for the job that has NO assignment to derive from: a
+// job delivered before unit capture shipped, or a business with no fleet registered.
+// Refused when the job HAS assignments, so it can never paper over the real state.
+//
+// It is DISPLAY STATE ONLY. It writes two timestamp columns on the lead and nothing
+// else — units_out, the completion gate, the swap markers, the dump tickets and every
+// invoice are untouched. Web dashboard only → hard auth.
+router.post('/:id/task-done', requireAuth, (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(req.params.id, businessId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const task = (req.body || {}).task;
+    if (task !== 'delivery' && task !== 'pickup') {
+      return res.status(400).json({ error: "task must be 'delivery' or 'pickup'" });
+    }
+
+    const hasAssignments = db.prepare(
+      'SELECT COUNT(*) AS n FROM assignments WHERE business_id = ? AND lead_id = ?'
+    ).get(businessId, lead.id).n > 0;
+    if (hasAssignments) {
+      return res.status(400).json({
+        error: 'This job tracks its actual units — record the drop or pickup instead.',
+        code: 'has_assignments',
+      });
+    }
+
+    const at = new Date().toISOString();
+    const column = task === 'delivery' ? 'delivery_done_at' : 'pickup_done_at';
+    // Idempotent: re-marking an already-done task is a no-op, not a re-stamp.
+    const already = lead[column];
+    if (!already) {
+      db.prepare(`UPDATE leads SET ${column} = ?, updated_at = ? WHERE id = ? AND business_id = ?`)
+        .run(at, at, lead.id, businessId);
+      logActivity(lead.id, 'note_added', task === 'delivery' ? 'Delivery marked done' : 'Pickup marked done');
+    }
+
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(lead.id, businessId);
+    try { emitToBusiness(businessId, 'lead_updated', updated); } catch { /* non-fatal */ }
+    res.json({ success: true, task, at: already || at, lead: updated });
+  } catch (err) {
+    console.error('POST /leads/:id/task-done error:', err);
+    res.status(500).json({ error: 'Failed to mark the task done' });
   }
 });
 

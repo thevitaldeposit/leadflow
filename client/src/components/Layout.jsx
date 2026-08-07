@@ -11,6 +11,7 @@ import {
   Users,
   Calendar,
   Package,
+  MapPin,
   DollarSign,
   Shield,
   CreditCard,
@@ -36,6 +37,7 @@ const PAGE_TITLES = {
   '/schedule': 'Schedule',
   '/insights': 'Insights',
   '/inventory': 'Inventory',
+  '/dump-sites': 'Dump Sites',
   '/completed': 'Completed',
   '/leads': 'All Leads',
   '/all-leads': 'All Leads (Unfiltered)',
@@ -125,7 +127,7 @@ export default function Layout({ children }) {
   }, []);
 
   const isHomeServices = location.pathname === '/' ||
-    ['/customers', '/pricing', '/invoices', '/payments', '/action-queue', '/opportunities', '/booked', '/schedule', '/inventory', '/completed'].some(p => location.pathname.startsWith(p));
+    ['/customers', '/pricing', '/invoices', '/payments', '/action-queue', '/opportunities', '/booked', '/schedule', '/inventory', '/dump-sites', '/completed'].some(p => location.pathname.startsWith(p));
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -168,6 +170,11 @@ export default function Layout({ children }) {
           <NavLink to="/inventory" className={linkClass}>
             <Package size={18} />
             Inventory
+          </NavLink>
+
+          <NavLink to="/dump-sites" className={linkClass}>
+            <MapPin size={18} />
+            Dump Sites
           </NavLink>
 
           <NavLink to="/pricing" className={linkClass}>

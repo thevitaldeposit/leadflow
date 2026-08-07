@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Calendar, Package, Phone, Navigation, Scale, Truck } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Calendar, Check, Package, ExternalLink } from 'lucide-react';
 import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
-import DumpTicketAction from '../components/home_services/DumpTicketAction';
-import { UnitDropAction, UnitPickupStep } from '../components/home_services/UnitAssignmentAction';
+import JobTaskModal from '../components/home_services/JobTaskModal';
 import YardQueue from '../components/home_services/YardQueue';
 
 // This page serves the Home Services dumpster-rental business; wording comes from
@@ -177,8 +176,30 @@ function SizeGroup({ group }) {
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// Is the task this card represents already handled? Derived server-side from the
+// job's unit assignments (a unit dropped / every unit picked up), falling back to
+// the owner's explicit stamp for a job that tracks no units at all. A done task
+// greys out and drops to the bottom of the day, and stops counting toward the day
+// cell's dots — the day clears as the work gets done. An ACTIVE rental is ongoing,
+// never "done".
+function isTaskDone(job, type) {
+  if (type === 'delivery') return !!job.dropRecorded;
+  if (type === 'pickup') return !!job.pickupSettled;
+  return false;
+}
+
+// Open tasks lead; handled ones settle to the bottom. Within each group the existing
+// scheduled-time order is preserved.
+function byDoneThenTime(type) {
+  return (a, b) => {
+    const da = isTaskDone(a, type) ? 1 : 0;
+    const db_ = isTaskDone(b, type) ? 1 : 0;
+    if (da !== db_) return da - db_;
+    return byScheduledTime(a, b);
+  };
+}
+
 function CalendarSection() {
-  const navigate = useNavigate();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1); // 1-indexed
@@ -295,8 +316,12 @@ function CalendarSection() {
                   if (!d) return <div key={`e-${i}`} />;
                   const dk = dayKey(d);
                   const data = getDayData(d);
-                  const hasDelivery = data && data.deliveries.length > 0;
-                  const hasPickup = data && data.pickups.length > 0;
+                  // Only OUTSTANDING work puts a dot on the day — a day whose drops and
+                  // pickups are all recorded visibly clears.
+                  const openDeliveries = data ? data.deliveries.filter(j => !isTaskDone(j, 'delivery')) : [];
+                  const openPickups = data ? data.pickups.filter(j => !isTaskDone(j, 'pickup')) : [];
+                  const hasDelivery = openDeliveries.length > 0;
+                  const hasPickup = openPickups.length > 0;
                   const hasActive = data && data.activeRentals.length > 0;
                   const isToday = dk === todayStr;
                   const isSelected = dk === selectedDay;
@@ -322,8 +347,8 @@ function CalendarSection() {
                         {d}
                       </span>
                       <div className="flex gap-0.5 flex-wrap">
-                        {hasDelivery && <span className="w-2 h-2 rounded-full bg-success" title={`${data.deliveries.length} delivery`} />}
-                        {hasPickup && <span className="w-2 h-2 rounded-full bg-brand" title={`${data.pickups.length} pickup`} />}
+                        {hasDelivery && <span className="w-2 h-2 rounded-full bg-success" title={`${openDeliveries.length} delivery`} />}
+                        {hasPickup && <span className="w-2 h-2 rounded-full bg-brand" title={`${openPickups.length} pickup`} />}
                         {hasActive && <span className="w-2 h-2 rounded-full bg-warning" title={`${data.activeRentals.length} active`} />}
                       </div>
                     </button>
@@ -345,14 +370,14 @@ function CalendarSection() {
                 <p className="px-4 py-6 text-xs text-muted italic">No jobs on this day.</p>
               ) : (
                 <div className="divide-y divide-divider">
-                  {[...selectedData.deliveries].sort(byScheduledTime).map(job => (
-                    <DayJobRow key={`d-${job.id}`} job={job} type="delivery" navigate={navigate} onChanged={reload} />
+                  {[...selectedData.deliveries].sort(byDoneThenTime('delivery')).map(job => (
+                    <DayJobRow key={`d-${job.id}`} job={job} type="delivery" onChanged={reload} />
                   ))}
-                  {[...selectedData.pickups].sort(byScheduledTime).map(job => (
-                    <DayJobRow key={`p-${job.id}`} job={job} type="pickup" navigate={navigate} onChanged={reload} />
+                  {[...selectedData.pickups].sort(byDoneThenTime('pickup')).map(job => (
+                    <DayJobRow key={`p-${job.id}`} job={job} type="pickup" onChanged={reload} />
                   ))}
                   {selectedData.activeRentals.map(job => (
-                    <DayJobRow key={`a-${job.id}`} job={job} type="active" navigate={navigate} />
+                    <DayJobRow key={`a-${job.id}`} job={job} type="active" onChanged={reload} />
                   ))}
                 </div>
               )}
@@ -364,31 +389,20 @@ function CalendarSection() {
   );
 }
 
-// Directions to the job site in whatever maps app the device prefers. Address-only —
-// no geocoding; Google resolves the destination string itself.
-function directionsUrl(address) {
-  return address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}` : null;
-}
-
-// Deliveries and pickups are jobs to DO, so both rows carry what the driver needs on
-// site: call the customer, navigate to the address, and record the unit —
-//   delivery → which dumpster went on the ground (required; also the swap replacement)
-//   pickup   → which of the job's on-site units came back (required), then the weight,
-//              the same DumpTicketAction the customer profile uses, unchanged.
-//   active   → the same call/navigate/drop, because a SWAP happens mid-rental: the
-//              replacement can is dropped on a day that is neither the delivery nor the
-//              pickup, and until this the drop step only existed on the delivery card, so
-//              a swap replacement never became an assignment (and could never be picked
-//              up or weighed as itself). Weight entry stays pickup-only.
-function DayJobRow({ job, type, navigate, onChanged }) {
-  const [showWeight, setShowWeight] = useState(false);
-  const [showDrop, setShowDrop] = useState(false);
-  // The unit step gates the weight entry only while a captured unit is still on site;
-  // a job delivered before unit capture existed (no assignment) falls straight through
-  // to the weight entry exactly as it did before. Holds the unit just picked up — its
-  // label so the step reads as "Unit 41 picked up", and its ASSIGNMENT so the weight
-  // entered next is attributed to that can and its job (Phase 2c).
-  const [picked, setPicked] = useState(null);
+// A day card is a JOB TO DO, and tapping it opens the guided flow for that job —
+// the whole task, in order, in one place (JobTaskModal). It used to navigate to the
+// customer profile and leave the driver to find the right button among several; the
+// profile is now a small explicit affordance on the card and inside the modal.
+//
+//   delivery → confirm the drop, capture the unit that went on the ground
+//   pickup   → capture the unit that came back, pick the dump site, enter the weight
+//   active   → record a SWAP replacement, which lands mid-rental (neither the
+//              delivery nor the pickup day)
+//
+// A task the assignments say is already handled greys out and carries a Done chip
+// rather than disappearing, so the day still reads as a complete record.
+function DayJobRow({ job, type, onChanged }) {
+  const [open, setOpen] = useState(false);
   const onSite = job.assignedUnits || [];
   const typeConfig = {
     delivery: { label: term.startBadge, bg: 'bg-success/10 text-success' },
@@ -398,134 +412,57 @@ function DayJobRow({ job, type, navigate, onChanged }) {
   const { label, bg } = typeConfig[type];
   // Active rentals are ongoing, so a specific time of day doesn't apply to them.
   const timeLabel = type === 'active' ? null : (formatTime12(job.scheduledTime) || 'Flexible');
-
-  const isPickup = type === 'pickup';
-  const isDelivery = type === 'delivery';
-  const isActive = type === 'active';
-  const tel = job.phone ? `tel:${String(job.phone).replace(/[^\d+]/g, '')}` : null;
-  const maps = directionsUrl(job.address);
-  // A drop is recordable whenever the job is live — at delivery, and mid-rental for the
-  // swap replacement. Named for what it is in context so the swap case is findable.
-  const canDrop = isDelivery || isActive;
-  const dropLabel = onSite.length === 0
-    ? 'Record drop'
-    : (isActive ? 'Record replacement' : 'Assign another unit');
-  // units_out is only initialized once the delivery date lands, so treat "unknown"
-  // (null) as still out — the server defaults it to 1 anyway. Hidden only when every
-  // unit is explicitly back.
-  const canRecord = isPickup && (job.unitsOut == null || job.unitsOut > 0);
-
-  const actionClass = 'flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg transition-colors';
+  const done = isTaskDone(job, type);
 
   return (
-    <div className="px-4 py-3 hover:bg-surface-2 transition-colors">
-      <button
-        onClick={() => navigate(`/leads/${job.id}`)}
-        className="w-full flex items-start gap-3 text-left"
-      >
-        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${bg}`}>
-          {label}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-content truncate">{job.customerName}</p>
-            {timeLabel && (
-              <span className="text-xs font-semibold flex-shrink-0 text-muted">{timeLabel}</span>
+    <div className={`px-4 py-3 transition-colors ${done ? 'opacity-55' : 'hover:bg-surface-2'}`}>
+      <div className="flex items-start gap-2">
+        {/* The whole card is the task — tapping it starts the guided flow. */}
+        <button onClick={() => setOpen(true)} className="flex-1 flex items-start gap-3 text-left min-w-0">
+          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${bg}`}>
+            {label}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-content truncate">{job.customerName}</p>
+              {timeLabel && (
+                <span className="text-xs font-semibold flex-shrink-0 text-muted">{timeLabel}</span>
+              )}
+            </div>
+            {job.dumpsterSize && <p className="text-xs text-muted">{job.dumpsterSize}</p>}
+            {job.address && <p className="text-xs text-muted truncate">{job.address}</p>}
+            {/* Which physical dumpster is sitting on this job right now. */}
+            {onSite.length > 0 && (
+              <p className="text-xs font-semibold text-brand mt-0.5">
+                {onSite.map(u => `Unit ${u.label}`).join(', ')} on site
+              </p>
+            )}
+            {done && (
+              <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/10 text-success">
+                <Check size={10} /> Done
+              </span>
             )}
           </div>
-          {job.dumpsterSize && <p className="text-xs text-muted">{job.dumpsterSize}</p>}
-          {job.address && <p className="text-xs text-muted truncate">{job.address}</p>}
-          {/* Which physical dumpster is sitting on this job right now. */}
-          {onSite.length > 0 && (
-            <p className="text-xs font-semibold text-brand mt-0.5">
-              {onSite.map(u => `Unit ${u.label}`).join(', ')} on site
-            </p>
-          )}
-        </div>
-      </button>
+        </button>
+        {/* The customer profile, now an explicit affordance instead of what tapping
+            the card does. */}
+        <Link
+          to={`/leads/${job.id}`}
+          onClick={(e) => e.stopPropagation()}
+          title="Open customer profile"
+          className="p-1.5 rounded-lg text-muted hover:bg-surface-2 hover:text-content transition-colors flex-shrink-0"
+        >
+          <ExternalLink size={13} />
+        </Link>
+      </div>
 
-      {(isPickup || isDelivery || isActive) && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-1">
-          {tel ? (
-            <a href={tel} className={`${actionClass} text-content bg-surface-2 hover:bg-divider`}>
-              <Phone size={11} /> Call
-            </a>
-          ) : (
-            <span className={`${actionClass} text-muted bg-surface-2 opacity-50 cursor-default`} title="No phone number on this job">
-              <Phone size={11} /> Call
-            </span>
-          )}
-          {maps ? (
-            <a href={maps} target="_blank" rel="noreferrer" className={`${actionClass} text-content bg-surface-2 hover:bg-divider`}>
-              <Navigation size={11} /> Navigate
-            </a>
-          ) : (
-            <span className={`${actionClass} text-muted bg-surface-2 opacity-50 cursor-default`} title="No delivery address on this job">
-              <Navigation size={11} /> Navigate
-            </span>
-          )}
-          {canDrop && (
-            <button
-              onClick={() => setShowDrop(v => !v)}
-              className={`${actionClass} ${showDrop ? 'text-white bg-brand' : 'text-brand bg-brand/10 hover:bg-brand/20'}`}
-            >
-              <Truck size={11} /> {showDrop ? 'Close' : dropLabel}
-            </button>
-          )}
-          {canRecord && (
-            <button
-              onClick={() => setShowWeight(v => !v)}
-              className={`${actionClass} ${showWeight ? 'text-white bg-brand' : 'text-brand bg-brand/10 hover:bg-brand/20'}`}
-            >
-              <Scale size={11} /> {showWeight ? 'Close' : 'Record pickup'}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Drop: the unit number is required, so this is the whole step. */}
-      {showDrop && (
-        <div className="mt-2.5 pl-1">
-          <UnitDropAction
-            leadId={job.id}
-            jobSize={job.dumpsterSize}
-            onDone={onChanged}
-            onCancel={() => setShowDrop(false)}
-          />
-        </div>
-      )}
-
-      {/* Pickup: which unit came back (required while one is on site), then the
-          unchanged weight / dump-ticket entry. */}
-      {showWeight && (
-        <div className="mt-2.5 pl-1 space-y-3">
-          <UnitPickupStep
-            leadId={job.id}
-            onSite={onSite}
-            pickedLabel={picked?.label}
-            onPicked={(res) => {
-              setPicked({ label: res?.assignment?.label || '—', assignmentId: res?.assignment?.id || null });
-              onChanged?.();
-            }}
-          />
-          {(picked || onSite.length === 0) && (
-            <DumpTicketAction
-              compact
-              leadId={job.id}
-              unitsOut={job.unitsOut}
-              dumpTickets={job.dumpTickets || []}
-              overageNeedsRate={job.overageNeedsRate}
-              // The can just picked up — its weight bills THIS job and prices against
-              // that unit's size. Null for a job delivered before unit capture.
-              assignmentId={picked?.assignmentId || null}
-              unitLabel={picked?.label || null}
-              // A paid swap the server is already tracking — hides the redundant manual
-              // swap checkbox, and the form asks for the replacement's unit after the haul.
-              pendingSwapOuts={job.pendingSwapOuts || 0}
-              onDone={onChanged}
-            />
-          )}
-        </div>
+      {open && (
+        <JobTaskModal
+          job={job}
+          type={type}
+          onClose={() => setOpen(false)}
+          onChanged={onChanged}
+        />
       )}
     </div>
   );

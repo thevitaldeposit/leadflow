@@ -90,6 +90,48 @@ function onSiteAssignmentsForLeads(businessId, leadIds = []) {
   return map;
 }
 
+// ── Task completion, DERIVED (guided drop/pickup flow) ───────────────────────
+// "Is this delivery / pickup actually done?" answered from the assignments that
+// already exist — no new write-path state, no new column on the lead.
+//
+//   dropRecorded   — at least one unit has been dropped on this job
+//   pickupSettled  — assignments EXIST and every one of them has been picked up
+//
+// The "exist" clause is the critical guard: a legacy job (delivered before unit
+// capture) and a business with no fleet registered both have ZERO assignment rows,
+// and `every()` over an empty list is vacuously true — which would silently hide
+// real work from today's schedule. Zero rows therefore means "nothing derived
+// here", and the caller falls back to the lead's own delivery_done_at /
+// pickup_done_at stamps.
+//
+// Read-only. This filters on NOTHING (in particular not `picked_up_at IS NULL`,
+// which is what the on-site lookups above use) because a settled task is exactly
+// the case where no unit is on site any more.
+function assignmentTaskStateForLeads(businessId, leadIds = []) {
+  const ids = [...new Set(leadIds.filter((id) => id != null))];
+  const map = new Map();
+  if (ids.length === 0) return map;
+
+  const rows = db.prepare(`
+    SELECT lead_id,
+           COUNT(*) AS total,
+           SUM(CASE WHEN dropped_at IS NOT NULL THEN 1 ELSE 0 END) AS dropped,
+           SUM(CASE WHEN picked_up_at IS NOT NULL THEN 1 ELSE 0 END) AS picked_up
+    FROM assignments
+    WHERE business_id = ? AND lead_id IN (${ids.map(() => '?').join(', ')})
+    GROUP BY lead_id
+  `).all(businessId, ...ids);
+
+  for (const r of rows) {
+    map.set(r.lead_id, {
+      hasAssignments: r.total > 0,
+      dropRecorded: r.dropped > 0,
+      pickupSettled: r.total > 0 && r.picked_up === r.total,
+    });
+  }
+  return map;
+}
+
 // One assignment by id, with its unit's label/size. The anchor Phase 2c weight
 // attribution resolves against: this row names the unit AND the job, so a ticket
 // carrying an assignment id bills that job no matter which screen it was entered from.
@@ -349,6 +391,7 @@ module.exports = {
   listAssignments,
   onSiteAssignments,
   onSiteAssignmentsForLeads,
+  assignmentTaskStateForLeads,
   openAssignmentForAsset,
   getAssignment,
   yardUnits,
