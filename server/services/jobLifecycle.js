@@ -170,6 +170,38 @@ function recomputeLeadPaymentStatus(businessId, leadOrId) {
 // paid_at write). Recomputes payment_status first, then advances if the gate is met.
 // Completion is GATED: awaiting_final_payment → completed only when fully paid AND no
 // unit is still out.
+// ── Double-pay race: book it anyway, but flag the conflict ─────────────────────
+// An unpaid payment link holds NOTHING (pending_payment is not an active status), so
+// two links for the last unit of a size can both be paid. Booking is gated at every
+// owner-initiated path, but this one can't be: the money is already collected.
+// So we always let the payment book the job — never bounce a customer's payment —
+// and, when the fleet can't actually cover the window, raise the SAME inventory-
+// conflict signal auto-book uses so the owner sees it at the top of the Action Queue
+// and resolves the double-book (reschedule, sub a size, or rent one in).
+// Best-effort: a failure here must never undo a completed payment's booking.
+function flagPaymentInventoryConflict(businessId, lead) {
+  try {
+    if (!lead.delivery_date || !lead.pickup_date) return false;
+    const inv = require('./inventoryService');
+    const size = parseVd(lead).dumpsterSize || null;
+    // Exclude this lead: it was just advanced to 'booked', so it now counts itself.
+    const cap = inv.assertCapacity(businessId, {
+      size, deliveryDate: lead.delivery_date, pickupDate: lead.pickup_date, excludeLeadId: lead.id,
+    });
+    if (cap.ok) return false;
+
+    const sizeLabel = size || 'requested size';
+    const note = `INVENTORY CONFLICT: payment booked a ${sizeLabel} for ${lead.delivery_date} to ${lead.pickup_date}, but no unit is free for those dates. The payment was kept — resolve the double-book with the customer.`;
+    const recommendation = `INVENTORY CONFLICT — This paid booking exceeds your ${sizeLabel} fleet for ${lead.delivery_date}. Call the customer to reschedule, or cover it with another unit.`;
+    const flagged = inv.flagInventoryConflict(lead, { note, recommendation });
+    if (flagged) logActivity(lead.id, 'note_added', note);
+    return flagged;
+  } catch (e) {
+    console.error('[jobLifecycle] capacity re-check failed:', e.message);
+    return false;
+  }
+}
+
 function advanceOnPayment(businessId, leadOrId) {
   const lead = loadLead(businessId, leadOrId);
   if (!lead) return null;
@@ -179,6 +211,7 @@ function advanceOnPayment(businessId, leadOrId) {
   if (js === JOB_STATUS.PENDING_PAYMENT && pay === PAYMENT_STATUS.PAID) {
     setJobStatus(lead, JOB_STATUS.BOOKED);
     logActivity(lead.id, 'status_change', 'Payment received — job booked; dumpster reserved and scheduled');
+    flagPaymentInventoryConflict(businessId, lead);
     bumpCustomer(lead); emit(lead);
     return { lead, advancedTo: JOB_STATUS.BOOKED, paymentStatus: pay };
   }

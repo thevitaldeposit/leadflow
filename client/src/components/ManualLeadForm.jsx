@@ -133,6 +133,9 @@ export default function ManualLeadForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [confirmPaid, setConfirmPaid] = useState(false);
+  // Set by the Availability check on step 2: no unit of this size is free for the
+  // chosen window, so booking is off (the server refuses it as well).
+  const [noCapacity, setNoCapacity] = useState(false);
   // Set to { id, name, mode } when the entered phone already belongs to a
   // different-named customer and we're asking the owner to confirm a merge. Two
   // triggers: the read-only check on "Next" (mode:null → merging just carries the id
@@ -207,6 +210,13 @@ export default function ManualLeadForm() {
   // it too); Mark Paid and Save-as-inquiry send nothing and stay ungated.
   const canEmailPaymentLink = isValidEmail(form.email);
 
+  // Booking reserves a real dumpster, so it needs a date window AND a free unit for
+  // it. Both are hard requirements the server enforces too — a full window has no
+  // "book it anyway", it just isn't bookable until the date or size changes. Only the
+  // three booking actions are gated; "Save as inquiry" reserves nothing and stays open.
+  const hasBookingWindow = !!(form.deliveryDate && pickupISO);
+  const canBook = hasBookingWindow && !noCapacity;
+
   // Open the same-phone / different-name merge confirm as a BACKSTOP: if a booking is
   // submitted without a merge id and the phone still belongs to a different-named
   // customer, the server refuses (409, creates nothing) and we open the same modal.
@@ -277,6 +287,14 @@ export default function ManualLeadForm() {
     if (mode === 'link' && !canEmailPaymentLink) {
       setError('Add an email address to send a payment link.');
       setStep(1);
+      return;
+    }
+    // Same backstop for capacity: a merge re-submit re-enters here, so never fire a
+    // booking action for a window with no free unit (the server refuses it too).
+    if (mode !== 'inquiry' && !canBook) {
+      setError(hasBookingWindow
+        ? 'No unit of this size is available for those dates. Change the date or size, or save this as an inquiry.'
+        : 'Add a delivery date and rental duration before booking.');
       return;
     }
     setSubmitting(true);
@@ -404,10 +422,16 @@ export default function ManualLeadForm() {
         </div>
 
         {/* Availability — same pool check the Confirm Booking modal uses, plus a
-            next-available hint when the window is full. Advisory: never blocks a book. */}
+            next-available hint when the window is full. A full window BLOCKS the three
+            booking actions below (onBlockedChange); only "Save as inquiry" stays open. */}
         <div className="bg-surface rounded-xl border border-divider shadow-sm p-4">
           <p className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Availability</p>
-          <AvailabilityCheck size={form.dumpsterSize} deliveryDate={form.deliveryDate} rentalDays={form.rentalDuration} />
+          <AvailabilityCheck
+            size={form.dumpsterSize}
+            deliveryDate={form.deliveryDate}
+            rentalDays={form.rentalDuration}
+            onBlockedChange={setNoCapacity}
+          />
         </div>
 
         {error && (
@@ -417,9 +441,27 @@ export default function ManualLeadForm() {
         {/* Booking options */}
         {!confirmPaid ? (
           <div className="space-y-3">
+            {/* No date window → booking can't reserve anything, so the three booking
+                actions are off with the reason stated. (A full window is explained by
+                the Availability block above, which also turns them off.) */}
+            {!hasBookingWindow && (
+              <div className="flex items-start gap-2.5 bg-warning/5 border border-warning/30 rounded-xl px-4 py-3">
+                <AlertTriangle size={16} className="text-warning flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-content">
+                  Add a delivery date and rental duration to book this job.{' '}
+                  <button
+                    onClick={() => { setError(null); setConfirmPaid(false); setStep(1); }}
+                    className="font-semibold text-accent hover:underline"
+                  >
+                    Add the dates
+                  </button>
+                  , or save it as an inquiry below.
+                </p>
+              </div>
+            )}
             <button
               onClick={() => submit('link')}
-              disabled={submitting || !canEmailPaymentLink}
+              disabled={submitting || !canEmailPaymentLink || !canBook}
               className="w-full flex items-center gap-3 text-left text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-3 rounded-xl transition-colors"
             >
               <Send size={18} className="flex-shrink-0" />
@@ -449,7 +491,7 @@ export default function ManualLeadForm() {
             )}
             <button
               onClick={() => setConfirmPaid(true)}
-              disabled={submitting}
+              disabled={submitting || !canBook}
               className="w-full flex items-center gap-3 text-left text-content bg-surface hover:bg-surface-2 border border-divider disabled:opacity-60 px-4 py-3 rounded-xl transition-colors"
             >
               <Banknote size={18} className="flex-shrink-0 text-muted" />
@@ -477,7 +519,7 @@ export default function ManualLeadForm() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => submit('paid')}
-                disabled={submitting}
+                disabled={submitting || !canBook}
                 className="flex items-center gap-1.5 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:opacity-60 px-4 py-2.5 rounded-xl transition-colors"
               >
                 <Banknote size={15} /> {submitting ? 'Booking…' : 'Yes, mark paid & book'}

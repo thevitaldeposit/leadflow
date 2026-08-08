@@ -164,6 +164,104 @@ function getNextAvailableDate(requestedSize, deliveryDate, rentalDays, excludeLe
   return null;
 }
 
+// ── Capacity enforcement ───────────────────────────────────────────────────────
+// The ONE answer to "can I book a unit of this size for [delivery, pickup)?", shared
+// by every owner-initiated booking path (manual create, Confirm Booking / Send
+// Payment Link / Mark Paid), by the auto-book gate, and by the payment-time race
+// check in jobLifecycle.
+//
+// It is a thin wrapper over getAvailabilityForSize — the availability math itself is
+// unchanged: available = owned − out_of_service − overlapping PAID/ACTIVE jobs.
+// Unpaid holds (pending_payment) deliberately reserve nothing, which is exactly why
+// jobLifecycle re-checks at payment time.
+//
+// Returns { ok, reason, available, quantity, size, message }:
+//   ok:true  → a unit is free, OR capacity is not evaluable here
+//              ('no_window' / 'no_size' — the callers enforce those separately —
+//               and 'no_fleet', a business that hasn't set up inventory at all,
+//               which must not have every booking refused)
+//   ok:false → 'size_not_owned' (fleet exists but not this size) or 'none_available'
+function assertCapacity(businessId, { size, deliveryDate, pickupDate, excludeLeadId = null } = {}) {
+  const base = { available: null, quantity: null, size: size || null, message: null };
+  if (!deliveryDate || !pickupDate) return { ...base, ok: true, reason: 'no_window' };
+  if (normalizeSize(size) === null) return { ...base, ok: true, reason: 'no_size' };
+
+  // A business with no inventory configured has nothing to enforce against — gating
+  // it would refuse every booking it ever tries to make.
+  if (getFleetBySize(businessId).length === 0) return { ...base, ok: true, reason: 'no_fleet' };
+
+  const row = getAvailabilityForSize(size, deliveryDate, pickupDate, excludeLeadId, businessId);
+  if (!row) {
+    return {
+      ...base,
+      ok: false,
+      reason: 'size_not_owned',
+      available: 0,
+      quantity: 0,
+      message: `No ${size} in your fleet. Add one in Inventory, or pick a size you own.`,
+    };
+  }
+  if (row.available > 0) {
+    return { ...base, ok: true, reason: 'available', available: row.available, quantity: row.quantity };
+  }
+  return {
+    ...base,
+    ok: false,
+    reason: 'none_available',
+    available: 0,
+    quantity: row.quantity,
+    message: `No ${size} available for ${formatWindow(deliveryDate, pickupDate)}`
+      + (row.quantity ? ` — all ${row.quantity} are booked or out of service for those dates.` : '.'),
+  };
+}
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "2026-08-12" + "2026-08-15" → "Aug 12–15"; across months → "Aug 30–Sep 2".
+// Plain string math on the ISO parts — no Date, no timezone to get wrong.
+function formatWindow(deliveryDate, pickupDate) {
+  const part = (iso) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    return m ? { mon: Number(m[2]), day: Number(m[3]) } : null;
+  };
+  const a = part(deliveryDate);
+  const b = part(pickupDate);
+  if (!a) return `${deliveryDate} to ${pickupDate}`;
+  const label = (p) => `${MONTH_ABBR[p.mon - 1] || p.mon} ${p.day}`;
+  if (!b) return label(a);
+  return a.mon === b.mon ? `${label(a)}–${b.day}` : `${label(a)}–${label(b)}`;
+}
+
+// Raise the SAME inventory-conflict signal the auto-book gate uses, WITHOUT changing
+// the job's status. Used at payment time: a completed payment always books (we never
+// bounce the customer's money), so when the fleet can't actually cover it the job
+// stands and the owner gets a top-of-Action-Queue flag to resolve the double-book.
+// Writes vertical_data + internal_notes only; the caller logs the timeline event.
+function flagInventoryConflict(lead, { note, recommendation }) {
+  let vd = {};
+  try { vd = lead.vertical_data ? JSON.parse(lead.vertical_data) : {}; } catch { vd = {}; }
+  if (vd.inventoryConflict === true) return false; // already flagged — don't re-stamp
+
+  vd.inventoryConflict = true;
+  vd.aiRecommendation = recommendation;
+  vd.urgency = 'ASAP';
+  vd.followUpDate = new Date().toISOString();
+  vd.followUpReason = 'Inventory conflict — no unit free for these dates';
+
+  const existingNotes = (lead.internal_notes || '').trim();
+  const internalNotes = existingNotes ? `${note}\n\n${existingNotes}` : note;
+  const serializedVd = JSON.stringify(vd);
+  const nowISO = new Date().toISOString();
+
+  db.prepare('UPDATE leads SET internal_notes = ?, vertical_data = ?, updated_at = ? WHERE id = ?')
+    .run(internalNotes, serializedVd, nowISO, lead.id);
+
+  lead.internal_notes = internalNotes;
+  lead.vertical_data = serializedVd;
+  lead.updated_at = nowISO;
+  return true;
+}
+
 // Parse a rental duration string to integer days.
 // "7 days" → 7, "1 week" → 7, "2 weeks" → 14, "10" → 10, etc.
 function parseRentalDays(str) {
@@ -426,6 +524,8 @@ module.exports = {
   getAvailabilityBySize,
   getAvailabilityForSize,
   getNextAvailableDate,
+  assertCapacity,
+  flagInventoryConflict,
   parseRentalDays,
   addDaysToISO,
   normalizeSize,

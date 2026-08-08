@@ -12,6 +12,7 @@ const { describeBooking } = require('../services/leadActivityText');
 const { sendToAll } = require('../services/apns');
 const { JOB_STATUS, LEGACY_STATUS, ACTIVE_JOB_STATUS_SET } = require('../config/jobStatus');
 const assignmentService = require('../services/assignmentService');
+const inventoryService = require('../services/inventoryService');
 const { fleetContext, isPreFleetJob } = require('../services/scheduleTaskService');
 const { isValidEmail } = require('../services/emailService');
 
@@ -45,6 +46,11 @@ function billingEmailForLead(businessId, lead) {
 // One message for every blocked email-a-link action, so the owner always reads the
 // same instruction wherever they hit it.
 const EMAIL_REQUIRED_ERROR = 'Add an email address to send a payment link. Add one to this customer, or use Mark Paid if payment was collected outside Stream.';
+
+// Booking is what reserves a unit, and a unit is reserved for a WINDOW — a booked job
+// with no delivery/pickup date is invisible to the availability count, so it would let
+// every later booking overbook past the fleet. Both dates are required to book.
+const BOOKING_DATES_REQUIRED_ERROR = 'Set a delivery date and rental duration before booking — a booked job needs a date window to reserve a unit.';
 
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
 // request to the caller's business when a token is present, else to Valley Binz.
@@ -576,6 +582,32 @@ router.put('/:id', (req, res) => {
       }
     }
 
+    // ── Capacity guard ───────────────────────────────────────────────────────────
+    // Confirm Booking / Send Payment Link / Mark Paid all land here as a status change
+    // into booked|pending_payment (initiateBaseInvoice). Same hard stop as manual
+    // create: no window → refuse (a dateless booked job is invisible to the count);
+    // no unit free for that window → refuse, with no override. Nothing is written, so
+    // the job stays exactly as it was. Every other edit (reschedule approval, notes,
+    // completion, an already-booked job re-saved) is untouched — this only fires on the
+    // transition that reserves a unit.
+    if (initiateBaseInvoice) {
+      const deliveryAfter = updates.delivery_date !== undefined ? updates.delivery_date : existing.delivery_date;
+      const pickupAfter = updates.pickup_date !== undefined ? updates.pickup_date : existing.pickup_date;
+      if (!deliveryAfter || !pickupAfter) {
+        return res.status(400).json({ error: BOOKING_DATES_REQUIRED_ERROR, code: 'dates_required' });
+      }
+      // Size as it will be AFTER this write (the modal sends a possibly-changed size
+      // in the vertical_data patch), falling back to what's already stored.
+      const sizeAfter = (vdPatch && vdPatch.dumpsterSize) || currentVd.dumpsterSize || null;
+      const cap = inventoryService.assertCapacity(businessId, {
+        size: sizeAfter,
+        deliveryDate: deliveryAfter,
+        pickupDate: pickupAfter,
+        excludeLeadId: existing.id,
+      });
+      if (!cap.ok) return res.status(400).json({ error: cap.message, code: 'no_availability' });
+    }
+
     // ── Payment-link email guard ─────────────────────────────────────────────────
     // This write would EMAIL the customer a payment link (ensureBaseInvoice
     // emailLink:true below). With no deliverable address that email is a silent
@@ -895,6 +927,25 @@ router.post('/manual', requireAuth, (req, res) => {
     if (wantsBooked && !alreadyPaid
         && !billingEmailFor(businessId, { email, customerId: linkedCustomerId, phone })) {
       return res.status(400).json({ error: EMAIL_REQUIRED_ERROR, code: 'email_required' });
+    }
+
+    // ── Capacity guard ──────────────────────────────────────────────────────────
+    // Booking a size the fleet can't cover for the window promises a dumpster that
+    // doesn't exist, so refuse before anything is created (no lead, no customer, no
+    // invoice, no emailed link) — same shape as the email guard above. There is no
+    // override: an owner who wants the job takes a different date or size.
+    // Both dates are required first, because a booked job with no window is invisible
+    // to the availability count and would silently overbook every later booking.
+    // "Save as inquiry" (!wantsBooked) is never gated — an inquiry reserves nothing.
+    if (wantsBooked) {
+      const bookingPickup = calcPickupFromDuration(deliveryDate, rentalDurationDays);
+      if (!deliveryDate || !bookingPickup) {
+        return res.status(400).json({ error: BOOKING_DATES_REQUIRED_ERROR, code: 'dates_required' });
+      }
+      const cap = inventoryService.assertCapacity(businessId, {
+        size: dumpsterSize, deliveryDate, pickupDate: bookingPickup,
+      });
+      if (!cap.ok) return res.status(400).json({ error: cap.message, code: 'no_availability' });
     }
 
     // No explicit price but we have a size → compute the suggested amount from the

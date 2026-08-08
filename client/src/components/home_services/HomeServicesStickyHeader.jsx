@@ -53,7 +53,12 @@ function AvailabilityNote({ loading, availability, size }) {
       </p>
     );
   }
-  return <p className="text-sm font-semibold text-danger">No {label} available for selected dates</p>;
+  return (
+    <div className="text-sm space-y-1">
+      <p className="font-semibold text-danger">No {label} available for selected dates</p>
+      <p className="text-xs text-warning">Booking is unavailable for these dates. Change the date or the size to book.</p>
+    </div>
+  );
 }
 
 export function BookedModal({ lead, onConfirm, onClose }) {
@@ -72,18 +77,28 @@ export function BookedModal({ lead, onConfirm, onClose }) {
   const [poolSizes, setPoolSizes] = useState([]);
   const [availability, setAvailability] = useState(null);
   const [loadingAvail, setLoadingAvail] = useState(false);
+  // The business has no inventory configured at all (no sizes come back). There is
+  // nothing to enforce capacity against, so booking must not be blocked — matching
+  // the server's own no-fleet carve-out.
+  const [noFleet, setNoFleet] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
+  // Confirming a booking reserves a unit, so it needs one to be free for the window.
+  // A full window is a hard stop with no overbook-anyway option — the owner changes
+  // the date or the size. (The server refuses the same write independently; this is
+  // just the visible half.) An in-flight check doesn't block: the server is the gate.
+  const canBook = isValid && !loadingAvail
+    && (noFleet || (!!availability && availability.available > 0));
 
   // Booking an unpaid job emails the customer a payment link, which the server
   // refuses when there's no address to send it to. Stay open and show the reason
   // instead of closing as though the job were booked.
   const confirm = async () => {
-    if (!isValid || saving) return;
+    if (!canBook || saving) return;
     setSaving(true); setError(null);
     try {
       await onConfirm({ date, rentalDays: daysNum, size });
@@ -129,6 +144,7 @@ export function BookedModal({ lead, onConfirm, onClose }) {
         if (cancelled) return;
         const match = (rows || []).find(r => sizeMatches(r.size, size)) || null;
         setAvailability(match);
+        setNoFleet((rows || []).length === 0);
         setLoadingAvail(false);
       })
       .catch(() => { if (!cancelled) { setAvailability(null); setLoadingAvail(false); } });
@@ -203,7 +219,7 @@ export function BookedModal({ lead, onConfirm, onClose }) {
         <div className="flex gap-3 mt-6">
           <button
             onClick={confirm}
-            disabled={!isValid || saving}
+            disabled={!canBook || saving}
             className="flex-1 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
           >
             {saving ? 'Booking…' : 'Confirm Booking'}
@@ -224,8 +240,9 @@ export function BookedModal({ lead, onConfirm, onClose }) {
 //     unpaid job to pending_payment and emails the link (payment reserves the unit).
 //   • Mark Paid → payment collected outside Stream → booked + reserved now, no link
 //     (the parent sends paid_at + book_without_payment).
-// Availability is advisory here too (owners may intentionally overbook) with a
-// next-available hint. Never re-runs extraction / booking-signal / auto-book logic.
+// Availability is a HARD GATE here too: a window with no free unit disables both
+// actions (with a next-available hint) — the server refuses the same write, and there
+// is no overbook-anyway path. Never re-runs extraction / booking-signal / auto-book logic.
 export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, onMarkPaid, onClose }) {
   const vd = parseVerticalData(lead);
   const t = getTerminology(lead.vertical, getSubVertical(lead));
@@ -240,10 +257,16 @@ export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, 
   const [submitting, setSubmitting] = useState(false);
   const [confirmPaid, setConfirmPaid] = useState(false);
   const [error, setError] = useState(null);
+  // Set by the Availability check below: no unit of this size is free for the chosen
+  // window, so booking is off (the server refuses the same write).
+  const [noCapacity, setNoCapacity] = useState(false);
 
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
+  // Booking reserves a real dumpster: it needs a window AND a free unit for it. There
+  // is no overbook-anyway path — the owner changes the date or the size instead.
+  const canBook = isValid && !noCapacity;
 
   // Send Payment Link EMAILS a secure invoice link to this customer — with no address
   // on file the send is a silent no-op, so the option is unavailable instead. The
@@ -274,7 +297,7 @@ export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, 
   // The parent handler persists then closes the modal (setBookingLead(null)) on
   // success; on failure it throws, so we just re-enable the buttons and stay open.
   const run = async (fn) => {
-    if (!isValid || submitting) return;
+    if (!canBook || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -327,7 +350,7 @@ export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, 
           <div>
             <label className={labelCls}>Availability</label>
             {isValid ? (
-              <AvailabilityCheck size={size} deliveryDate={date} rentalDays={daysNum} excludeLeadId={lead.id} />
+              <AvailabilityCheck size={size} deliveryDate={date} rentalDays={daysNum} excludeLeadId={lead.id} onBlockedChange={setNoCapacity} />
             ) : (
               <p className="text-xs text-muted">Enter a delivery date and duration to check availability.</p>
             )}
@@ -342,7 +365,7 @@ export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, 
           <div className="mt-6 space-y-3">
             <button
               onClick={() => run(onSendPaymentLink)}
-              disabled={!isValid || submitting || !canEmailPaymentLink}
+              disabled={!canBook || submitting || !canEmailPaymentLink}
               className="w-full flex items-center gap-3 text-left text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-3 rounded-xl transition-colors"
             >
               <Send size={18} className="flex-shrink-0" />
@@ -366,7 +389,7 @@ export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, 
             )}
             <button
               onClick={() => setConfirmPaid(true)}
-              disabled={!isValid || submitting}
+              disabled={!canBook || submitting}
               className="w-full flex items-center gap-3 text-left text-content bg-surface hover:bg-surface-2 border border-divider disabled:opacity-60 px-4 py-3 rounded-xl transition-colors"
             >
               <Banknote size={18} className="flex-shrink-0 text-muted" />
@@ -390,7 +413,7 @@ export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, 
             <div className="flex items-center gap-3">
               <button
                 onClick={() => run(onMarkPaid)}
-                disabled={submitting}
+                disabled={submitting || !canBook}
                 className="flex items-center gap-1.5 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:opacity-60 px-4 py-2.5 rounded-xl transition-colors"
               >
                 <Banknote size={15} /> {submitting ? 'Booking…' : 'Yes, mark paid & book'}
