@@ -15,7 +15,7 @@ import MissedCallBadge from './MissedCallBadge';
 import ManualBadge from './ManualBadge';
 import { api } from '../../utils/api';
 import { parseVerticalData, getLeadActionState, JOB_STATUS_STYLES, getJobStatusLabel, JOB_STATUSES, getTerminology, getSubVertical, formatTime12 } from '../../utils/verticalConfig';
-import { parseRentalDays, calcPickupFromDuration, buildBookingUpdates, buildJobDetailUpdates } from '../../utils/booking';
+import { parseRentalDays, calcPickupFromDuration, buildBookingUpdates, buildJobDetailUpdates, hasBookableSize } from '../../utils/booking';
 import { isValidEmail } from '../../utils/email';
 
 function formatPickupDate(iso) {
@@ -87,11 +87,15 @@ export function BookedModal({ lead, onConfirm, onClose }) {
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
+  // A booked job is counted against its size, so the size has to name one — an
+  // extracted string with no number in it ("dumpster") occupies no capacity at all and
+  // is refused by the server (400 `size_required`).
+  const sizeOk = hasBookableSize(size);
   // Confirming a booking reserves a unit, so it needs one to be free for the window.
   // A full window is a hard stop with no overbook-anyway option — the owner changes
   // the date or the size. (The server refuses the same write independently; this is
   // just the visible half.) An in-flight check doesn't block: the server is the gate.
-  const canBook = isValid && !loadingAvail
+  const canBook = isValid && sizeOk && !loadingAvail
     && (noFleet || (!!availability && availability.available > 0));
 
   // Booking an unpaid job emails the customer a payment link, which the server
@@ -205,7 +209,9 @@ export function BookedModal({ lead, onConfirm, onClose }) {
             <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
               Availability
             </label>
-            {isValid ? (
+            {!sizeOk ? (
+              <p className="text-xs text-warning">A dumpster size is required to book — pick the size going out so it counts against your fleet.</p>
+            ) : isValid ? (
               <AvailabilityNote loading={loadingAvail} availability={availability} size={size} />
             ) : (
               <p className="text-xs text-muted">Enter a delivery date and duration to check availability.</p>
@@ -264,9 +270,13 @@ export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, 
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
-  // Booking reserves a real dumpster: it needs a window AND a free unit for it. There
-  // is no overbook-anyway path — the owner changes the date or the size instead.
-  const canBook = isValid && !noCapacity;
+  // A booked job is counted against its size, so the size has to name one — a string
+  // with no number in it occupies no capacity and is refused by the server.
+  const sizeOk = hasBookableSize(size);
+  // Booking reserves a real dumpster: it needs a window, a size, AND a free unit of
+  // that size for it. There is no overbook-anyway path — the owner changes the date or
+  // the size instead.
+  const canBook = isValid && sizeOk && !noCapacity;
 
   // Send Payment Link EMAILS a secure invoice link to this customer — with no address
   // on file the send is a silent no-op, so the option is unavailable instead. The
@@ -349,7 +359,9 @@ export function CreateJobModal({ lead, customerEmail = null, onSendPaymentLink, 
           </div>
           <div>
             <label className={labelCls}>Availability</label>
-            {isValid ? (
+            {!sizeOk ? (
+              <p className="text-xs text-warning">A dumpster size is required to book — pick the size going out so it counts against your fleet.</p>
+            ) : isValid ? (
               <AvailabilityCheck size={size} deliveryDate={date} rentalDays={daysNum} excludeLeadId={lead.id} onBlockedChange={setNoCapacity} />
             ) : (
               <p className="text-xs text-muted">Enter a delivery date and duration to check availability.</p>

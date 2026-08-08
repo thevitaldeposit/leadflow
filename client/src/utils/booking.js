@@ -13,6 +13,16 @@ export function parseRentalDays(str) {
   return Math.round(num);
 }
 
+// Can this size actually be booked? The availability count buckets active jobs by the
+// leading integer of the size string (the server's inventoryService.normalizeSize), so
+// a booked job with no size — or a size with no number in it — counts against no size
+// and would slip past the fleet cap. Mirrors the server's booking-time gate, which
+// refuses the same write (400 `size_required`); this is just the visible half.
+// Inquiries are never gated by it — they reserve nothing.
+export function hasBookableSize(size) {
+  return /\d/.test(String(size || ''));
+}
+
 export function calcPickupFromDuration(deliveryISO, rentalDuration) {
   if (!deliveryISO || !rentalDuration) return null;
   const days = parseRentalDays(rentalDuration);

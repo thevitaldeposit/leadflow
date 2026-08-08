@@ -52,6 +52,13 @@ const EMAIL_REQUIRED_ERROR = 'Add an email address to send a payment link. Add o
 // every later booking overbook past the fleet. Both dates are required to book.
 const BOOKING_DATES_REQUIRED_ERROR = 'Set a delivery date and rental duration before booking — a booked job needs a date window to reserve a unit.';
 
+// Same leak, other axis: the availability count buckets active jobs by the leading
+// integer of vd.dumpsterSize (inventoryService.normalizeSize), so a booked job whose
+// size is missing or has no number in it counts against NO size and slips past the
+// capacity cap. A size is required to book, exactly like the dates above.
+const BOOKING_SIZE_REQUIRED_ERROR = 'A dumpster size is required to book — pick the size going out so it counts against your fleet.';
+const bookableSize = (size) => inventoryService.normalizeSize(size) !== null;
+
 // Shared with the iOS app, which doesn't send a token yet — soft auth scopes the
 // request to the caller's business when a token is present, else to Valley Binz.
 router.use(attachBusiness);
@@ -586,6 +593,7 @@ router.put('/:id', (req, res) => {
     // Confirm Booking / Send Payment Link / Mark Paid all land here as a status change
     // into booked|pending_payment (initiateBaseInvoice). Same hard stop as manual
     // create: no window → refuse (a dateless booked job is invisible to the count);
+    // no parseable size → refuse (a sizeless booked job is invisible to it too);
     // no unit free for that window → refuse, with no override. Nothing is written, so
     // the job stays exactly as it was. Every other edit (reschedule approval, notes,
     // completion, an already-booked job re-saved) is untouched — this only fires on the
@@ -599,6 +607,9 @@ router.put('/:id', (req, res) => {
       // Size as it will be AFTER this write (the modal sends a possibly-changed size
       // in the vertical_data patch), falling back to what's already stored.
       const sizeAfter = (vdPatch && vdPatch.dumpsterSize) || currentVd.dumpsterSize || null;
+      if (!bookableSize(sizeAfter)) {
+        return res.status(400).json({ error: BOOKING_SIZE_REQUIRED_ERROR, code: 'size_required' });
+      }
       const cap = inventoryService.assertCapacity(businessId, {
         size: sizeAfter,
         deliveryDate: deliveryAfter,
@@ -934,13 +945,18 @@ router.post('/manual', requireAuth, (req, res) => {
     // doesn't exist, so refuse before anything is created (no lead, no customer, no
     // invoice, no emailed link) — same shape as the email guard above. There is no
     // override: an owner who wants the job takes a different date or size.
-    // Both dates are required first, because a booked job with no window is invisible
-    // to the availability count and would silently overbook every later booking.
-    // "Save as inquiry" (!wantsBooked) is never gated — an inquiry reserves nothing.
+    // Both dates and a parseable size are required first, because a booked job missing
+    // either is invisible to the availability count and would silently overbook every
+    // later booking.
+    // "Save as inquiry" (!wantsBooked) is never gated — an inquiry reserves nothing, so
+    // it stays saveable with every job detail blank, size included.
     if (wantsBooked) {
       const bookingPickup = calcPickupFromDuration(deliveryDate, rentalDurationDays);
       if (!deliveryDate || !bookingPickup) {
         return res.status(400).json({ error: BOOKING_DATES_REQUIRED_ERROR, code: 'dates_required' });
+      }
+      if (!bookableSize(dumpsterSize)) {
+        return res.status(400).json({ error: BOOKING_SIZE_REQUIRED_ERROR, code: 'size_required' });
       }
       const cap = inventoryService.assertCapacity(businessId, {
         size: dumpsterSize, deliveryDate, pickupDate: bookingPickup,

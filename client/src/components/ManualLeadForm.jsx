@@ -7,6 +7,7 @@ import {
 import { api } from '../utils/api';
 import { getTerminology, formatTime12 } from '../utils/verticalConfig';
 import { isValidEmail } from '../utils/email';
+import { hasBookableSize } from '../utils/booking';
 import AvailabilityCheck from './home_services/AvailabilityCheck';
 
 const DUMPSTER_SIZES = ['10 yard', '15 yard', '20 yard'];
@@ -210,12 +211,15 @@ export default function ManualLeadForm() {
   // it too); Mark Paid and Save-as-inquiry send nothing and stay ungated.
   const canEmailPaymentLink = isValidEmail(form.email);
 
-  // Booking reserves a real dumpster, so it needs a date window AND a free unit for
-  // it. Both are hard requirements the server enforces too — a full window has no
-  // "book it anyway", it just isn't bookable until the date or size changes. Only the
-  // three booking actions are gated; "Save as inquiry" reserves nothing and stays open.
+  // Booking reserves a real dumpster, so it needs a date window, a SIZE, and a free
+  // unit of that size for that window. All three are hard requirements the server
+  // enforces too — a full window has no "book it anyway", it just isn't bookable until
+  // the date or size changes, and a sizeless booking would occupy no size's capacity at
+  // all. Only the three booking actions are gated; "Save as inquiry" reserves nothing
+  // and stays open with every job detail — size included — left blank.
   const hasBookingWindow = !!(form.deliveryDate && pickupISO);
-  const canBook = hasBookingWindow && !noCapacity;
+  const hasBookingSize = hasBookableSize(form.dumpsterSize);
+  const canBook = hasBookingWindow && hasBookingSize && !noCapacity;
 
   // Open the same-phone / different-name merge confirm as a BACKSTOP: if a booking is
   // submitted without a merge id and the phone still belongs to a different-named
@@ -289,12 +293,13 @@ export default function ManualLeadForm() {
       setStep(1);
       return;
     }
-    // Same backstop for capacity: a merge re-submit re-enters here, so never fire a
-    // booking action for a window with no free unit (the server refuses it too).
+    // Same backstop for the booking requirements: a merge re-submit re-enters here, so
+    // never fire a booking action without a window, without a size, or for a window
+    // with no free unit (the server refuses all three too).
     if (mode !== 'inquiry' && !canBook) {
-      setError(hasBookingWindow
-        ? 'No unit of this size is available for those dates. Change the date or size, or save this as an inquiry.'
-        : 'Add a delivery date and rental duration before booking.');
+      if (!hasBookingWindow) setError('Add a delivery date and rental duration before booking.');
+      else if (!hasBookingSize) setError('A dumpster size is required to book. Pick a size, or save this as an inquiry.');
+      else setError('No unit of this size is available for those dates. Change the date or size, or save this as an inquiry.');
       return;
     }
     setSubmitting(true);
@@ -441,19 +446,24 @@ export default function ManualLeadForm() {
         {/* Booking options */}
         {!confirmPaid ? (
           <div className="space-y-3">
-            {/* No date window → booking can't reserve anything, so the three booking
-                actions are off with the reason stated. (A full window is explained by
-                the Availability block above, which also turns them off.) */}
-            {!hasBookingWindow && (
+            {/* No date window, or no size → booking can't reserve anything against the
+                fleet, so the three booking actions are off with the reason stated.
+                (A full window is explained by the Availability block above, which also
+                turns them off.) Both fields live back on step 1. */}
+            {(!hasBookingWindow || !hasBookingSize) && (
               <div className="flex items-start gap-2.5 bg-warning/5 border border-warning/30 rounded-xl px-4 py-3">
                 <AlertTriangle size={16} className="text-warning flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-content">
-                  Add a delivery date and rental duration to book this job.{' '}
+                  {!hasBookingWindow && !hasBookingSize
+                    ? 'Add a dumpster size, delivery date and rental duration to book this job. '
+                    : !hasBookingWindow
+                      ? 'Add a delivery date and rental duration to book this job. '
+                      : 'A dumpster size is required to book this job. '}
                   <button
                     onClick={() => { setError(null); setConfirmPaid(false); setStep(1); }}
                     className="font-semibold text-accent hover:underline"
                   >
-                    Add the dates
+                    {hasBookingWindow ? 'Pick a size' : 'Add the job details'}
                   </button>
                   , or save it as an inquiry below.
                 </p>

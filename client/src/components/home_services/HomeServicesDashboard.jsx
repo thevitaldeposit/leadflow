@@ -14,6 +14,7 @@ import VoicemailBadge from './VoicemailBadge';
 import MissedCallBadge from './MissedCallBadge';
 import ActiveRentalActions from './ActiveRentalActions';
 import { getSettings, saveSettings } from '../../utils/settings';
+import { hasBookableSize } from '../../utils/booking';
 import { Link, useNavigate } from 'react-router-dom';
 import OnboardingBanner from '../OnboardingBanner';
 
@@ -1255,12 +1256,17 @@ function BookedModal({ lead, onConfirm, onClose }) {
   const daysNum = Number(rentalDays);
   const pickupISO = (date && daysNum >= 1) ? calcPickupFromDuration(date, String(daysNum)) : null;
   const isValid = !!date && daysNum >= 1 && !!size;
+  // A booked job is counted against its size, so the size has to name one — a string
+  // with no number in it ("dumpster") occupies no capacity at all and is refused by the
+  // server (400 `size_required`), same as a booking with no dates.
+  const sizeOk = hasBookableSize(size);
+  const canBook = isValid && sizeOk;
 
   // Booking an unpaid job emails the customer a payment link, and the server refuses
   // that when there's no address to send it to. Surface the refusal here rather than
   // closing the modal as though the job were booked.
   const confirm = async () => {
-    if (!isValid || saving) return;
+    if (!canBook || saving) return;
     setSaving(true); setError(null);
     try {
       await onConfirm({ date, rentalDays: daysNum, size });
@@ -1358,7 +1364,9 @@ function BookedModal({ lead, onConfirm, onClose }) {
             <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1">
               Availability
             </label>
-            {isValid ? (
+            {!sizeOk ? (
+              <p className="text-xs text-warning">A dumpster size is required to book — pick the size going out so it counts against your fleet.</p>
+            ) : isValid ? (
               <AvailabilityNote loading={loadingAvail} availability={availability} size={size} />
             ) : (
               <p className="text-xs text-muted">Enter a delivery date and duration to check availability.</p>
@@ -1371,7 +1379,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
         <div className="flex gap-3 mt-6">
           <button
             onClick={confirm}
-            disabled={!isValid || saving}
+            disabled={!canBook || saving}
             className="flex-1 text-sm font-medium text-background bg-success hover:bg-success/90 disabled:bg-surface-2 disabled:text-muted disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition-colors"
           >
             {saving ? 'Booking…' : 'Confirm Booking'}
