@@ -1233,7 +1233,12 @@ function AvailabilityNote({ loading, availability, size }) {
       </p>
     );
   }
-  return <p className="text-sm font-semibold text-danger">No {label} available for selected dates</p>;
+  return (
+    <div className="text-sm space-y-1">
+      <p className="font-semibold text-danger">No {label} available for selected dates</p>
+      <p className="text-xs text-warning">Booking is unavailable for these dates. Change the date or the size to book.</p>
+    </div>
+  );
 }
 
 function BookedModal({ lead, onConfirm, onClose }) {
@@ -1249,6 +1254,10 @@ function BookedModal({ lead, onConfirm, onClose }) {
   const [poolSizes, setPoolSizes] = useState([]);
   const [availability, setAvailability] = useState(null);
   const [loadingAvail, setLoadingAvail] = useState(false);
+  // The business has no inventory configured at all (no sizes come back). There is
+  // nothing to enforce capacity against, so booking must not be blocked — matching
+  // the server's own no-fleet carve-out.
+  const [noFleet, setNoFleet] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const name = getLeadName(lead);
@@ -1260,7 +1269,13 @@ function BookedModal({ lead, onConfirm, onClose }) {
   // with no number in it ("dumpster") occupies no capacity at all and is refused by the
   // server (400 `size_required`), same as a booking with no dates.
   const sizeOk = hasBookableSize(size);
-  const canBook = isValid && sizeOk;
+  // Confirming a booking reserves a unit, so it needs one to be free for the window.
+  // A full window is a hard stop with no overbook-anyway option — the owner changes
+  // the date or the size. (The server refuses the same write independently; this is
+  // just the visible half.) An in-flight check doesn't block: the server is the gate.
+  // Mirrors the identical gate in HomeServicesStickyHeader's BookedModal.
+  const canBook = isValid && sizeOk && !loadingAvail
+    && (noFleet || (!!availability && availability.available > 0));
 
   // Booking an unpaid job emails the customer a payment link, and the server refuses
   // that when there's no address to send it to. Surface the refusal here rather than
@@ -1304,6 +1319,7 @@ function BookedModal({ lead, onConfirm, onClose }) {
         if (cancelled) return;
         const match = (rows || []).find(r => sizeMatches(r.size, size)) || null;
         setAvailability(match);
+        setNoFleet((rows || []).length === 0);
         setLoadingAvail(false);
       })
       .catch(() => { if (!cancelled) { setAvailability(null); setLoadingAvail(false); } });
@@ -1903,8 +1919,17 @@ export default function HomeServicesDashboard() {
   }, [leads, settings]);
 
   // Expiration runs on every dashboard load: any lead whose Action Queue grace
-  // window has lapsed is moved to All Opportunities with an "Expired" stamp,
-  // keeping it out of the queue on subsequent loads.
+  // window has lapsed gets an "Expired" stamp on internal_notes, keeping it out of
+  // the queue on subsequent loads.
+  //
+  // A page load must NEVER change a lead's job_status. This effect used to also
+  // PATCH job_status:'opportunity', so merely opening the dashboard silently
+  // reclassified old leads (and cascaded into the customer badge via the server's
+  // recomputeCustomerStatus) with no owner action behind it. The stamp alone does
+  // the job: isExpiredFlagged() keys off the note, so the lead still leaves the
+  // Action Queue and stays out — exactly how the deliberate Dismiss action works.
+  // Rows already mis-flipped by the old behavior are left as they are; this only
+  // stops it from happening again.
   const expiringRef = useRef(new Set());
   useEffect(() => {
     if (!toExpire || toExpire.length === 0) return;
@@ -1914,11 +1939,12 @@ export default function HomeServicesDashboard() {
       expiringRef.current.add(lead.id);
       const prefix = lead.internal_notes ? `${lead.internal_notes}\n` : '';
       const internal_notes = `${prefix}Expired — no action taken [${stamp}]`;
-      // Missed calls were never leads, so an expired one is discarded outright;
-      // a real opportunity is downgraded back into All Opportunities.
+      // Missed calls were never leads, so an expired one is discarded outright.
+      // A real opportunity keeps whatever status it earned from the call — it's
+      // only stamped out of the queue.
       const patch = lead.call_type === 'missed_call'
         ? { discarded: 1, internal_notes }
-        : { job_status: 'opportunity', internal_notes };
+        : { internal_notes };
       api.updateLead(lead.id, patch)
         .then((updated) => {
           setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
