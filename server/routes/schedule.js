@@ -28,12 +28,13 @@ router.get('/availability', (req, res) => {
 
     const pickupDate = addDaysToISO(delivery_date, days);
 
-    // Pool-based availability: owned quantity − units in service − overlapping
-    // active jobs of that size.
+    // Pool-based availability: owned quantity − units in service − units at the yard
+    // (picked up, awaiting a dump) − overlapping active jobs of that size.
     const bySizes = getAvailabilityBySize(delivery_date, pickupDate, null, req.business.id).map(p => ({
       size: p.size,
       ownedCount: p.quantity,
       unitsInService: p.units_in_service,
+      unitsAtYard: p.units_at_yard,
       bookedCount: p.booked,
       availableCount: p.available,
     }));

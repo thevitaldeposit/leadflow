@@ -1226,16 +1226,26 @@ function AvailabilityNote({ loading, availability, size }) {
   if (!availability) {
     return <p className="text-xs text-warning">No {label} in inventory for the selected dates.</p>;
   }
+  // A can back at the yard but not yet dumped is still full, so it isn't sellable —
+  // name it, or the count looks short by one for no visible reason.
+  const atYard = availability.units_at_yard || 0;
+  const atYardNote = atYard > 0
+    ? `${atYard} at the yard awaiting a dump — record the weight to free ${atYard === 1 ? 'it' : 'them'}.`
+    : null;
   if (availability.available > 0) {
     return (
-      <p className="text-sm font-semibold text-success">
-        {availability.available} of {availability.quantity} available for this date
-      </p>
+      <div className="space-y-0.5">
+        <p className="text-sm font-semibold text-success">
+          {availability.available} of {availability.quantity} available for this date
+        </p>
+        {atYardNote && <p className="text-xs text-muted">{atYardNote}</p>}
+      </div>
     );
   }
   return (
     <div className="text-sm space-y-1">
       <p className="font-semibold text-danger">No {label} available for selected dates</p>
+      {atYardNote && <p className="text-xs text-muted">{atYardNote}</p>}
       <p className="text-xs text-warning">Booking is unavailable for these dates. Change the date or the size to book.</p>
     </div>
   );

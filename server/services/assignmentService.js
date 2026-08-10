@@ -396,11 +396,20 @@ function pickUpUnit(businessId, lead, { assetId } = {}) {
 // the two surfaces disagreed until the 30-day purge cascaded the rows away.
 //
 // Closing the assignment here is the fleet's view of the same fact: the job is gone,
-// so the can is not on it. The open row is stamped picked up and the asset returns to
-// 'available' (not 'at_yard' — there is no haul to weigh, and the yard queue excludes
-// binned jobs anyway). Nothing else moves: units_out, the completion gate, the swap
-// markers and every ticket already written are untouched, and a weighed/picked-up
-// assignment stays exactly as it is so the job's unit history survives.
+// so the can is not on it. The row is stamped picked up + weighed and the asset
+// returns to 'available'. Nothing else moves: units_out, the completion gate, the
+// swap markers and every ticket already written are untouched.
+//
+// UNSETTLED, NOT JUST OPEN. This deliberately also matches a can that was already
+// picked up and is sitting at the yard unweighed (`picked_up_at` set, `weighed_at`
+// null). That row used to be skipped, and since the lead delete cascades the
+// assignment away (or the bin hides it from the yard queue), the asset was left
+// stranded on 'at_yard' with no job, no queue row and nothing pointing at it. Now
+// that 'at_yard' is subtracted from availability that orphan would be permanently
+// unsellable, so freeing it here is a required companion to the availability change:
+// the job is being deleted, so there is no ticket to attribute and no reason to hold
+// the can. A fully settled assignment (weighed) still stays exactly as it is, so the
+// job's unit history survives.
 //
 // Returns the labels of the units released.
 function releaseUnitsForLead(businessId, leadId, { log = false } = {}) {
@@ -408,14 +417,18 @@ function releaseUnitsForLead(businessId, leadId, { log = false } = {}) {
     SELECT asg.id, asg.asset_id, ast.label
     FROM assignments asg
     JOIN assets ast ON ast.id = asg.asset_id
-    WHERE asg.business_id = ? AND asg.lead_id = ? AND asg.picked_up_at IS NULL
+    WHERE asg.business_id = ? AND asg.lead_id = ?
+      AND (asg.picked_up_at IS NULL OR asg.weighed_at IS NULL)
   `).all(businessId, leadId);
   if (open.length === 0) return [];
 
   const at = nowIso();
   for (const row of open) {
-    db.prepare('UPDATE assignments SET picked_up_at = ?, updated_at = ? WHERE id = ?')
-      .run(at, at, row.id);
+    db.prepare(`
+      UPDATE assignments
+         SET picked_up_at = COALESCE(picked_up_at, ?), weighed_at = COALESCE(weighed_at, ?), updated_at = ?
+       WHERE id = ?
+    `).run(at, at, at, row.id);
     updateAsset(businessId, row.asset_id, { status: 'available' });
   }
 
@@ -429,6 +442,66 @@ function releaseUnitsForLead(businessId, leadId, { log = false } = {}) {
     );
   }
   return open.map(r => r.label);
+}
+
+// ── "Set it back to Available" — the unstick lever ────────────────────────────
+// Status and assignments are two different records of where a can is, and they can
+// disagree: a pickup marked by hand on the Inventory page (rather than through the
+// task screen) leaves the assignment OPEN, and an open assignment hides the unit from
+// the drop picker (`assignableAssets` filters on assignments, not status) AND from the
+// yard queue (which wants `picked_up_at` stamped). The result is a unit the owner can
+// see, can re-label, and still cannot use — with no lever anywhere to fix it.
+//
+// So setting a unit to 'available' now means what it says: any assignment of that unit
+// that isn't fully settled is closed out (picked up + weighed stamped, whichever is
+// missing), which makes the unit droppable again and clears it from the yard queue.
+//
+// This does NOT write a dump ticket, touch units_out, price anything, or advance a
+// job — a haul the owner still needs to bill is recorded on the job itself the usual
+// way (the by-lead dump-ticket path, unchanged). Each affected job gets a timeline
+// note so the closure is on the record rather than silent.
+//
+// Returns the rows it settled: [{ assignmentId, leadId, label, wasOnJob }].
+function settleAssignmentsForAsset(businessId, assetId, { at = nowIso() } = {}) {
+  const id = Number(assetId);
+  if (!Number.isFinite(id)) return [];
+
+  const rows = db.prepare(`
+    SELECT asg.id, asg.lead_id, asg.picked_up_at, ast.label
+    FROM assignments asg
+    JOIN assets ast ON ast.id = asg.asset_id
+    WHERE asg.business_id = ? AND asg.asset_id = ?
+      AND (asg.picked_up_at IS NULL OR asg.weighed_at IS NULL)
+  `).all(businessId, id);
+  if (rows.length === 0) return [];
+
+  const settled = [];
+  for (const row of rows) {
+    db.prepare(`
+      UPDATE assignments
+         SET picked_up_at = COALESCE(picked_up_at, ?), weighed_at = COALESCE(weighed_at, ?), updated_at = ?
+       WHERE id = ? AND business_id = ?
+    `).run(at, at, at, row.id, businessId);
+
+    if (row.lead_id) {
+      try {
+        logActivity(
+          row.lead_id,
+          'note_added',
+          `Unit ${row.label} set back to Available in Inventory — its record on this job was closed out`
+            + `${row.picked_up_at ? '' : ' (it was still marked out on this job)'}.`
+            + ' No weight was recorded; enter one on this job if the haul still needs billing.'
+        );
+      } catch { /* a timeline note must never block freeing the unit */ }
+    }
+    settled.push({
+      assignmentId: row.id,
+      leadId: row.lead_id || null,
+      label: row.label,
+      wasOnJob: !row.picked_up_at,
+    });
+  }
+  return settled;
 }
 
 module.exports = {
@@ -445,4 +518,5 @@ module.exports = {
   dropUnit,
   pickUpUnit,
   releaseUnitsForLead,
+  settleAssignmentsForAsset,
 };

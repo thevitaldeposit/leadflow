@@ -152,7 +152,7 @@ function AvailabilitySection() {
 }
 
 function SizeGroup({ group }) {
-  const { size, ownedCount, unitsInService, bookedCount, availableCount } = group;
+  const { size, ownedCount, unitsInService, unitsAtYard = 0, bookedCount, availableCount } = group;
   const none = availableCount <= 0;
 
   return (
@@ -161,6 +161,7 @@ function SizeGroup({ group }) {
         <p className="text-sm font-bold text-content">{size}</p>
         <p className="text-xs text-muted mt-0.5">
           {ownedCount} owned · {bookedCount} on jobs{unitsInService > 0 ? ` · ${unitsInService} in service` : ''}
+          {unitsAtYard > 0 ? ` · ${unitsAtYard} at yard (awaiting dump)` : ''}
         </p>
       </div>
       <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 ${

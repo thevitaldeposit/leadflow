@@ -10,7 +10,7 @@ const {
   updateAsset,
   retireAsset,
 } = require('../services/assetService');
-const { yardUnits } = require('../services/assignmentService');
+const { yardUnits, settleAssignmentsForAsset } = require('../services/assignmentService');
 
 // Fleet registry (pickup rework, Phase 2a): the owner's individual dumpsters.
 // Every route is scoped to the authenticated business.
@@ -63,11 +63,24 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/assets/:id — edit label, size, status, notes; `active` un-retires
+//
+// Setting the status to `available` FULLY frees the unit: on top of the status write,
+// any assignment of it that isn't settled is closed out (see
+// assignmentService.settleAssignmentsForAsset). Without that, a unit whose job record
+// was left open stays hidden from the drop picker no matter what its status says —
+// which is exactly how a can ends up visible, idle and unusable. Reported back as
+// `clearedAssignments` so the page can say what it did.
 router.put('/:id', (req, res) => {
   try {
-    const updated = updateAsset(req.business.id, req.params.id, req.body || {});
+    const businessId = req.business.id;
+    const updated = updateAsset(businessId, req.params.id, req.body || {});
     if (!updated) return res.status(404).json({ error: 'Asset not found' });
-    res.json(updated);
+
+    const cleared = updated.status === 'available' && updated.active
+      ? settleAssignmentsForAsset(businessId, updated.id)
+      : [];
+
+    res.json({ ...updated, clearedAssignments: cleared.length, clearedUnits: cleared });
   } catch (err) {
     fail(res, err, 'Failed to update asset');
   }

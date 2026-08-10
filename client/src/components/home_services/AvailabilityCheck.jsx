@@ -88,11 +88,21 @@ export default function AvailabilityCheck({ size, deliveryDate, rentalDays, excl
   if (loading) return <p className="text-xs text-muted">Checking availability…</p>;
 
   const label = size || 'this size';
+  // A can that's back at the yard but not yet dumped is still full, so it isn't
+  // sellable — say so, or the count looks short by one for no visible reason.
+  const atYard = availability?.units_at_yard || 0;
+  const atYardNote = atYard > 0
+    ? `${atYard} at the yard awaiting a dump — record the weight to free ${atYard === 1 ? 'it' : 'them'}.`
+    : null;
+
   if (availability && availability.available > 0) {
     return (
-      <p className="text-sm font-semibold text-success">
-        {availability.available} of {availability.quantity} available for this date
-      </p>
+      <div className="space-y-0.5">
+        <p className="text-sm font-semibold text-success">
+          {availability.available} of {availability.quantity} available for this date
+        </p>
+        {atYardNote && <p className="text-xs text-muted">{atYardNote}</p>}
+      </div>
     );
   }
 
@@ -104,6 +114,7 @@ export default function AvailabilityCheck({ size, deliveryDate, rentalDays, excl
       <p className="font-semibold text-danger">
         {availability ? `No ${label} available for these dates` : `No ${label} in inventory for these dates`}
       </p>
+      {atYardNote && <p className="text-xs text-muted">{atYardNote}</p>}
       {checkedNext && (
         <p className="text-xs text-muted">
           {nextDate

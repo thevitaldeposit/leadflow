@@ -67,10 +67,17 @@ function sizeGroupKey(size) {
 //
 //   quantity          active (non-retired) assets of that size
 //   units_in_service  those of them flagged out_of_service
+//   units_at_yard     those of them flagged at_yard — picked up, awaiting a dump
 //
-// so `quantity − units_in_service` is the sellable count. Location statuses
-// (`out`, `at_yard`) are ignored on purpose: availability is a pure count minus
-// overlapping jobs and must never depend on a unit being assigned to a job.
+// so `quantity − units_in_service − units_at_yard` is the sellable count.
+//
+// `at_yard` is a FULL can: it came back off a job and can't go out again until it's
+// weighed/dumped (the weekend case — collected Saturday, landfill shut till Monday).
+// Counting it as sellable let the booking paths promise a dumpster that physically
+// cannot be delivered, so it is subtracted here. The deduction clears itself: a weigh
+// puts the unit back to 'available' (assignmentService.markWeighed) and re-dropping it
+// moves it to 'out'. `out` stays ignored — a unit on a job is already accounted for by
+// the overlapping-job count below, and double-subtracting it would refuse good bookings.
 //
 // `inventory_pool` is still read — but only as the per-size registry that carries
 // the row `id` and `notes`, and to keep a size visible after its last unit is
@@ -80,7 +87,7 @@ function getFleetBySize(businessId) {
   const upsert = (key, size) => {
     let g = groups.get(key);
     if (!g) {
-      g = { id: null, size, notes: null, quantity: 0, units_in_service: 0 };
+      g = { id: null, size, notes: null, quantity: 0, units_in_service: 0, units_at_yard: 0 };
       groups.set(key, g);
     }
     return g;
@@ -96,7 +103,9 @@ function getFleetBySize(businessId) {
   for (const a of db.prepare('SELECT size, status FROM assets WHERE business_id = ? AND active = 1').all(businessId)) {
     const g = upsert(sizeGroupKey(a.size), a.size);
     g.quantity += 1;
+    // Mutually exclusive on purpose — a unit is deducted once, never twice.
     if (a.status === 'out_of_service') g.units_in_service += 1;
+    else if (a.status === 'at_yard') g.units_at_yard += 1;
   }
 
   const rows = [...groups.values()];
@@ -105,7 +114,15 @@ function getFleetBySize(businessId) {
 }
 
 // Compute availability for every size for a given date window.
-// available = owned quantity − units_in_service − overlapping active jobs of that size.
+// available = owned quantity − units_in_service − units_at_yard − overlapping active
+// jobs of that size.
+//
+// The at-yard term is what stops a full can being sold: it is subtracted for EVERY
+// window, near-term or far-future, because nothing in the system knows when a unit
+// will actually be dumped (landfill hours, the driver's route, the weekend). Being
+// conservative here costs a callback; the alternative promised a dumpster that
+// couldn't be delivered.
+//
 // Returns an array sorted numerically by size. Scoped to one tenant's inventory.
 function getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId = null, businessId) {
   const fleet = getFleetBySize(businessId);
@@ -116,12 +133,14 @@ function getAvailabilityBySize(deliveryDate, pickupDate, excludeLeadId = null, b
     const booked = (n !== null ? counts.get(n) : 0) || 0;
     const owned = p.quantity || 0;
     const inService = p.units_in_service || 0;
-    const available = Math.max(0, owned - inService - booked);
+    const atYard = p.units_at_yard || 0;
+    const available = Math.max(0, owned - inService - atYard - booked);
     return {
       id: p.id,
       size: p.size,
       quantity: owned,
       units_in_service: inService,
+      units_at_yard: atYard,
       notes: p.notes || null,
       booked,
       available,
@@ -171,7 +190,7 @@ function getNextAvailableDate(requestedSize, deliveryDate, rentalDays, excludeLe
 // check in jobLifecycle.
 //
 // It is a thin wrapper over getAvailabilityForSize — the availability math itself is
-// unchanged: available = owned − out_of_service − overlapping PAID/ACTIVE jobs.
+// unchanged: available = owned − out_of_service − at_yard − overlapping PAID/ACTIVE jobs.
 // Unpaid holds (pending_payment) deliberately reserve nothing, which is exactly why
 // jobLifecycle re-checks at payment time.
 //
@@ -204,6 +223,13 @@ function assertCapacity(businessId, { size, deliveryDate, pickupDate, excludeLea
   if (row.available > 0) {
     return { ...base, ok: true, reason: 'available', available: row.available, quantity: row.quantity };
   }
+  // Name the at-yard units in the refusal — "all 2 are booked" reads like a bug when
+  // the owner can see one sitting in the yard. It's there, it's just still full.
+  let why = ` — all ${row.quantity} are booked or out of service for those dates.`;
+  if (row.units_at_yard > 0) {
+    why = ` — ${row.units_at_yard} of ${row.quantity} ${row.units_at_yard === 1 ? 'is' : 'are'} at the yard`
+      + ' awaiting a dump, the rest are booked or out of service. Record the weight to free it.';
+  }
   return {
     ...base,
     ok: false,
@@ -211,7 +237,7 @@ function assertCapacity(businessId, { size, deliveryDate, pickupDate, excludeLea
     available: 0,
     quantity: row.quantity,
     message: `No ${size} available for ${formatWindow(deliveryDate, pickupDate)}`
-      + (row.quantity ? ` — all ${row.quantity} are booked or out of service for those dates.` : '.'),
+      + (row.quantity ? why : '.'),
   };
 }
 

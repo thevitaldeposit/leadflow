@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Package, PlusCircle, Edit2, X, Check, Wrench, Truck, Archive, RotateCcw } from 'lucide-react';
+import { Package, PlusCircle, Edit2, X, Check, Wrench, Truck, Archive, RotateCcw, Warehouse } from 'lucide-react';
 import { api } from '../utils/api';
 
 const SIZE_SUGGESTIONS = ['10 yard', '15 yard', '20 yard', '30 yard', '40 yard'];
 
-// Only `out_of_service` reduces availability — the location statuses are there so
-// the owner can see where a can is, and are what Phase 2b will drive off drops
-// and pickups.
+// Two statuses reduce availability: `out_of_service` (down for maintenance) and
+// `at_yard` (came back off a job, still full, not yet dumped — it can't go out again
+// until its weight is recorded). `out` doesn't, because the job it's on is already
+// subtracted by the date-overlap count.
+//
+// Setting a unit back to `Available` fully frees it: the server also closes any
+// unsettled assignment for that unit, so it becomes droppable again.
 const STATUS_META = {
   available: { label: 'Available' },
   out: { label: 'Out on job' },
-  at_yard: { label: 'At yard' },
+  at_yard: { label: 'At yard (awaiting dump)' },
   out_of_service: { label: 'Out of service' },
 };
 const STATUS_ORDER = ['available', 'out', 'at_yard', 'out_of_service'];
@@ -121,6 +125,8 @@ export default function InventoryPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [showRetired, setShowRetired] = useState(false);
+  // One-line confirmation after an action that did more than it looks like it did.
+  const [notice, setNotice] = useState(null);
 
   const load = useCallback((includeRetired) => {
     return api.getFleet(includeRetired ? { include_retired: 1 } : {}).then(res => {
@@ -145,9 +151,16 @@ export default function InventoryPage() {
     setEditingId(null);
   };
 
-  // Inline status change without entering full edit mode.
+  // Inline status change without entering full edit mode. Setting a unit back to
+  // Available also closes any stale job record the server still holds for it, which is
+  // what actually makes a stuck unit droppable again — so say when that happened.
   const changeStatus = async (asset, status) => {
-    await api.updateAsset(asset.id, { status });
+    const res = await api.updateAsset(asset.id, { status });
+    setNotice(
+      res?.clearedAssignments > 0
+        ? `Unit ${asset.label} is available again — cleared ${res.clearedAssignments} open job record${res.clearedAssignments === 1 ? '' : 's'} still holding it. No weight was recorded.`
+        : null
+    );
     await load(showRetired);
   };
 
@@ -171,7 +184,8 @@ export default function InventoryPage() {
   const retiredAssets = assets.filter(a => a.active === 0);
   const totalOwned = activeAssets.length;
   const totalInService = activeAssets.filter(a => a.status === 'out_of_service').length;
-  const totalSellable = totalOwned - totalInService;
+  const totalAtYard = activeAssets.filter(a => a.status === 'at_yard').length;
+  const totalSellable = totalOwned - totalInService - totalAtYard;
 
   if (loading) {
     return (
@@ -250,14 +264,18 @@ export default function InventoryPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-5">
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border border-divider bg-surface px-4 py-3">
           <p className="text-2xl font-bold text-content">{totalOwned}</p>
           <p className="text-xs text-muted mt-0.5">Dumpsters Owned</p>
         </div>
         <div className="rounded-xl border border-success/30 bg-success/10 px-4 py-3">
-          <p className="text-2xl font-bold text-success">{totalSellable}</p>
-          <p className="text-xs text-success/80 mt-0.5">Available (excl. service)</p>
+          <p className="text-2xl font-bold text-success">{Math.max(0, totalSellable)}</p>
+          <p className="text-xs text-success/80 mt-0.5">Sellable Now</p>
+        </div>
+        <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3">
+          <p className="text-2xl font-bold text-warning">{totalAtYard}</p>
+          <p className="text-xs text-warning/80 mt-0.5">At Yard (awaiting dump)</p>
         </div>
         <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3">
           <p className="text-2xl font-bold text-warning">{totalInService}</p>
@@ -265,10 +283,18 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      {notice && (
+        <p className="text-xs text-success bg-success/10 border border-success/30 rounded-xl px-3 py-2.5">
+          {notice}
+        </p>
+      )}
+
       <p className="text-xs text-muted px-1">
-        Availability counts the dumpsters registered below. A unit marked <strong>out of service</strong> is
-        removed from availability until you set it back. Availability for a specific date also subtracts
-        jobs active on that date — see the Schedule page.
+        Availability counts the dumpsters registered below. A unit marked <strong>out of service</strong> or
+        sitting <strong>at the yard</strong> (picked up and still full, waiting on a dump) is removed from
+        availability — an at-yard can comes back the moment you record its weight. Setting a unit to{' '}
+        <strong>Available</strong> frees it immediately and clears any job record still holding it.
+        Availability for a specific date also subtracts jobs active on that date — see the Schedule page.
       </p>
 
       {/* Fleet registry */}
@@ -339,6 +365,7 @@ export default function InventoryPage() {
                 <th className="text-left px-5 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Size</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Owned</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Out of Service</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">At Yard</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">Sellable</th>
               </tr>
             </thead>
@@ -353,8 +380,14 @@ export default function InventoryPage() {
                       {s.units_in_service}
                     </span>
                   </td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center gap-1.5 text-content">
+                      <Warehouse size={13} className="text-warning" />
+                      {s.units_at_yard || 0}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 font-semibold text-success">
-                    {Math.max(0, s.quantity - s.units_in_service)}
+                    {Math.max(0, s.quantity - s.units_in_service - (s.units_at_yard || 0))}
                   </td>
                 </tr>
               ))}
